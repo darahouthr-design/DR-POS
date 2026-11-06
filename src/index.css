@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', 'Battambang', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* 3D button and card effects */
+.btn-3d {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateY(0);
+}
+
+.btn-3d:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+}
+
+.btn-3d:active {
+  transform: translateY(1px);
+  filter: brightness(0.95);
+}
+
+/* Card 3D Depth */
+.card-3d {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-3d:hover {
+  transform: translateY(-3px);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
+}
+
+/* Receipt Print Styling */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 10px !important;
+    background: white !important;
+    color: black !important;
+    font-family: 'Noto Sans KR', 'Battambang', monospace, sans-serif !important;
+  }
+
+  @page {
+    margin: 0;
+  }
+}

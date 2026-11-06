@@ -1,0 +1,9 @@
+{
+  "name": "DR-POS System",
+  "description": "ប្រព័ន្ធគ្រប់គ្រងការលក់ DR-POS Realtime Multi-Device Point of Sale System",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
