@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readJsonBody, sendJson } from '../../lib/developerRegistry';
-import { runDeveloperIssueMasterOtp } from '../../lib/masterOtp';
+import { readJsonBody, sendJson } from '../../lib/developerRegistry.js';
+import { runDeveloperIssueMasterOtp } from '../../lib/masterOtp.js';
 
 export default async function handler(req: IncomingMessage & { body?: unknown }, res: ServerResponse) {
   if (req.method === 'OPTIONS') {

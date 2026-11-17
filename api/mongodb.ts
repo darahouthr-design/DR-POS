@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readJsonBody, sendJson } from '../lib/developerRegistry';
+import { readJsonBody, sendJson } from '../lib/developerRegistry.js';
 import {
   runMongoAnalytics,
   runMongoChanges,
@@ -7,7 +7,7 @@ import {
   runMongoQueryStockLogs,
   runMongoStatus,
   runMongoSync,
-} from '../lib/mongoPartition';
+} from '../lib/mongoPartition.js';
 
 function getAction(req: IncomingMessage, body: Record<string, unknown>): string {
   try {

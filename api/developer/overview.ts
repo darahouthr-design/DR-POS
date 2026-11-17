@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { runDeveloperOverview, sendJson } from '../../lib/developerRegistry';
+import { runDeveloperOverview, sendJson } from '../../lib/developerRegistry.js';
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method === 'OPTIONS') {

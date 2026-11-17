@@ -311,11 +311,17 @@ export async function ensureMongoAvailable(forceRefresh = false): Promise<boolea
   return inFlightCheck;
 }
 
-async function getFirebaseAuthHeaders(): Promise<Record<string, string> | null> {
+let lastMongoErrorDetail = '';
+
+export function getLastMongoErrorDetail(): string {
+  return lastMongoErrorDetail;
+}
+
+async function getFirebaseAuthHeaders(forceRefresh = false): Promise<Record<string, string> | null> {
   const user = auth.currentUser;
   if (!user) return null;
   try {
-    const token = await user.getIdToken();
+    const token = await user.getIdToken(forceRefresh);
     if (!token) return null;
     return {
       'Content-Type': 'application/json',
@@ -333,6 +339,7 @@ async function postMongoAction<T extends { configured?: boolean }>(
   options: {
     maxAttempts?: number;
     forceRefreshIfDisabled?: boolean;
+    forceRefreshToken?: boolean;
     timeoutMs?: number;
     keepalive?: boolean;
   } = {}
@@ -340,7 +347,8 @@ async function postMongoAction<T extends { configured?: boolean }>(
   const {
     maxAttempts = 2,
     forceRefreshIfDisabled = false,
-    timeoutMs = 8500,
+    forceRefreshToken = false,
+    timeoutMs = 12000,
     keepalive = false,
   } = options;
 
@@ -353,11 +361,15 @@ async function postMongoAction<T extends { configured?: boolean }>(
     return null;
   }
 
-  const headers = await getFirebaseAuthHeaders();
-  if (!headers) return null;
+  let headers = await getFirebaseAuthHeaders(forceRefreshToken);
+  if (!headers) {
+    lastMongoErrorDetail = 'Firebase auth session unavailable';
+    return null;
+  }
 
   const bodyStr = JSON.stringify(payload);
   const canKeepalive = keepalive && bodyStr.length < 55000;
+  let tokenRefreshedOn401 = forceRefreshToken;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -374,6 +386,7 @@ async function postMongoAction<T extends { configured?: boolean }>(
       if (timer !== null) window.clearTimeout(timer);
 
       if (res.ok) {
+        lastMongoErrorDetail = '';
         const data = (await res.json()) as T;
         if (data && data.configured === false) {
           mongoState = 'not-configured';
@@ -385,19 +398,34 @@ async function postMongoAction<T extends { configured?: boolean }>(
         return data;
       }
 
+      const errPayload = (await res.json().catch(() => null)) as { error?: string } | null;
+      lastMongoErrorDetail = errPayload?.error
+        ? `HTTP ${res.status}: ${errPayload.error}`
+        : `HTTP ${res.status}`;
+
+      if (res.status === 401 && !tokenRefreshedOn401) {
+        tokenRefreshedOn401 = true;
+        const freshHeaders = await getFirebaseAuthHeaders(true);
+        if (freshHeaders) {
+          headers = freshHeaders;
+          continue;
+        }
+      }
+
       if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
         return null;
       }
       mongoState = 'transient-unavailable';
       lastCheckedAt = Date.now();
-    } catch {
+    } catch (err) {
       if (timer !== null) window.clearTimeout(timer);
+      lastMongoErrorDetail = err instanceof Error ? err.message : 'Network or timeout error';
       mongoState = 'transient-unavailable';
       lastCheckedAt = Date.now();
     }
 
     if (attempt < maxAttempts) {
-      await new Promise((r) => setTimeout(r, 300 * attempt));
+      await new Promise((r) => setTimeout(r, 350 * attempt));
     }
   }
 
@@ -715,7 +743,13 @@ export async function deleteWorkspaceFromMongoSync(accountEmails: string[] = [])
   const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
     'sync',
     { deleteWorkspaceAll: true, accountEmails: cleanEmails },
-    { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 10000, keepalive: true }
+    {
+      maxAttempts: 3,
+      forceRefreshIfDisabled: true,
+      forceRefreshToken: true,
+      timeoutMs: 25000,
+      keepalive: true,
+    }
   );
   if (res && (res.ok || res.configured === false)) {
     if (typeof window !== 'undefined' && window.localStorage) {

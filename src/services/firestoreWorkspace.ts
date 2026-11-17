@@ -30,6 +30,7 @@ import {
   deleteOrdersFromMongoSync,
   deleteStockLogsFromMongoBackground,
   deleteWorkspaceFromMongoSync,
+  getLastMongoErrorDetail,
   fetchMongoChanges,
   flushAllPendingMongoOps,
   queryMoreOrdersFromMongo,
@@ -2272,8 +2273,11 @@ export async function deleteAccountWorkspaceFs(
   // 1. Purge MongoDB workspace partition BEFORE auth.currentUser is deleted (requires valid ID token)
   const mongoDeleted = await deleteWorkspaceFromMongoSync(allEmails);
   if (!mongoDeleted && typeof navigator !== 'undefined' && navigator.onLine !== false) {
+    const detail = getLastMongoErrorDetail();
     throw new Error(
-      'មិនអាចលុបរបាយការណ៍ពី MongoDB បានទេនៅពេលនេះ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត រួចព្យាយាមម្ដងទៀត!'
+      detail
+        ? `មិនអាចលុបរបាយការណ៍ពី MongoDB បានទេនៅពេលនេះ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត រួចព្យាយាមម្ដងទៀត! (${detail})`
+        : 'មិនអាចលុបរបាយការណ៍ពី MongoDB បានទេនៅពេលនេះ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត រួចព្យាយាមម្ដងទៀត!'
     );
   }
 

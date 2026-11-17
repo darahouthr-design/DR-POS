@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readJsonBody, runUnregisterWorkspaceAccount, sendJson } from '../../lib/developerRegistry';
+import { readJsonBody, runUnregisterWorkspaceAccount, sendJson } from '../../lib/developerRegistry.js';
 
 export default async function handler(req: IncomingMessage & { body?: unknown }, res: ServerResponse) {
   if (req.method === 'OPTIONS') {

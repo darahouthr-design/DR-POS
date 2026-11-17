@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import type { AdminProfile, WorkspaceLicense } from '../src/types';
-import { verifyFirebaseIdToken } from './mongoPartition';
+import type { AdminProfile, WorkspaceLicense } from '../src/types.js';
+import { verifyFirebaseIdToken } from './mongoPartition.js';
 
 export const DEFAULT_DEVELOPER_KEY = '975596700/houtdara';
 export const DEFAULT_TELEGRAM_URL = 'https://t.me/houtdara';

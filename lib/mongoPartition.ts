@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
-import type { Order, StockLogEntry } from '../src/types';
+import type { Order, StockLogEntry } from '../src/types.js';
 
 export interface FirebaseVerifiedUser {
   uid: string;
@@ -178,11 +178,11 @@ async function getMongoDb(): Promise<Db | null> {
     state.indexesReady = false;
     state.clientUri = uri;
     const client = new MongoClient(uri, {
-      maxPoolSize: 10,
-      minPoolSize: 1,
-      serverSelectionTimeoutMS: 6500,
-      connectTimeoutMS: 7500,
-      socketTimeoutMS: 12000,
+      maxPoolSize: 5,
+      minPoolSize: 0,
+      serverSelectionTimeoutMS: 9000,
+      connectTimeoutMS: 9000,
+      socketTimeoutMS: 15000,
     });
     state.clientPromise = client.connect().catch((err) => {
       state.clientPromise = null;
@@ -492,7 +492,20 @@ export async function runMongoSync(
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
   }
 
-  const db = await getMongoDb();
+  let db: Db | null = null;
+  try {
+    db = await getMongoDb();
+  } catch (err) {
+    return {
+      status: 503,
+      body: {
+        configured: true,
+        connected: false,
+        ok: false,
+        error: err instanceof Error ? err.message : 'MongoDB connection failed',
+      },
+    };
+  }
   if (!db) {
     return { status: 200, body: { configured: false, ok: false, skipped: true } };
   }
