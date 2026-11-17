@@ -14,6 +14,7 @@ import {
   deleteProblemCustomerFs,
   deleteProductFs,
   deleteStaffFs,
+  fetchLatestWorkspaceSaleProfilesFromServer,
   reorderProductsFs,
   savePriceRecordFs,
   saveProductFs,
@@ -87,7 +88,12 @@ const SettingsView = React.lazy(() =>
 );
 import { Button, ImageZoomModal, Surface } from './components/ui';
 import { useIsDesktopDevice } from './utils/device';
-import { formatMoney, playNewOrderNotification, todayLocalISO } from './utils/helpers';
+import {
+  formatMoney,
+  normalizeSaleKey,
+  playNewOrderNotification,
+  todayLocalISO,
+} from './utils/helpers';
 import { TRANSLATIONS } from './utils/i18n';
 import { LanguageProvider } from './utils/i18nContext';
 import type {
@@ -166,6 +172,8 @@ export function App() {
   const latestWorkspaceRef = useRef<WorkspaceData | null>(null);
   const licenseSyncSeqRef = useRef(0);
   const deletingAccountRef = useRef(false);
+  const saleVerifyInFlightRef = useRef<string | null>(null);
+  const serverVerifiedSaleProfilesRef = useRef<SaleProfile[] | null>(null);
 
   useEffect(() => {
     activeRoleRef.current = roleState;
@@ -253,36 +261,123 @@ export function App() {
 
       setActivePage('dashboard');
 
+      saleVerifyInFlightRef.current = null;
+      serverVerifiedSaleProfilesRef.current = null;
+
       try {
         await seedWorkspaceIfNeeded(fbUser.uid, cleanEmail, displayName);
         if (currentRun !== activeRunId) return;
 
+        const rejectSaleLogin = () => {
+          licenseSyncSeqRef.current += 1;
+          if (wsSubRef.current) {
+            wsSubRef.current.unsubscribe();
+            wsSubRef.current = null;
+          }
+          setExternalAuthError(
+            'ឈ្មោះ Sale នេះមិនមាននៅក្នុងការកំណត់របស់ Admin ឬត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមពិនិត្យឈ្មោះ Sale ម្ដងទៀត ឬទាក់ទង Admin។'
+          );
+          clearRolePref(fbUser.uid);
+          setWorkspace(null);
+          setProblemCustomers([]);
+          setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+          setInitializing(false);
+          signOut(auth).catch(() => {});
+        };
+
         wsSubRef.current = subscribeToWorkspace(fbUser.uid, cleanEmail, displayName, {
-          onUpdate: ({ workspace: ws, problemCustomers: pc, newOrders, pagination: nextPag }) => {
+          onUpdate: ({
+            workspace: ws,
+            problemCustomers: pc,
+            newOrders,
+            pagination: nextPag,
+            rootFromCache,
+          }) => {
             if (currentRun !== activeRunId) return;
 
+            let effectiveWs = ws;
             const currentRole = activeRoleRef.current;
             if (currentRole.role === 'sale') {
-              const targetSale = (currentRole.saleName || '').trim().toLowerCase();
-              const matchedSale = (ws.settings.saleProfiles || []).find(
-                (sp) => sp.active && sp.name.trim().toLowerCase() === targetSale
+              const targetSale = normalizeSaleKey(currentRole.saleName || '');
+              const currentSaleList = ws.settings.saleProfiles || [];
+              let matchedSale = currentSaleList.find(
+                (sp) => sp.active !== false && normalizeSaleKey(sp.name) === targetSale
               );
-              if (!targetSale || !matchedSale) {
-                licenseSyncSeqRef.current += 1;
-                if (wsSubRef.current) {
-                  wsSubRef.current.unsubscribe();
-                  wsSubRef.current = null;
-                }
-                setExternalAuthError(
-                  'ឈ្មោះ Sale នេះមិនមាននៅក្នុងការកំណត់របស់ Admin ឬត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមពិនិត្យឈ្មោះ Sale ម្ដងទៀត ឬទាក់ទង Admin។'
+
+              if (!matchedSale && rootFromCache && serverVerifiedSaleProfilesRef.current) {
+                const serverMatched = serverVerifiedSaleProfilesRef.current.find(
+                  (sp) => sp.active !== false && normalizeSaleKey(sp.name) === targetSale
                 );
-                clearRolePref(fbUser.uid);
-                setWorkspace(null);
-                setProblemCustomers([]);
-                setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
-                setInitializing(false);
-                signOut(auth).catch(() => {});
+                if (serverMatched) {
+                  matchedSale = serverMatched;
+                  effectiveWs = {
+                    ...ws,
+                    settings: {
+                      ...ws.settings,
+                      saleProfiles: serverVerifiedSaleProfilesRef.current,
+                    },
+                  };
+                }
+              }
+
+              if (!targetSale) {
+                rejectSaleLogin();
                 return;
+              }
+
+              if (!matchedSale) {
+                const verifyKey = `${currentRun}:${targetSale}`;
+                if (saleVerifyInFlightRef.current !== verifyKey) {
+                  saleVerifyInFlightRef.current = verifyKey;
+                  void fetchLatestWorkspaceSaleProfilesFromServer(fbUser.uid).then(
+                    (serverSales) => {
+                      if (currentRun !== activeRunId) return;
+                      saleVerifyInFlightRef.current = null;
+                      if (serverSales === null) {
+                        if (!rootFromCache) {
+                          rejectSaleLogin();
+                        }
+                        return;
+                      }
+                      const serverMatched = serverSales.find(
+                        (sp) => sp.active !== false && normalizeSaleKey(sp.name) === targetSale
+                      );
+                      if (!serverMatched) {
+                        serverVerifiedSaleProfilesRef.current = null;
+                        rejectSaleLogin();
+                        return;
+                      }
+                      serverVerifiedSaleProfilesRef.current = serverSales;
+                      if (serverMatched.name !== activeRoleRef.current.saleName) {
+                        const normalizedPref: StoredRolePref = {
+                          role: 'sale',
+                          saleName: serverMatched.name,
+                        };
+                        saveRolePref(fbUser.uid, normalizedPref);
+                        setRoleState(normalizedPref);
+                        activeRoleRef.current = normalizedPref;
+                      }
+                      setWorkspace((prev) => {
+                        const base = prev || effectiveWs;
+                        return {
+                          ...base,
+                          settings: {
+                            ...base.settings,
+                            saleProfiles: serverSales,
+                          },
+                        };
+                      });
+                      setProblemCustomers(pc);
+                      setPagination(nextPag);
+                      setInitializing(false);
+                    }
+                  );
+                }
+                return;
+              }
+
+              if (!rootFromCache) {
+                serverVerifiedSaleProfilesRef.current = currentSaleList;
               }
               if (matchedSale.name !== currentRole.saleName) {
                 const normalizedPref: StoredRolePref = { role: 'sale', saleName: matchedSale.name };
@@ -292,17 +387,25 @@ export function App() {
               }
             }
 
-            setWorkspace(ws);
+            setWorkspace(effectiveWs);
             setProblemCustomers(pc);
             setPagination(nextPag);
             setInitializing(false);
 
             for (const o of newOrders) {
-              const targetAdmin = (activeAdminEmailRef.current || ws.email).trim().toLowerCase();
-              const orderAdmin = (o.operatorEmail || o.createdByEmail || ws.email).trim().toLowerCase();
+              const targetAdmin = (activeAdminEmailRef.current || effectiveWs.email)
+                .trim()
+                .toLowerCase();
+              const orderAdmin = (
+                o.operatorEmail ||
+                o.createdByEmail ||
+                effectiveWs.email
+              )
+                .trim()
+                .toLowerCase();
               if (currentRole.role === 'sale') {
-                const sKey = (currentRole.saleName || '').trim().toLowerCase();
-                if (o.staffName.trim().toLowerCase() !== sKey) continue;
+                const sKey = normalizeSaleKey(currentRole.saleName || '');
+                if (normalizeSaleKey(o.staffName) !== sKey) continue;
                 if (activeAdminEmailRef.current && orderAdmin !== targetAdmin) continue;
               } else {
                 if (orderAdmin !== targetAdmin) continue;
@@ -572,11 +675,11 @@ export function App() {
 
   const matchedSaleProfile = useMemo(() => {
     if (!workspace || session?.role !== 'sale') return null;
-    const targetSale = (session.saleName || '').trim().toLowerCase();
+    const targetSale = normalizeSaleKey(session.saleName || '');
     if (!targetSale) return null;
     return (
       (workspace.settings.saleProfiles || []).find(
-        (sp) => sp.active && sp.name.trim().toLowerCase() === targetSale
+        (sp) => sp.active !== false && normalizeSaleKey(sp.name) === targetSale
       ) || null
     );
   }, [workspace, session?.role, session?.saleName]);
@@ -603,11 +706,11 @@ export function App() {
   const visibleOrders = useMemo(() => {
     if (!workspace || !session) return [];
     if (session.role === 'sale') {
-      const targetSale = (session.saleName || '').trim().toLowerCase();
+      const targetSale = normalizeSaleKey(session.saleName || '');
       if (!targetSale) return [];
       return workspace.orders.filter(
         (o) =>
-          o.staffName.trim().toLowerCase() === targetSale &&
+          normalizeSaleKey(o.staffName) === targetSale &&
           (o.operatorEmail || o.createdByEmail || workspace.email).trim().toLowerCase() ===
             effectiveAdminEmail
       );
@@ -1468,10 +1571,11 @@ export function App() {
                 isDesktop={isDesktop}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
                 onSaveSettings={async (patch: Partial<WorkspaceSettings>) => {
-                  if (isSaleRole) return;
+                  if (isSaleRole) return false;
+                  const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
                   let nextPatch = patch;
                   if (Array.isArray(patch.saleProfiles)) {
-                    const otherAdminSales = (workspace.settings.saleProfiles || []).filter(
+                    const otherAdminSales = (baseSettings.saleProfiles || []).filter(
                       (sp: SaleProfile) =>
                         (sp.ownerAdminEmail || workspace.email).trim().toLowerCase() !==
                         effectiveAdminEmail
@@ -1486,20 +1590,23 @@ export function App() {
                     };
                   }
                   const ok = await runFsMutation(() =>
-                    updateSettingsFs(firebaseUser.uid, workspace.settings, nextPatch)
+                    updateSettingsFs(firebaseUser.uid, baseSettings, nextPatch)
                   );
-                  if (ok && patch.adminProfiles !== undefined) {
+                  if (ok) {
                     if (latestWorkspaceRef.current) {
                       latestWorkspaceRef.current = {
                         ...latestWorkspaceRef.current,
                         settings: {
                           ...latestWorkspaceRef.current.settings,
-                          adminProfiles: patch.adminProfiles,
+                          ...nextPatch,
                         },
                       };
                     }
-                    void revalidateLicenseInBackground(true);
+                    if (patch.adminProfiles !== undefined) {
+                      void revalidateLicenseInBackground(true);
+                    }
                   }
+                  return ok;
                 }}
                 onSaveStaff={async (payload: Partial<StaffMember>) => {
                   if (isSaleRole) return false;

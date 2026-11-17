@@ -28,7 +28,7 @@ import {
 import { CambodiaFlagAnimated, DrPosLogo, Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import posVersionManifest from '../posVersion.json';
-import { uploadImageToCloudinary } from '../utils/helpers';
+import { cleanSaleNameDisplay, normalizeSaleKey, uploadImageToCloudinary } from '../utils/helpers';
 import { useI18n } from '../utils/i18nContext';
 import type {
   AdminProfile,
@@ -66,7 +66,7 @@ interface SettingsViewProps {
   license?: WorkspaceLicense;
   isExpired?: boolean;
   isDesktop: boolean;
-  onSaveSettings: (next: Partial<WorkspaceSettings>) => Promise<void>;
+  onSaveSettings: (next: Partial<WorkspaceSettings>) => Promise<boolean | void> | void;
   onSaveStaff: (payload: Partial<StaffMember>) => Promise<boolean>;
   onDeleteStaff: (id: string) => Promise<boolean>;
   onSetAdminPassword: (password: string) => Promise<{ ok: boolean; message: string }>;
@@ -363,22 +363,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const addSaleProfile = async (nameInput: string, phoneInput = '') => {
-    if (isExpired) return;
+  const addSaleProfile = async (nameInput: string, phoneInput = ''): Promise<boolean> => {
+    if (isExpired) return false;
     setSaleFeedback(null);
-    const cleanName = nameInput.trim();
+    const cleanName = cleanSaleNameDisplay(nameInput);
     if (!cleanName) {
       setSaleFeedback({ type: 'error', message: t.settings.errSaleNameRequired });
-      return;
+      return false;
     }
+    const cleanKey = normalizeSaleKey(cleanName);
     const currentSales = settings.saleProfiles || [];
     const globalSales = allSaleProfiles || currentSales;
-    if (globalSales.some((s) => s.name.trim().toLowerCase() === cleanName.toLowerCase())) {
+    if (globalSales.some((s) => normalizeSaleKey(s.name) === cleanKey)) {
       setSaleFeedback({
         type: 'error',
         message: t.settings.errSaleNameExists.replace('{name}', cleanName),
       });
-      return;
+      return false;
     }
     const ownerAdminEmail = (session.operatorEmail || session.email).trim().toLowerCase();
     const nextSale: SaleProfile = {
@@ -389,8 +390,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ownerAdminEmail,
       createdAt: new Date().toISOString(),
     };
-    await onSaveSettings({ saleProfiles: [...currentSales, nextSale] });
-    if (!staff.some((st) => st.name.trim().toLowerCase() === cleanName.toLowerCase())) {
+    const saved = await onSaveSettings({ saleProfiles: [...currentSales, nextSale] });
+    if (saved === false) {
+      setSaleFeedback({
+        type: 'error',
+        message: 'មិនអាចរក្សាទុកឈ្មោះ Sale ទៅកាន់ Cloud Firestore បានទេ! សូមពិនិត្យការតភ្ជាប់ រួចព្យាយាមម្ដងទៀត។',
+      });
+      return false;
+    }
+    if (!staff.some((st) => normalizeSaleKey(st.name) === cleanKey)) {
       await onSaveStaff({
         name: cleanName,
         position: t.staffInfo.defaultPosition,
@@ -403,6 +411,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       type: 'success',
       message: t.settings.saleAddedMsg.replace('{name}', cleanName),
     });
+    return true;
   };
 
   const saleProfilesList = settings.saleProfiles || [];
@@ -1103,9 +1112,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <form
                         onSubmit={async (e) => {
                           e.preventDefault();
-                          await addSaleProfile(newSaleName, newSalePhone);
-                          setNewSaleName('');
-                          setNewSalePhone('');
+                          const ok = await addSaleProfile(newSaleName, newSalePhone);
+                          if (ok) {
+                            setNewSaleName('');
+                            setNewSalePhone('');
+                          }
                         }}
                         className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end"
                       >

@@ -29,6 +29,18 @@ export function normalizePhone(raw: string): string {
   return digits;
 }
 
+export function cleanSaleNameDisplay(raw: string): string {
+  return String(raw || '')
+    .normalize('NFC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function normalizeSaleKey(raw: string): string {
+  return cleanSaleNameDisplay(raw).toLowerCase();
+}
+
 export function formatMoney(usdAmount: number, currency: CurrencyCode): string {
   const safe = Number.isFinite(usdAmount) ? usdAmount : 0;
   if (currency === 'kh') {

@@ -53,6 +53,7 @@ import type {
   PriceTier,
   ProblemCustomer,
   Product,
+  SaleProfile,
   StaffMember,
   StockLogEntry,
   WorkspaceData,
@@ -60,6 +61,19 @@ import type {
   WorkspacePaginationState,
   WorkspaceSettings,
 } from '../types';
+
+export async function fetchLatestWorkspaceSaleProfilesFromServer(
+  uid: string
+): Promise<SaleProfile[] | null> {
+  try {
+    const snap = await getDocFromServer(doc(db, 'workspaces', uid));
+    if (!snap.exists()) return [];
+    const rawSettings = snap.data()?.settings || {};
+    return Array.isArray(rawSettings.saleProfiles) ? (rawSettings.saleProfiles as SaleProfile[]) : [];
+  } catch {
+    return null;
+  }
+}
 
 export const ORDERS_PAGE_SIZE = 60;
 export const STOCK_LOGS_PAGE_SIZE = 40;
@@ -442,12 +456,14 @@ export function subscribeToWorkspace(
       problemCustomers: ProblemCustomer[];
       newOrders: Order[];
       pagination: WorkspacePaginationState;
+      rootFromCache?: boolean;
     }) => void;
     onDeleted: () => void;
     onError: (err: Error) => void;
   }
 ): WorkspaceSubscription {
   let rootReady = false;
+  let rootFromCache = true;
   let disposed = false;
   let initialOrdersLoaded = false;
   let initialStockLogsLoaded = false;
@@ -571,6 +587,7 @@ export function subscribeToWorkspace(
         hasMoreOrders,
         hasMoreStockLogs,
       },
+      rootFromCache,
     });
   };
 
@@ -586,6 +603,7 @@ export function subscribeToWorkspace(
   const wsPath = `workspaces/${uid}`;
   const unsubRoot = onSnapshot(
     doc(db, 'workspaces', uid),
+    { includeMetadataChanges: true },
     (snap) => {
       if (!snap.exists()) {
         if (rootReady) {
@@ -593,6 +611,7 @@ export function subscribeToWorkspace(
         }
         return;
       }
+      rootFromCache = Boolean(snap.metadata.fromCache);
       const d = snap.data();
       currentEmail = String(d.ownerEmail || email).toLowerCase();
       const rawSettings = d.settings || {};

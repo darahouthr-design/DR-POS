@@ -52,6 +52,7 @@ import { useIsDesktopDevice } from '../utils/device';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { APP_LOGO_URL, DrPosLogo, Icon3D } from './Icon3D';
 import { PosSliderCaptcha } from './PosSliderCaptcha';
+import { cleanSaleNameDisplay } from '../utils/helpers';
 import { Button, Field, Surface, inputClass } from './ui';
 import type { UserRole } from '../types';
 
@@ -762,7 +763,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     }
 
     // 3. Sale Sign In (Mandatory on Phone & Tablet, optional tab on Desktop)
-    const cleanSaleName = saleName.trim();
+    const cleanSaleName = cleanSaleNameDisplay(saleName);
     if (!cleanSaleName) {
       setError('សូមបញ្ចូលឈ្មោះ Sale ដែល Admin បានកំណត់នៅក្នុងប្រព័ន្ធ!');
       return;
