@@ -8,7 +8,8 @@
     "lib": [
       "ES2022",
       "DOM",
-      "DOM.Iterable"
+      "DOM.Iterable",
+      "ESNext.Disposable"
     ],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -16,14 +17,14 @@
     "moduleDetection": "force",
     "resolveJsonModule": true,
     "allowJs": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
         "./*"
       ]
-    },
-    "allowImportingTsExtensions": true,
-    "noEmit": true
+    }
   },
-  "exclude": ["dist"]
+  "exclude": ["dist", "node_modules"]
 }

@@ -16,7 +16,7 @@ import type {
   PriceRecordItem,
   StockLogEntry,
   WorkspaceSettings,
-} from './src/types.ts';
+} from './src/types';
 import {
   DEFAULT_TELEGRAM_URL,
   runAuthGateCheck,
