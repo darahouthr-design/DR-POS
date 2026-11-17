@@ -1,0 +1,488 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isWorkspaceOwner(workspaceId) {
+      return isSignedIn() && request.auth.uid == workspaceId;
+    }
+
+    function isParentWorkspaceOwned(workspaceId) {
+      return isWorkspaceOwner(workspaceId) && (
+        (
+          exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+          get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.ownerUid == request.auth.uid
+        ) ||
+        (
+          existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+          getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.ownerUid == request.auth.uid
+        )
+      );
+    }
+
+    // Entity Validation Blueprints (No existing() or diff() inside helpers)
+    function isValidWorkspaceSettings(s) {
+      return s is map &&
+        s.keys().hasAll([
+          'personalName', 'personalPhone', 'businessName', 'darkMode',
+          'language', 'currency', 'soundEnabled', 'warehouses', 'stores',
+          'groups', 'categories', 'accessRules'
+        ]) &&
+        s.keys().hasOnly([
+          'personalName', 'personalPhone', 'businessName', 'darkMode',
+          'language', 'currency', 'soundEnabled', 'warehouses', 'stores',
+          'groups', 'categories', 'accessRules',
+          'saleProfiles', 'adminProfiles'
+        ]) &&
+        s.personalName is string && s.personalName.size() <= 200 &&
+        s.personalPhone is string && s.personalPhone.size() <= 64 &&
+        s.businessName is string && s.businessName.size() <= 200 &&
+        s.darkMode is bool &&
+        s.language in ['kh', 'en', 'kr'] &&
+        s.currency in ['en', 'kh', 'kr'] &&
+        s.soundEnabled is bool &&
+        s.warehouses is list && s.warehouses.size() <= 100 &&
+        (s.warehouses.size() == 0 || s.warehouses[0] is string) &&
+        s.stores is list && s.stores.size() <= 100 &&
+        (s.stores.size() == 0 || s.stores[0] is string) &&
+        s.groups is list && s.groups.size() <= 100 &&
+        (s.groups.size() == 0 || s.groups[0] is string) &&
+        s.categories is list && s.categories.size() <= 100 &&
+        (s.categories.size() == 0 || s.categories[0] is string) &&
+        s.accessRules is list && s.accessRules.size() <= 100 &&
+        (s.accessRules.size() == 0 || s.accessRules[0] is map) &&
+        (!('saleProfiles' in s) || (s.saleProfiles is list && s.saleProfiles.size() <= 100 && (s.saleProfiles.size() == 0 || s.saleProfiles[0] is map))) &&
+        (!('adminProfiles' in s) || (s.adminProfiles is list && s.adminProfiles.size() <= 100 && (s.adminProfiles.size() == 0 || s.adminProfiles[0] is map)));
+    }
+
+    function isValidWorkspaceLicense(l) {
+      return l is map &&
+        l.keys().hasAll(['trialStartedAt', 'expireAt', 'planType', 'telegramUrl', 'developerUpdatedAt']) &&
+        l.keys().hasOnly(['trialStartedAt', 'expireAt', 'planType', 'telegramUrl', 'developerUpdatedAt']) &&
+        l.trialStartedAt is string && l.trialStartedAt.size() <= 64 &&
+        l.expireAt is string && l.expireAt.size() <= 64 &&
+        l.planType in ['trial', 'paid'] &&
+        l.telegramUrl is string && l.telegramUrl.size() <= 500 &&
+        l.developerUpdatedAt is string && l.developerUpdatedAt.size() <= 64;
+    }
+
+    function isValidWorkspace(data) {
+      return data is map &&
+        data.keys().hasAll(['ownerUid', 'ownerEmail', 'settings', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly(['ownerUid', 'ownerEmail', 'settings', 'license', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.ownerEmail is string && data.ownerEmail.size() > 0 && data.ownerEmail.size() <= 200 &&
+        isValidWorkspaceSettings(data.settings) &&
+        (!('license' in data) || isValidWorkspaceLicense(data.license)) &&
+        data.serverCreatedAt is timestamp &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'imageUrl', 'costPrice', 'sellingPrice',
+          'promotion', 'stock', 'barcode', 'category', 'warehouse', 'sortOrder',
+          'updatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'imageUrl', 'costPrice', 'sellingPrice',
+          'promotion', 'stock', 'barcode', 'category', 'warehouse', 'sortOrder',
+          'updatedAt', 'operatorEmail', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        data.imageUrl is string && data.imageUrl.size() <= 2000 &&
+        data.costPrice is number && data.costPrice >= 0 &&
+        data.sellingPrice is number && data.sellingPrice >= 0 &&
+        data.promotion is number && data.promotion >= 0 &&
+        data.stock is number && data.stock >= 0 &&
+        data.barcode is string && data.barcode.size() <= 120 &&
+        data.category is string && data.category.size() <= 120 &&
+        data.warehouse is string && data.warehouse.size() <= 120 &&
+        data.sortOrder is number && data.sortOrder >= 0 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('operatorEmail' in data) || (data.operatorEmail is string && data.operatorEmail.size() <= 200)) &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'orderNumber', 'date', 'time', 'createdAt',
+          'customerName', 'customerPhone', 'customerAddress', 'storeName',
+          'groupName', 'staffName', 'warehouse', 'paymentStatus', 'dueDate',
+          'note', 'items', 'totalAmount', 'totalCost', 'createdByEmail',
+          'operatorEmail', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'orderNumber', 'date', 'time', 'createdAt',
+          'customerName', 'customerPhone', 'customerAddress', 'storeName',
+          'groupName', 'staffName', 'warehouse', 'paymentStatus', 'dueDate',
+          'note', 'items', 'subtotalAmount', 'discountType', 'discountValue',
+          'discountAmount', 'totalAmount', 'totalCost', 'createdByEmail',
+          'operatorEmail', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 64 &&
+        data.date is string && data.date.size() <= 32 &&
+        data.time is string && data.time.size() <= 32 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.customerName is string && data.customerName.size() <= 200 &&
+        data.customerPhone is string && data.customerPhone.size() <= 64 &&
+        data.customerAddress is string && data.customerAddress.size() <= 500 &&
+        data.storeName is string && data.storeName.size() <= 120 &&
+        data.groupName is string && data.groupName.size() <= 120 &&
+        data.staffName is string && data.staffName.size() <= 120 &&
+        data.warehouse is string && data.warehouse.size() <= 120 &&
+        data.paymentStatus in ['paid', 'unpaid'] &&
+        data.dueDate is string && data.dueDate.size() <= 32 &&
+        data.note is string && data.note.size() <= 1000 &&
+        data.items is list && data.items.size() > 0 && data.items.size() <= 200 &&
+        data.items[0] is map &&
+        (!('subtotalAmount' in data) || (data.subtotalAmount is number && data.subtotalAmount >= 0)) &&
+        (!('discountType' in data) || data.discountType in ['amount', 'percent']) &&
+        (!('discountValue' in data) || (data.discountValue is number && data.discountValue >= 0)) &&
+        (!('discountAmount' in data) || (data.discountAmount is number && data.discountAmount >= 0)) &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        data.totalCost is number && data.totalCost >= 0 &&
+        data.createdByEmail is string && data.createdByEmail.size() <= 200 &&
+        data.operatorEmail is string && data.operatorEmail.size() <= 200 &&
+        data.serverCreatedAt is timestamp &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidStaff(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'photoUrl', 'position', 'phone',
+          'address', 'createdAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'photoUrl', 'position', 'phone',
+          'address', 'createdAt', 'operatorEmail', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        data.photoUrl is string && data.photoUrl.size() <= 2000 &&
+        data.position is string && data.position.size() <= 120 &&
+        data.phone is string && data.phone.size() <= 64 &&
+        data.address is string && data.address.size() <= 400 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('operatorEmail' in data) || (data.operatorEmail is string && data.operatorEmail.size() <= 200)) &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidPriceRecord(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'productName', 'imageUrl', 'prices',
+          'updatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'productName', 'imageUrl', 'prices',
+          'updatedAt', 'operatorEmail', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.productName is string && data.productName.size() > 0 && data.productName.size() <= 200 &&
+        data.imageUrl is string && data.imageUrl.size() <= 2000 &&
+        data.prices is list && data.prices.size() <= 30 &&
+        (data.prices.size() == 0 || data.prices[0] is map) &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('operatorEmail' in data) || (data.operatorEmail is string && data.operatorEmail.size() <= 200)) &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidStockLog(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'productId', 'productName', 'addedQuantity',
+          'previousStock', 'newStock', 'warehouse', 'date', 'createdAt',
+          'serverCreatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'productId', 'productName', 'addedQuantity',
+          'previousStock', 'newStock', 'warehouse', 'date', 'createdAt',
+          'operatorEmail', 'serverCreatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        isValidId(data.productId) &&
+        data.productName is string && data.productName.size() > 0 && data.productName.size() <= 200 &&
+        data.addedQuantity is number && data.addedQuantity > 0 &&
+        data.previousStock is number && data.previousStock >= 0 &&
+        data.newStock is number && data.newStock >= 0 &&
+        data.warehouse is string && data.warehouse.size() <= 120 &&
+        data.date is string && data.date.size() <= 64 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('operatorEmail' in data) || (data.operatorEmail is string && data.operatorEmail.size() <= 200)) &&
+        data.serverCreatedAt is timestamp;
+    }
+
+    function isValidProblemCustomer(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'phone', 'normalizedPhone',
+          'note', 'sourceOrderId', 'createdAt', 'serverCreatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'phone', 'normalizedPhone',
+          'note', 'sourceOrderId', 'createdAt', 'serverCreatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        data.phone is string && data.phone.size() > 0 && data.phone.size() <= 64 &&
+        data.normalizedPhone is string && data.normalizedPhone.size() <= 64 &&
+        data.note is string && data.note.size() <= 1000 &&
+        data.sourceOrderId is string && data.sourceOrderId.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.serverCreatedAt is timestamp;
+    }
+
+    function isValidDeveloperVaultId(vaultId) {
+      return isValidId(vaultId) && vaultId == 'devvault_a882249ff19ca7af4920b868d2613325';
+    }
+
+    function isValidDeveloperVault(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'vaultId', 'telegramUrl', 'masterAdmins', 'subAdminEmails',
+          'updatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'vaultId', 'telegramUrl', 'masterAdmins', 'subAdminEmails',
+          'otpChallenges', 'updatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidDeveloperVaultId(data.vaultId) &&
+        data.telegramUrl is string && data.telegramUrl.size() > 0 && data.telegramUrl.size() <= 500 &&
+        data.masterAdmins is map &&
+        data.subAdminEmails is map &&
+        (!('otpChallenges' in data) || (data.otpChallenges is map && data.otpChallenges.size() <= 200)) &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    // Account-Segregated Workspace Root Document (Strictly keyed by request.auth.uid)
+    match /workspaces/{workspaceId} {
+      allow get: if isValidId(workspaceId) && isWorkspaceOwner(workspaceId);
+      allow list: if false;
+
+      allow create: if isValidId(workspaceId) &&
+        isWorkspaceOwner(workspaceId) &&
+        isValidWorkspace(incoming()) &&
+        incoming().serverCreatedAt == request.time &&
+        incoming().serverUpdatedAt == request.time;
+
+      allow update: if isValidId(workspaceId) &&
+        isWorkspaceOwner(workspaceId) &&
+        isValidWorkspace(incoming()) &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().serverCreatedAt == existing().serverCreatedAt &&
+        incoming().serverUpdatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['settings', 'ownerEmail', 'license', 'serverUpdatedAt']);
+
+      allow delete: if isValidId(workspaceId) && isWorkspaceOwner(workspaceId);
+
+      // Products Subcollection
+      match /products/{productId} {
+        allow get: if isValidId(workspaceId) && isValidId(productId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(productId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidProduct(incoming()) &&
+          incoming().id == productId &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(productId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidProduct(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().serverUpdatedAt == request.time &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'imageUrl', 'costPrice', 'sellingPrice', 'promotion',
+              'stock', 'barcode', 'category', 'warehouse', 'sortOrder',
+              'updatedAt', 'serverUpdatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['sortOrder', 'serverUpdatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'updatedAt', 'serverUpdatedAt'])
+          );
+
+        allow delete: if isValidId(workspaceId) && isValidId(productId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Orders Subcollection
+      match /orders/{orderId} {
+        allow get: if isValidId(workspaceId) && isValidId(orderId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(orderId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidOrder(incoming()) &&
+          incoming().id == orderId &&
+          incoming().serverCreatedAt == request.time &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(orderId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidOrder(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().serverCreatedAt == existing().serverCreatedAt &&
+          incoming().serverUpdatedAt == request.time &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'date', 'time', 'customerName', 'customerPhone', 'customerAddress',
+              'storeName', 'groupName', 'staffName', 'warehouse', 'paymentStatus',
+              'dueDate', 'note', 'items', 'subtotalAmount', 'discountType',
+              'discountValue', 'discountAmount', 'totalAmount', 'totalCost', 'serverUpdatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'dueDate', 'serverUpdatedAt'])
+          );
+
+        allow delete: if isValidId(workspaceId) && isValidId(orderId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Staff Subcollection
+      match /staff/{staffId} {
+        allow get: if isValidId(workspaceId) && isValidId(staffId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(staffId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidStaff(incoming()) &&
+          incoming().id == staffId &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(staffId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidStaff(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().serverUpdatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'photoUrl', 'position', 'phone', 'address', 'serverUpdatedAt'
+          ]);
+
+        allow delete: if isValidId(workspaceId) && isValidId(staffId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Price Records Subcollection
+      match /priceRecords/{priceRecordId} {
+        allow get: if isValidId(workspaceId) && isValidId(priceRecordId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(priceRecordId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidPriceRecord(incoming()) &&
+          incoming().id == priceRecordId &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(priceRecordId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidPriceRecord(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().serverUpdatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'productName', 'imageUrl', 'prices', 'updatedAt', 'serverUpdatedAt'
+          ]);
+
+        allow delete: if isValidId(workspaceId) && isValidId(priceRecordId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Stock Logs Subcollection
+      match /stockLogs/{stockLogId} {
+        allow get: if isValidId(workspaceId) && isValidId(stockLogId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(stockLogId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidStockLog(incoming()) &&
+          incoming().id == stockLogId &&
+          incoming().serverCreatedAt == request.time;
+
+        allow update: if false;
+        allow delete: if isValidId(workspaceId) && isValidId(stockLogId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Problem Customers Subcollection (Segregated per Gmail Workspace)
+      match /problemCustomers/{problemCustomerId} {
+        allow get: if isValidId(workspaceId) && isValidId(problemCustomerId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(problemCustomerId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidProblemCustomer(incoming()) &&
+          incoming().id == problemCustomerId &&
+          incoming().serverCreatedAt == request.time;
+
+        allow update: if false;
+        allow delete: if isValidId(workspaceId) && isValidId(problemCustomerId) && isWorkspaceOwner(workspaceId);
+      }
+    }
+
+    // Server-Managed Developer License & Email-Gate Registry (Keyed by capability vaultId, list disabled)
+    match /developerVault/{vaultId} {
+      allow get: if isValidDeveloperVaultId(vaultId);
+      allow list: if false;
+
+      allow create: if isValidDeveloperVaultId(vaultId) &&
+        isValidDeveloperVault(incoming()) &&
+        incoming().vaultId == vaultId &&
+        incoming().serverUpdatedAt == request.time;
+
+      allow update: if isValidDeveloperVaultId(vaultId) &&
+        isValidDeveloperVault(incoming()) &&
+        incoming().vaultId == vaultId &&
+        incoming().serverUpdatedAt == request.time &&
+        (
+          !('vaultId' in existing()) ||
+          (
+            incoming().vaultId == existing().vaultId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'telegramUrl', 'masterAdmins', 'subAdminEmails', 'otpChallenges', 'updatedAt', 'serverUpdatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+  }
+}

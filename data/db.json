@@ -1,0 +1,61 @@
+{
+  "accounts": {},
+  "sessions": {},
+  "workspaces": {},
+  "problemCustomers": [],
+  "developer": {
+    "telegramUrl": "https://t.me/houtdara",
+    "masterAdmins": {
+      "daracambobmc@gmail.com": {
+        "email": "daracambobmc@gmail.com",
+        "uid": "dOEr7bRsJgYLT4qPFJ0NgvtPeCn1",
+        "displayName": "daracambobmc",
+        "trialStartedAt": "2026-11-16T09:25:22.446Z",
+        "expireAt": "2026-12-16T09:25:22.446Z",
+        "planType": "trial",
+        "developerUpdatedAt": ""
+      }
+    },
+    "subAdminEmails": {
+      "darahouthr@gmail.com": {
+        "email": "darahouthr@gmail.com",
+        "masterEmail": "daracambobmc@gmail.com",
+        "name": "ឃ្លាំងទី2",
+        "createdAt": "2026-11-16T10:03:40.174Z"
+      }
+    },
+    "otpChallenges": {
+      "231934d9200a2e5da54ce700": {
+        "emailHash": "231934d9200a2e5da54ce700",
+        "maskedEmail": "th***7@gmail.com",
+        "jti": "77abc63a-71fd-47c3-a37d-c50ee30692f0",
+        "salt": "5bd90eb36e39b82a",
+        "otpDigest": "22a0995b684f11171420ff2449fe84d048a9d8b907895c55d107750b5cf9c8b2",
+        "createdAt": "2026-11-16T10:19:59.592Z",
+        "expiresAt": "2026-11-16T10:29:59.592Z",
+        "usedAt": "",
+        "attempts": 0,
+        "source": "email"
+      },
+      "1c17dc0e8f3874d3d3d37f6f": {
+        "emailHash": "1c17dc0e8f3874d3d3d37f6f",
+        "maskedEmail": "da***c@gmail.com",
+        "jti": "14743ab2-8f3c-4e9e-8703-eb75abd55a07",
+        "salt": "e1e40e0f134266ee",
+        "otpDigest": "57cc02b16dbdf896da5940ebfbab08a36e83cfe953db4654e15a89a879524aeb",
+        "createdAt": "2026-11-16T09:24:37.688Z",
+        "expiresAt": "2026-11-16T09:34:37.688Z",
+        "usedAt": "2026-11-16T09:24:57.424Z",
+        "attempts": 0,
+        "source": "email"
+      }
+    },
+    "devSessions": {
+      "8fdae1e8-b2e6-4e3c-82dd-8134ae0b2228": {
+        "token": "8fdae1e8-b2e6-4e3c-82dd-8134ae0b2228",
+        "createdAt": "2026-11-15T08:58:03.233Z",
+        "expiresAt": 1794747483233
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "DR-POS — Realtime Multi-Device POS System",
+  "short_name": "DR-POS",
+  "description": "ប្រព័ន្ធគ្រប់គ្រងការលក់ និងស្តុកទំនិញ Realtime Multi-Device POS System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#117852",
+  "icons": [
+    {
+      "src": "/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

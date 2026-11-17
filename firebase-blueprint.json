@@ -1,0 +1,223 @@
+{
+  "entities": {
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Account-scoped workspace root document keyed by Firebase Auth UID for strict Gmail segregation.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the Gmail account owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Normalized lowercase Gmail address of the workspace.",
+          "maxLength": 200
+        },
+        "settings": {
+          "type": "object",
+          "description": "Workspace preferences, warehouses, stores, groups, categories, access rules, adminProfiles, and saleProfiles."
+        },
+        "license": {
+          "type": "object",
+          "description": "Master Admin license expiration and trial validity metadata (trialStartedAt, expireAt, planType, telegramUrl, developerUpdatedAt)."
+        },
+        "serverCreatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "serverUpdatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": ["ownerUid", "ownerEmail", "settings", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product item belonging to a workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "imageUrl": { "type": "string", "maxLength": 2000 },
+        "costPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "promotion": { "type": "number" },
+        "stock": { "type": "number" },
+        "barcode": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "maxLength": 120 },
+        "warehouse": { "type": "string", "maxLength": 120 },
+        "sortOrder": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "operatorEmail": { "type": "string", "maxLength": 200 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "costPrice", "sellingPrice", "promotion", "stock", "sortOrder", "updatedAt", "serverUpdatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "POS order record belonging to a workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderNumber": { "type": "string", "maxLength": 64 },
+        "date": { "type": "string", "maxLength": 32 },
+        "time": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "customerPhone": { "type": "string", "maxLength": 64 },
+        "customerAddress": { "type": "string", "maxLength": 500 },
+        "storeName": { "type": "string", "maxLength": 120 },
+        "groupName": { "type": "string", "maxLength": 120 },
+        "staffName": { "type": "string", "maxLength": 120 },
+        "warehouse": { "type": "string", "maxLength": 120 },
+        "paymentStatus": { "type": "string", "enum": ["paid", "unpaid"] },
+        "dueDate": { "type": "string", "maxLength": 32 },
+        "note": { "type": "string", "maxLength": 1000 },
+        "items": { "type": "array" },
+        "subtotalAmount": { "type": "number" },
+        "discountType": { "type": "string", "enum": ["amount", "percent"] },
+        "discountValue": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "createdByEmail": { "type": "string", "maxLength": 200 },
+        "operatorEmail": { "type": "string", "maxLength": 200 },
+        "serverCreatedAt": { "type": "string", "format": "date-time" },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "orderNumber", "date", "time", "createdAt", "customerName", "paymentStatus", "items", "totalAmount", "totalCost", "createdByEmail", "operatorEmail", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Sales staff member belonging to a workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "photoUrl": { "type": "string", "maxLength": 2000 },
+        "position": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "address": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "operatorEmail": { "type": "string", "maxLength": 200 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "position", "createdAt", "serverUpdatedAt"]
+    },
+    "PriceRecordItem": {
+      "title": "PriceRecordItem",
+      "description": "Multi-tier price record belonging to a workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productName": { "type": "string", "maxLength": 200 },
+        "imageUrl": { "type": "string", "maxLength": 2000 },
+        "prices": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "operatorEmail": { "type": "string", "maxLength": 200 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "productName", "prices", "updatedAt", "serverUpdatedAt"]
+    },
+    "StockLogEntry": {
+      "title": "StockLogEntry",
+      "description": "Inventory stock addition history log belonging to a workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "maxLength": 128 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "addedQuantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "warehouse": { "type": "string", "maxLength": 120 },
+        "date": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "operatorEmail": { "type": "string", "maxLength": 200 },
+        "serverCreatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "productId", "productName", "addedQuantity", "previousStock", "newStock", "date", "createdAt", "serverCreatedAt"]
+    },
+    "ProblemCustomer": {
+      "title": "ProblemCustomer",
+      "description": "Problem customer warning entry strictly scoped to the signed-in Gmail workspace.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "normalizedPhone": { "type": "string", "maxLength": 64 },
+        "note": { "type": "string", "maxLength": 1000 },
+        "sourceOrderId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "serverCreatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "phone", "normalizedPhone", "createdAt", "serverCreatedAt"]
+    },
+    "DeveloperVault": {
+      "title": "DeveloperVault",
+      "description": "Server-managed developer license registry, Master Admin trial/expiration states, Sub-Admin email gate registry, and support Telegram URL.",
+      "type": "object",
+      "properties": {
+        "vaultId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "telegramUrl": { "type": "string", "maxLength": 500 },
+        "masterAdmins": { "type": "object" },
+        "subAdminEmails": { "type": "object" },
+        "otpChallenges": {
+          "type": "object",
+          "description": "Server-managed HMAC-hashed OTP challenge records for Master Admin registration (no plaintext OTPs stored)."
+        },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vaultId", "telegramUrl", "masterAdmins", "subAdminEmails", "updatedAt", "serverUpdatedAt"]
+    }
+  },
+  "firestore": {
+    "/workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "Workspace root document owned exclusively by request.auth.uid == workspaceId."
+    },
+    "/workspaces/{workspaceId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products catalog and stock levels scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "POS sales orders scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Staff records scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/priceRecords/{priceRecordId}": {
+      "schema": { "$ref": "#/entities/PriceRecordItem" },
+      "description": "Multi-tier price records scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/stockLogs/{stockLogId}": {
+      "schema": { "$ref": "#/entities/StockLogEntry" },
+      "description": "Stock replenishment logs scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/problemCustomers/{problemCustomerId}": {
+      "schema": { "$ref": "#/entities/ProblemCustomer" },
+      "description": "Problem customer warning records scoped to workspaceId."
+    },
+    "/developerVault/{vaultId}": {
+      "schema": { "$ref": "#/entities/DeveloperVault" },
+      "description": "Developer license and workspace gate registry keyed by deterministic vault capability ID."
+    }
+  }
+}
