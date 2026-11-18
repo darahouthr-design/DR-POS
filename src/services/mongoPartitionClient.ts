@@ -725,6 +725,47 @@ export function deleteStockLogsFromMongoBackground(stockLogIds: string[]): void 
   void deleteStockLogsFromMongoSync(stockLogIds);
 }
 
+export async function purgeExpiredStockLogsFromMongoSync(
+  cutoffIso: string
+): Promise<{ ok: boolean; deletedCount: number }> {
+  bindOnlineFlushListener();
+  const cutoffMs = Date.parse(cutoffIso);
+  if (!Number.isFinite(cutoffMs)) {
+    return { ok: false, deletedCount: 0 };
+  }
+
+  // Drop expired entries from any pending offline stock log upsert queue
+  const pendingUpserts = readStorageRecord<StockLogEntry>(PENDING_STOCK_LOGS_UPSERT_KEY);
+  const expiredPendingIds: string[] = [];
+  for (const [id, entry] of Object.entries(pendingUpserts)) {
+    const ms = Date.parse(String(entry?.createdAt || ''));
+    if (Number.isFinite(ms) && ms > 0 && ms < cutoffMs) {
+      expiredPendingIds.push(id);
+    }
+  }
+  if (expiredPendingIds.length > 0) {
+    removePendingUpserts<StockLogEntry>(PENDING_STOCK_LOGS_UPSERT_KEY, expiredPendingIds);
+  }
+
+  const res = await postMongoAction<{
+    configured?: boolean;
+    ok?: boolean;
+    deletedStockLogs?: number;
+  }>(
+    'sync',
+    { deleteStockLogsBeforeIso: new Date(cutoffMs).toISOString() },
+    { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 12000, keepalive: true }
+  );
+
+  if (res && (res.ok || res.configured === false)) {
+    return {
+      ok: true,
+      deletedCount: Number(res.deletedStockLogs || 0),
+    };
+  }
+  return { ok: false, deletedCount: 0 };
+}
+
 export async function deleteWorkspaceFromMongoSync(accountEmails: string[] = []): Promise<boolean> {
   bindOnlineFlushListener();
   const cleanEmails = Array.from(

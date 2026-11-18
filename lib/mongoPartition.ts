@@ -549,6 +549,12 @@ export async function runMongoSync(
         .filter(Boolean)
     )
   );
+  const rawCutoffIso = String(payload.deleteStockLogsBeforeIso || '').trim();
+  const parsedCutoffMs = rawCutoffIso ? Date.parse(rawCutoffIso) : NaN;
+  const deleteStockLogsBeforeIso =
+    rawCutoffIso && Number.isFinite(parsedCutoffMs) && parsedCutoffMs <= Date.now() + 60_000
+      ? new Date(parsedCutoffMs).toISOString()
+      : '';
 
   let syncedOrders = 0;
   let deletedOrders = 0;
@@ -617,6 +623,30 @@ export async function runMongoSync(
     }
   }
 
+  if (deleteStockLogsBeforeIso && !deleteWorkspaceAll) {
+    const expiredDocs = await stockLogsCol
+      .find(
+        {
+          ownerUid: user.uid,
+          createdAt: { $lt: deleteStockLogsBeforeIso },
+        },
+        { projection: { id: 1 } }
+      )
+      .limit(2000)
+      .toArray()
+      .catch(() => []);
+    const expiredIds = expiredDocs.map((d) => String(d.id || '').trim()).filter(Boolean);
+    if (expiredIds.length > 0) {
+      recordTombstones(stockLogTombstones, user.uid, expiredIds);
+      await recordPersistentTombstones(db, user.uid, 'stock_log', expiredIds, nowIso);
+    }
+    const cutoffRes = await stockLogsCol.deleteMany({
+      ownerUid: user.uid,
+      createdAt: { $lt: deleteStockLogsBeforeIso },
+    });
+    deletedStockLogs += cutoffRes.deletedCount || 0;
+  }
+
   if (upsertOrders.length > 0 && !deleteWorkspaceAll) {
     const sanitized = upsertOrders
       .slice(0, 500)
@@ -653,7 +683,13 @@ export async function runMongoSync(
       .slice(0, 500)
       .map((l) => sanitizeStockLogForMongo(user.uid, l, nowIso, user.email))
       .filter((d): d is Document => Boolean(d))
-      .filter((d) => !isTombstoned(stockLogTombstones, user.uid, String(d.id)));
+      .filter((d) => !isTombstoned(stockLogTombstones, user.uid, String(d.id)))
+      .filter(
+        (d) =>
+          !deleteStockLogsBeforeIso ||
+          !d.createdAt ||
+          String(d.createdAt) >= deleteStockLogsBeforeIso
+      );
 
     if (sanitized.length > 0) {
       const candidateIds = sanitized.map((d) => String(d.id));

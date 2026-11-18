@@ -203,6 +203,47 @@
         "serverUpdatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "ownerUid", "saleName", "saleKey", "ownerAdminEmail", "online", "activePage", "deviceType", "loggedInAt", "lastSeenAt", "serverUpdatedAt"]
+    },
+    "SaleActivityLog": {
+      "title": "SaleActivityLog",
+      "description": "Immutable chronological audit log of key actions performed by Sale staff, visible strictly to Master Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "saleName": { "type": "string", "maxLength": 200 },
+        "saleKey": { "type": "string", "maxLength": 200 },
+        "ownerAdminEmail": { "type": "string", "maxLength": 200 },
+        "actionType": {
+          "type": "string",
+          "enum": [
+            "order_created",
+            "order_updated",
+            "payment_updated",
+            "order_deleted",
+            "orders_bulk_deleted",
+            "problem_customer_added"
+          ]
+        },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "orderNumber": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "amount": { "type": "number" },
+        "summary": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "serverCreatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "saleName",
+        "saleKey",
+        "ownerAdminEmail",
+        "actionType",
+        "summary",
+        "createdAt",
+        "serverCreatedAt"
+      ]
     }
   },
   "firestore": {
@@ -237,6 +278,10 @@
     "/workspaces/{workspaceId}/salePresence/{presenceId}": {
       "schema": { "$ref": "#/entities/SalePresence" },
       "description": "Real-time Sale online presence sessions scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/activityLogs/{activityId}": {
+      "schema": { "$ref": "#/entities/SaleActivityLog" },
+      "description": "Chronological Sale staff activity logs scoped to workspaceId."
     },
     "/developerVault/{vaultId}": {
       "schema": { "$ref": "#/entities/DeveloperVault" },

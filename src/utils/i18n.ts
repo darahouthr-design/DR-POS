@@ -167,6 +167,31 @@ export interface TranslationDict {
     deviceTablet: string;
     deviceDesktop: string;
     manageSalesBtn: string;
+    activityLogTitle: string;
+    activityLogSubtitle: string;
+    activityEventsUnit: string;
+    activityFilterAll: string;
+    activityActionCreated: string;
+    activityActionUpdated: string;
+    activityActionPayment: string;
+    activityActionDeleted: string;
+    activityActionBulkDeleted: string;
+    activityActionProblemCustomer: string;
+    activitySearchPlaceholder: string;
+    activityAllStaff: string;
+    activitySortNewest: string;
+    activitySortOldest: string;
+    activityEmptyTitle: string;
+    activityEmptyHint: string;
+    activityFilteredEmpty: string;
+    activityResetFilter: string;
+    activityShowMore: string;
+    activityShowLess: string;
+    activityLoading: string;
+    activityAutoClearNote: string;
+    activityAutoClearBtn: string;
+    activityAutoClearedResult: string;
+    activityAutoClearNone: string;
   };
   pos: {
     title: string;
@@ -284,6 +309,7 @@ export interface TranslationDict {
     requiredMissingListPrefix: string;
     requiredFieldEmptyError: string;
     requiredSettingsConfigHint: string;
+    hideKeyboardBtn: string;
   };
   orders: {
     saleTitlePrefix: string;
@@ -536,6 +562,10 @@ export interface TranslationDict {
     loadingMoreBtn: string;
     allRecordsLoaded: string;
     showMoreScreenBtn: string;
+    autoClearNote: string;
+    autoClearBtn: string;
+    autoClearedResult: string;
+    autoClearNone: string;
   };
   settings: {
     userRestrictedTitle: string;
@@ -816,14 +846,14 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colCustomerPhone: 'អតិថិជន / ទូរស័ព្ទ',
       colStore: 'ហាង',
       colTotal: 'តម្លៃសរុប',
-      recentOrdersTitle: 'ការបញ្ជាទិញថ្មីៗ (New Orders)',
+      recentOrdersTitle: 'ការបញ្ជាទិញថ្មីៗ',
       recentOrdersSubtitle: 'បង្ហាញកាលបរិច្ឆេទ បុគ្គលិកលក់ អតិថិជន ទំនិញលក់បាន និងតម្លៃសរុប',
       viewOrdersBtn: 'មើលបញ្ជីការបញ្ជាទិញ',
       noOrdersYet: 'មិនទាន់មានការបញ្ជាទិញនៅឡើយទេ។',
       colOrderDate: 'កាលបរិច្ឆេទបញ្ជាទិញ',
       colCustomerName: 'ឈ្មោះអតិថិជន',
       colSoldItems: 'ឈ្មោះទំនិញលក់បាន',
-      monthlyYearlyTitle: 'របាយការណ៍ចំណូលលក់ និងប្រាក់ចំណេញសុទ្ធ (ប្រចាំខែ / ប្រចាំឆ្នាំ)',
+      monthlyYearlyTitle: 'បាយការណ៍ចំណូលលក់ (ប្រចាំខែ / ប្រចាំឆ្នាំ)',
       monthlyYearlySubtitle: 'សង្ខេបចំណូលលក់ និងប្រាក់ចំណេញសុទ្ធសម្រាប់ខែ និងឆ្នាំដែលបានជ្រើសរើស',
       selectMonthLabel: 'ខែ',
       selectYearLabel: 'ឆ្នាំ',
@@ -834,7 +864,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       yearlyNetProfit: 'ប្រាក់ចំណេញសុទ្ធប្រចាំឆ្នាំ',
       yearlyItemsSold: 'ទំនិញលក់បានប្រចាំឆ្នាំ',
       profitMarginLabel: 'អត្រាចំណេញ',
-      staffLineChartTitle: 'ក្រាហ្វិកប្រៀបធៀបការលក់បុគ្គលិកប្រចាំខែ (Line Graphic)',
+      staffLineChartTitle: 'ក្រាហ្វិកប្រៀបធៀប',
       staffLineChartSubtitle: 'ប្រៀបធៀបចំនួនលក់របស់បុគ្គលិកតាមខែនីមួយៗក្នុងឆ្នាំ',
       metricUnits: 'ចំនួនលក់',
       metricOrders: 'វិក្កយបត្រ',
@@ -848,7 +878,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colInvoiceDate: 'វិក្កយបត្រ / កាលបរិច្ឆេទ',
       colStatus: 'ស្ថានភាព',
       noFilteredOrders: 'មិនមានការបញ្ជាទិញតាមស្ថានភាពដែលបានជ្រើសរើសទេ។',
-      salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់ Sale (Online)',
+      salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់',
       salePresenceSubtitle: 'បង្ហាញការចូលប្រើប្រាស់ Web App របស់បុគ្គលិក Sale ម្នាក់ៗក្នុងពេលជាក់ស្ដែង (សម្រាប់តែ Admin មេ)',
       onlineCountSummary: 'កំពុង Online',
       statusOnline: 'Online',
@@ -867,6 +897,31 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deviceTablet: 'Tablet',
       deviceDesktop: 'កុំព្យូទ័រ',
       manageSalesBtn: 'គ្រប់គ្រង Sale',
+      activityLogTitle: 'កំណត់ត្រាសកម្មភាពបុគ្គលិក Sale',
+      activityLogSubtitle: 'តាមដានសកម្មភាពសំខាន់ៗរបស់ Sale តាមលំដាប់ពេលវេលាជាក់ស្ដែង (សម្រាប់តែ Admin មេ)',
+      activityEventsUnit: 'សកម្មភាព',
+      activityFilterAll: 'ទាំងអស់',
+      activityActionCreated: 'បង្កើតការបញ្ជាទិញ',
+      activityActionUpdated: 'កែប្រែការបញ្ជាទិញ',
+      activityActionPayment: 'កែប្រែការទូទាត់',
+      activityActionDeleted: 'លុបការបញ្ជាទិញ',
+      activityActionBulkDeleted: 'លុបការបញ្ជាទិញច្រើន',
+      activityActionProblemCustomer: 'រាយការណ៍អតិថិជនមានបញ្ហា',
+      activitySearchPlaceholder: 'ស្វែងរកឈ្មោះ Sale លេខវិក្កយបត្រ ឬអតិថិជន...',
+      activityAllStaff: 'Sale ទាំងអស់',
+      activitySortNewest: 'ថ្មីបំផុតមុន',
+      activitySortOldest: 'ចាស់បំផុតមុន',
+      activityEmptyTitle: 'មិនទាន់មានកំណត់ត្រាសកម្មភាពរបស់ Sale នៅឡើយទេ',
+      activityEmptyHint: 'នៅពេលបុគ្គលិក Sale បង្កើត កែប្រែ ឬលុបការបញ្ជាទិញ កំណត់ត្រានឹងបង្ហាញនៅទីនេះដោយស្វ័យប្រវត្តិ។',
+      activityFilteredEmpty: 'មិនមានកំណត់ត្រាត្រូវនឹងលក្ខខណ្ឌស្វែងរកទេ។',
+      activityResetFilter: 'សម្អាតតម្រង',
+      activityShowMore: 'បង្ហាញបន្ថែម',
+      activityShowLess: 'បង្រួមវិញ',
+      activityLoading: 'កំពុងផ្ទុកកំណត់ត្រាសកម្មភាព...',
+      activityAutoClearNote: 'សម្អាតស្វ័យប្រវត្តិរៀងរាល់ ៣០ ថ្ងៃម្ដង រាប់ពីថ្ងៃបង្កើត កែប្រែ ការទូទាត់ ឬលុបការបញ្ជាទិញ',
+      activityAutoClearBtn: 'សម្អាតចាស់ជាង ៣០ ថ្ងៃ',
+      activityAutoClearedResult: 'បានសម្អាតកំណត់ត្រាចាស់លើស ៣០ ថ្ងៃចំនួន {count} រួចរាល់',
+      activityAutoClearNone: 'មិនមានកំណត់ត្រាចាស់លើស ៣០ ថ្ងៃទេ',
     },
     pos: {
       title: 'ផ្ទាំងលក់ទំនិញ',
@@ -984,6 +1039,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       requiredMissingListPrefix: 'ខ្វះព័ត៌មានចាំបាច់៖',
       requiredFieldEmptyError: 'តម្រូវឱ្យបំពេញជាដាច់ខាត',
       requiredSettingsConfigHint: 'ប្រសិនបើមិនទាន់មាន ឈ្មោះហាង ឬ Groups សូមឱ្យ Admin បន្ថែមនៅក្នុងទំព័រ "ការកំណត់ (Settings)" ជាមុនសិន។',
+      hideKeyboardBtn: 'បិទក្ដារចុច',
     },
     orders: {
       saleTitlePrefix: 'របាយការណ៍ Orders របស់ Sale៖',
@@ -1238,6 +1294,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       loadingMoreBtn: 'កំពុងផ្ទុកប្រវត្តិស្តុក...',
       allRecordsLoaded: 'បានផ្ទុកប្រវត្តិស្តុកទាំងអស់រួចរាល់',
       showMoreScreenBtn: 'បង្ហាញបន្ថែមលើអេក្រង់ ({remaining})',
+      autoClearNote: 'សម្អាតប្រវត្តិស្តុកដោយស្វ័យប្រវត្តិរៀងរាល់ ៣០ ថ្ងៃម្ដង រាប់ពីថ្ងៃបញ្ចូល ឬកែប្រែស្តុក ដើម្បីកុំឱ្យយឺតប្រព័ន្ធ និងពេញ Database',
+      autoClearBtn: 'សម្អាតចាស់ជាង ៣០ ថ្ងៃ',
+      autoClearedResult: 'បានសម្អាតប្រវត្តិស្តុកចាស់លើស ៣០ ថ្ងៃចំនួន {count} រួចរាល់',
+      autoClearNone: 'មិនមានប្រវត្តិស្តុកចាស់លើស ៣០ ថ្ងៃទេ',
     },
     settings: {
       userRestrictedTitle: 'ព័ត៌មានគណនី (Sale Settings)',
@@ -1585,6 +1645,31 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deviceTablet: 'Tablet',
       deviceDesktop: 'Desktop',
       manageSalesBtn: 'Manage Sales',
+      activityLogTitle: 'Activity Log',
+      activityLogSubtitle: 'Chronological record of key actions performed by Sale staff (Master Admin Only)',
+      activityEventsUnit: 'events',
+      activityFilterAll: 'All',
+      activityActionCreated: 'Order Created',
+      activityActionUpdated: 'Order Updated',
+      activityActionPayment: 'Payment Updated',
+      activityActionDeleted: 'Order Deleted',
+      activityActionBulkDeleted: 'Orders Deleted',
+      activityActionProblemCustomer: 'Problem Customer Flagged',
+      activitySearchPlaceholder: 'Search Sale name, invoice #, or customer...',
+      activityAllStaff: 'All Sale Staff',
+      activitySortNewest: 'Newest First',
+      activitySortOldest: 'Oldest First',
+      activityEmptyTitle: 'No Sale staff activity recorded yet',
+      activityEmptyHint: 'Key actions such as creating, updating, or deleting orders by Sale staff will appear here in chronological order.',
+      activityFilteredEmpty: 'No activity entries match your current filters.',
+      activityResetFilter: 'Reset Filters',
+      activityShowMore: 'Show More',
+      activityShowLess: 'Show Less',
+      activityLoading: 'Loading activity log...',
+      activityAutoClearNote: 'Auto-clears every 30 days from creation, edit, payment, or order deletion',
+      activityAutoClearBtn: 'Clear >30 Days',
+      activityAutoClearedResult: 'Cleared {count} activity record(s) older than 30 days',
+      activityAutoClearNone: 'No activity records older than 30 days',
     },
     pos: {
       title: 'POS Terminal',
@@ -1702,6 +1787,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       requiredMissingListPrefix: 'Missing required:',
       requiredFieldEmptyError: 'This field is required',
       requiredSettingsConfigHint: 'If Store or Groups list is empty, ask Admin to configure them in Settings first.',
+      hideKeyboardBtn: 'Done',
     },
     orders: {
       saleTitlePrefix: 'Orders Report for Sale:',
@@ -1954,6 +2040,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       loadingMoreBtn: 'Loading older stock logs...',
       allRecordsLoaded: 'All stock history records loaded',
       showMoreScreenBtn: 'Show More on Screen ({remaining})',
+      autoClearNote: 'Auto-clears every 30 days from stock entry or edit date to keep app & database fast',
+      autoClearBtn: 'Clear >30 Days',
+      autoClearedResult: 'Cleared {count} stock log(s) older than 30 days',
+      autoClearNone: 'No stock logs older than 30 days',
     },
     settings: {
       userRestrictedTitle: 'Account Info (Sale Settings)',
@@ -2301,6 +2391,31 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deviceTablet: '태블릿',
       deviceDesktop: '데스크톱',
       manageSalesBtn: 'Sale 관리',
+      activityLogTitle: 'Sale 직원 활동 로그',
+      activityLogSubtitle: 'Sale 직원이 수행한 주요 작업의 시간순 기록 (메인 관리자 전용)',
+      activityEventsUnit: '건',
+      activityFilterAll: '전체',
+      activityActionCreated: '주문 생성',
+      activityActionUpdated: '주문 수정',
+      activityActionPayment: '결제 상태 변경',
+      activityActionDeleted: '주문 삭제',
+      activityActionBulkDeleted: '주문 일괄 삭제',
+      activityActionProblemCustomer: '문제 고객 등록',
+      activitySearchPlaceholder: 'Sale 이름, 주문번호, 고객명 검색...',
+      activityAllStaff: '전체 Sale 직원',
+      activitySortNewest: '최신순',
+      activitySortOldest: '오래된순',
+      activityEmptyTitle: '아직 기록된 Sale 직원 활동이 없습니다',
+      activityEmptyHint: 'Sale 직원이 주문을 생성, 수정 또는 삭제하면 이 목록에 시간순으로 자동 기록됩니다.',
+      activityFilteredEmpty: '선택한 필터와 일치하는 활동 기록이 없습니다.',
+      activityResetFilter: '필터 초기화',
+      activityShowMore: '더 보기',
+      activityShowLess: '접기',
+      activityLoading: '활동 로그 불러오는 중...',
+      activityAutoClearNote: '생성, 수정, 결제 변경, 삭제 후 30일이 지나면 자동 정리됩니다',
+      activityAutoClearBtn: '30일 경과 정리',
+      activityAutoClearedResult: '30일이 지난 활동 기록 {count}건을 정리했습니다',
+      activityAutoClearNone: '30일이 지난 활동 기록이 없습니다',
     },
     pos: {
       title: '판매 포스 (POS Terminal)',
@@ -2418,6 +2533,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       requiredMissingListPrefix: '미입력 필수 항목:',
       requiredFieldEmptyError: '필수 입력 항목입니다',
       requiredSettingsConfigHint: '매장 또는 그룹 목록이 비어 있다면 먼저 설정(Settings)에서 추가해 주세요.',
+      hideKeyboardBtn: '키보드 닫기',
     },
     orders: {
       saleTitlePrefix: '개인 주문 내역 (Sale):',
@@ -2670,6 +2786,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       loadingMoreBtn: '이전 재고 이력 불러오는 중...',
       allRecordsLoaded: '모든 재고 이력을 불러왔습니다',
       showMoreScreenBtn: '화면에 더 보기 ({remaining})',
+      autoClearNote: '속도 저하와 DB 용량 초과 방지를 위해 입고·수정 후 30일 경과 시 자동 정리됩니다',
+      autoClearBtn: '30일 경과 정리',
+      autoClearedResult: '30일이 지난 재고 이력 {count}건을 정리했습니다',
+      autoClearNone: '30일이 지난 재고 이력이 없습니다',
     },
     settings: {
       userRestrictedTitle: '계정 정보 (Sale 설정)',

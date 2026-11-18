@@ -213,4 +213,29 @@ export interface SalePresence {
   loggedInAt: string;
   lastSeenAt: string;
   serverUpdatedMs?: number;
+  observedAtMs?: number;
+}
+
+export type SaleActivityActionType =
+  | 'order_created'
+  | 'order_updated'
+  | 'payment_updated'
+  | 'order_deleted'
+  | 'orders_bulk_deleted'
+  | 'problem_customer_added';
+
+export interface SaleActivityLog {
+  id: string;
+  ownerUid: string;
+  saleName: string;
+  saleKey: string;
+  ownerAdminEmail: string;
+  actionType: SaleActivityActionType;
+  targetId?: string;
+  orderNumber?: string;
+  customerName?: string;
+  amount?: number;
+  summary: string;
+  createdAt: string;
+  serverCreatedMs?: number;
 }

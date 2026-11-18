@@ -29,10 +29,12 @@ import {
   deleteOrdersFromMongoBackground,
   deleteOrdersFromMongoSync,
   deleteStockLogsFromMongoBackground,
+  deleteStockLogsFromMongoSync,
   deleteWorkspaceFromMongoSync,
   getLastMongoErrorDetail,
   fetchMongoChanges,
   flushAllPendingMongoOps,
+  purgeExpiredStockLogsFromMongoSync,
   queryMoreOrdersFromMongo,
   queryMoreStockLogsFromMongo,
   subscribeToLocalSyncBroadcast,
@@ -53,6 +55,8 @@ import type {
   PriceTier,
   ProblemCustomer,
   Product,
+  SaleActivityActionType,
+  SaleActivityLog,
   SalePresence,
   SaleProfile,
   StaffMember,
@@ -78,12 +82,36 @@ export async function fetchLatestWorkspaceSaleProfilesFromServer(
 
 export const ORDERS_PAGE_SIZE = 60;
 export const STOCK_LOGS_PAGE_SIZE = 40;
+export const LOG_RETENTION_DAYS = 30;
+export const LOG_RETENTION_MS = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+export function getLogRetentionCutoffMs(days = LOG_RETENTION_DAYS): number {
+  const safeDays = Math.max(1, Math.floor(Number(days) || LOG_RETENTION_DAYS));
+  return Date.now() - safeDays * 24 * 60 * 60 * 1000;
+}
+
+export function getLogRetentionCutoffIso(days = LOG_RETENTION_DAYS): string {
+  return new Date(getLogRetentionCutoffMs(days)).toISOString();
+}
+
+export function isTimestampExpired(
+  createdAt?: string,
+  serverMs?: number,
+  cutoffMs = getLogRetentionCutoffMs()
+): boolean {
+  if (typeof serverMs === 'number' && Number.isFinite(serverMs) && serverMs > 0) {
+    return serverMs < cutoffMs;
+  }
+  const parsed = Date.parse(String(createdAt || ''));
+  return Number.isFinite(parsed) && parsed > 0 && parsed < cutoffMs;
+}
 
 export interface WorkspaceSubscription {
   unsubscribe: () => void;
   loadMoreOrders: () => Promise<boolean>;
   loadMoreStockLogs: () => Promise<boolean>;
   evictOrders: (ids: string[]) => void;
+  evictStockLogs: (ids: string[]) => void;
 }
 
 function formatDateLocal(d: Date): string {
@@ -578,7 +606,7 @@ export function subscribeToWorkspace(
         priceRecords: [...priceRecords].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
         stockLogs: mergePaginatedById(liveStockLogs, olderStockLogs, deletedStockLogIds, (a, b) =>
           b.createdAt.localeCompare(a.createdAt)
-        ),
+        ).filter((l) => !isTimestampExpired(l.createdAt)),
         settings: currentSettings,
         license: resolveEffectiveLicense(),
       },
@@ -1120,6 +1148,17 @@ export function subscribeToWorkspace(
     emit();
   };
 
+  const evictStockLogs = (ids: string[]) => {
+    if (!ids.length || disposed) return;
+    const removeSet = new Set(ids);
+    for (const id of ids) {
+      deletedStockLogIds.add(id);
+    }
+    olderStockLogs = olderStockLogs.filter((l) => !removeSet.has(l.id));
+    liveStockLogs = liveStockLogs.filter((l) => !removeSet.has(l.id));
+    emit();
+  };
+
   const runMongoDeltaCheck = async () => {
     if (disposed || mongoDeltaInFlight) return;
     mongoDeltaInFlight = true;
@@ -1301,6 +1340,7 @@ export function subscribeToWorkspace(
     loadMoreOrders,
     loadMoreStockLogs,
     evictOrders,
+    evictStockLogs,
   };
 }
 
@@ -2335,6 +2375,7 @@ export async function deleteAccountWorkspaceFs(
     'stockLogs',
     'problemCustomers',
     'salePresence',
+    'activityLogs',
   ] as const;
 
   for (const sub of subcollections) {
@@ -2364,7 +2405,24 @@ export async function deleteAccountWorkspaceFs(
   }
 }
 
-function stripSalePresence(raw: Record<string, unknown>): SalePresence {
+const knownPresenceDocs = new Set<string>();
+const presenceWriteQueues = new Map<string, Promise<void>>();
+
+function enqueuePresenceWrite(queueKey: string, task: () => Promise<void>): Promise<void> {
+  const prev = presenceWriteQueues.get(queueKey) || Promise.resolve();
+  const next = prev.catch(() => {}).then(task);
+  presenceWriteQueues.set(queueKey, next);
+  return next.finally(() => {
+    if (presenceWriteQueues.get(queueKey) === next) {
+      presenceWriteQueues.delete(queueKey);
+    }
+  });
+}
+
+function stripSalePresence(
+  raw: Record<string, unknown>,
+  observedAtMs?: number
+): SalePresence {
   const srvTs = raw.serverUpdatedAt as { toMillis?: () => number } | undefined;
   const serverUpdatedMs =
     srvTs && typeof srvTs.toMillis === 'function' ? srvTs.toMillis() : undefined;
@@ -2380,6 +2438,7 @@ function stripSalePresence(raw: Record<string, unknown>): SalePresence {
     loggedInAt: String(raw.loggedInAt || ''),
     lastSeenAt: String(raw.lastSeenAt || ''),
     ...(serverUpdatedMs ? { serverUpdatedMs } : {}),
+    ...(observedAtMs ? { observedAtMs } : {}),
   };
 }
 
@@ -2402,42 +2461,58 @@ export async function upsertSalePresenceFs(
   const cleanKey = payload.saleKey.trim().toLowerCase().slice(0, 200);
   if (!cleanId || !cleanName || !cleanKey) return;
 
-  const ref = doc(db, 'workspaces', uid, 'salePresence', cleanId);
-  const nowIso = new Date().toISOString();
-  const updateBody = {
-    saleName: cleanName,
-    saleKey: cleanKey,
-    ownerAdminEmail: payload.ownerAdminEmail.trim().toLowerCase().slice(0, 200),
-    online: Boolean(payload.online),
-    activePage: String(payload.activePage || 'dashboard').slice(0, 64),
-    deviceType: String(payload.deviceType || 'desktop').slice(0, 32),
-    lastSeenAt: nowIso,
-    serverUpdatedAt: serverTimestamp(),
-  };
+  const queueKey = `${uid}:${cleanId}`;
+  return enqueuePresenceWrite(queueKey, async () => {
+    if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+    const ref = doc(db, 'workspaces', uid, 'salePresence', cleanId);
+    const nowIso = new Date().toISOString();
+    const cleanLoggedInAt = String(payload.loggedInAt || nowIso).slice(0, 64);
+    const updateBody = {
+      saleName: cleanName,
+      saleKey: cleanKey,
+      ownerAdminEmail: payload.ownerAdminEmail.trim().toLowerCase().slice(0, 200),
+      online: Boolean(payload.online),
+      activePage: String(payload.activePage || 'dashboard').slice(0, 64),
+      deviceType: String(payload.deviceType || 'desktop').slice(0, 32),
+      lastSeenAt: nowIso,
+      serverUpdatedAt: serverTimestamp(),
+    };
 
-  try {
-    await updateDoc(ref, updateBody);
-  } catch (err) {
-    const code = (err as { code?: string })?.code || '';
-    const msg = err instanceof Error ? err.message : String(err || '');
-    if (
-      code === 'not-found' ||
-      msg.toLowerCase().includes('no document to update') ||
-      msg.toLowerCase().includes('not-found')
-    ) {
+    const createFullDoc = async () => {
+      await setDoc(ref, {
+        id: cleanId,
+        ownerUid: uid,
+        ...updateBody,
+        loggedInAt: cleanLoggedInAt,
+      });
+      knownPresenceDocs.add(queueKey);
+    };
+
+    try {
+      if (!knownPresenceDocs.has(queueKey)) {
+        const snap = await getDocFromServer(ref).catch(() => getDoc(ref).catch(() => null));
+        if (!snap || !snap.exists()) {
+          await createFullDoc();
+          return;
+        }
+        knownPresenceDocs.add(queueKey);
+      }
+      await updateDoc(ref, updateBody);
+    } catch {
+      knownPresenceDocs.delete(queueKey);
       try {
-        await setDoc(ref, {
-          id: cleanId,
-          ownerUid: uid,
-          ...updateBody,
-          loggedInAt: String(payload.loggedInAt || nowIso).slice(0, 64),
-        });
+        const snap = await getDocFromServer(ref).catch(() => null);
+        if (!snap || !snap.exists()) {
+          await createFullDoc();
+        } else {
+          knownPresenceDocs.add(queueKey);
+          await updateDoc(ref, updateBody);
+        }
       } catch {
         // Ignore transient offline/unauthenticated teardown races
       }
-      return;
     }
-  }
+  });
 }
 
 export async function markSalePresenceOfflineFs(
@@ -2447,15 +2522,19 @@ export async function markSalePresenceOfflineFs(
   if (!auth.currentUser || auth.currentUser.uid !== uid) return;
   const cleanId = presenceId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
   if (!cleanId) return;
-  try {
-    await updateDoc(doc(db, 'workspaces', uid, 'salePresence', cleanId), {
-      online: false,
-      lastSeenAt: new Date().toISOString(),
-      serverUpdatedAt: serverTimestamp(),
-    });
-  } catch {
-    // Ignore if document wasn't created yet or user signed out mid-flight
-  }
+  const queueKey = `${uid}:${cleanId}`;
+  return enqueuePresenceWrite(queueKey, async () => {
+    if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+    try {
+      await updateDoc(doc(db, 'workspaces', uid, 'salePresence', cleanId), {
+        online: false,
+        lastSeenAt: new Date().toISOString(),
+        serverUpdatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Ignore if document wasn't created yet or user signed out mid-flight
+    }
+  });
 }
 
 export function subscribeToSalePresence(
@@ -2465,10 +2544,48 @@ export function subscribeToSalePresence(
 ): Unsubscribe {
   const path = `workspaces/${uid}/salePresence`;
   const q = query(collection(db, 'workspaces', uid, 'salePresence'), where('ownerUid', '==', uid));
+  const observedMap = new Map<string, { sig: string; observedAtMs: number }>();
+  let hasInitialServerSnap = false;
+
   return onSnapshot(
     q,
     (snap) => {
-      const list = snap.docs.map((d) => stripSalePresence(d.data()));
+      const nowMs = Date.now();
+      const activeIds = new Set<string>();
+      const list = snap.docs.map((d) => {
+        activeIds.add(d.id);
+        const data = d.data() as Record<string, unknown>;
+        const srvTs = data.serverUpdatedAt as { toMillis?: () => number } | undefined;
+        const srvMs = srvTs && typeof srvTs.toMillis === 'function' ? srvTs.toMillis() : '';
+        const sig = `${Boolean(data.online)}|${String(data.lastSeenAt || '')}|${String(
+          data.activePage || ''
+        )}|${srvMs}`;
+
+        const prev = observedMap.get(d.id);
+        let observedAtMs = prev?.observedAtMs;
+        if (!snap.metadata.fromCache && hasInitialServerSnap) {
+          if (!prev || prev.sig !== sig) {
+            observedAtMs = nowMs;
+            observedMap.set(d.id, { sig, observedAtMs });
+          }
+        } else if (!prev) {
+          observedMap.set(d.id, { sig, observedAtMs: 0 });
+        } else if (prev.sig !== sig && !snap.metadata.fromCache) {
+          observedAtMs = nowMs;
+          observedMap.set(d.id, { sig, observedAtMs });
+        }
+
+        return stripSalePresence(data, observedAtMs || undefined);
+      });
+
+      for (const cachedId of observedMap.keys()) {
+        if (!activeIds.has(cachedId)) {
+          observedMap.delete(cachedId);
+        }
+      }
+      if (!snap.metadata.fromCache) {
+        hasInitialServerSnap = true;
+      }
       onUpdate(list);
     },
     (err) => {
@@ -2481,4 +2598,254 @@ export function subscribeToSalePresence(
       }
     }
   );
+}
+
+function stripSaleActivityLog(raw: Record<string, unknown>): SaleActivityLog {
+  const srvTs = raw.serverCreatedAt as { toMillis?: () => number } | undefined;
+  const serverCreatedMs =
+    srvTs && typeof srvTs.toMillis === 'function' ? srvTs.toMillis() : undefined;
+  const validActions = new Set<SaleActivityActionType>([
+    'order_created',
+    'order_updated',
+    'payment_updated',
+    'order_deleted',
+    'orders_bulk_deleted',
+    'problem_customer_added',
+  ]);
+  const rawAction = String(raw.actionType || 'order_created') as SaleActivityActionType;
+  return {
+    id: String(raw.id || ''),
+    ownerUid: String(raw.ownerUid || ''),
+    saleName: String(raw.saleName || ''),
+    saleKey: String(raw.saleKey || ''),
+    ownerAdminEmail: String(raw.ownerAdminEmail || '').toLowerCase(),
+    actionType: validActions.has(rawAction) ? rawAction : 'order_created',
+    ...(raw.targetId ? { targetId: String(raw.targetId) } : {}),
+    ...(raw.orderNumber ? { orderNumber: String(raw.orderNumber) } : {}),
+    ...(raw.customerName ? { customerName: String(raw.customerName) } : {}),
+    ...(typeof raw.amount === 'number' && Number.isFinite(raw.amount)
+      ? { amount: Number(raw.amount) }
+      : {}),
+    summary: String(raw.summary || ''),
+    createdAt: String(raw.createdAt || ''),
+    ...(serverCreatedMs ? { serverCreatedMs } : {}),
+  };
+}
+
+export async function logSaleActivityFs(
+  uid: string,
+  payload: {
+    saleName: string;
+    saleKey: string;
+    ownerAdminEmail: string;
+    actionType: SaleActivityActionType;
+    targetId?: string;
+    orderNumber?: string;
+    customerName?: string;
+    amount?: number;
+    summary: string;
+  }
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+  const cleanSaleName = String(payload.saleName || '').trim().slice(0, 200);
+  const cleanSaleKey = String(payload.saleKey || '').trim().toLowerCase().slice(0, 200);
+  if (!cleanSaleName || !cleanSaleKey) return;
+
+  const id = makeDocId('act');
+  const path = `workspaces/${uid}/activityLogs/${id}`;
+  const docBody: Record<string, unknown> = {
+    id,
+    ownerUid: uid,
+    saleName: cleanSaleName,
+    saleKey: cleanSaleKey,
+    ownerAdminEmail: String(payload.ownerAdminEmail || '').trim().toLowerCase().slice(0, 200),
+    actionType: payload.actionType,
+    summary: String(payload.summary || '').trim().slice(0, 500),
+    createdAt: new Date().toISOString().slice(0, 64),
+    serverCreatedAt: serverTimestamp(),
+  };
+
+  if (payload.targetId) {
+    docBody.targetId = String(payload.targetId).trim().slice(0, 128);
+  }
+  if (payload.orderNumber) {
+    docBody.orderNumber = String(payload.orderNumber).trim().slice(0, 64);
+  }
+  if (payload.customerName) {
+    docBody.customerName = String(payload.customerName).trim().slice(0, 200);
+  }
+  if (typeof payload.amount === 'number' && Number.isFinite(payload.amount) && payload.amount >= 0) {
+    docBody.amount = roundUsdPrecision(payload.amount);
+  }
+
+  try {
+    await setDoc(doc(db, 'workspaces', uid, 'activityLogs', id), docBody);
+  } catch (err) {
+    try {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    } catch {
+      // Non-fatal audit logging failure should not crash user's primary workflow
+    }
+  }
+}
+
+export function subscribeToSaleActivityLogs(
+  uid: string,
+  onUpdate: (items: SaleActivityLog[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = `workspaces/${uid}/activityLogs`;
+  const logsCol = collection(db, 'workspaces', uid, 'activityLogs');
+  let unsub: Unsubscribe = () => {};
+  let disposed = false;
+
+  const attach = (withOrderBy: boolean) => {
+    unsub();
+    const q = withOrderBy
+      ? query(logsCol, where('ownerUid', '==', uid), orderBy('createdAt', 'desc'), limit(120))
+      : query(logsCol, where('ownerUid', '==', uid), limit(120));
+
+    unsub = onSnapshot(
+      q,
+      (snap) => {
+        const cutoffMs = getLogRetentionCutoffMs();
+        const items = snap.docs
+          .map((d) => stripSaleActivityLog(d.data() as Record<string, unknown>))
+          .filter((item) => !isTimestampExpired(item.createdAt, item.serverCreatedMs, cutoffMs))
+          .sort((a, b) => (b.serverCreatedMs || Date.parse(b.createdAt) || 0) - (a.serverCreatedMs || Date.parse(a.createdAt) || 0));
+        onUpdate(items);
+      },
+      (err) => {
+        if (withOrderBy && isFailedPreconditionError(err) && !disposed) {
+          attach(false);
+          return;
+        }
+        if (onError) {
+          try {
+            handleFirestoreError(err, OperationType.LIST, path);
+          } catch (wrapped) {
+            onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+          }
+        }
+      }
+    );
+  };
+
+  attach(true);
+  return () => {
+    disposed = true;
+    unsub();
+  };
+}
+
+async function purgeExpiredSubcollectionDocsFs(
+  uid: string,
+  subcollection: 'stockLogs' | 'activityLogs',
+  cutoffMs: number,
+  cutoffIso: string
+): Promise<string[]> {
+  if (!uid || !auth.currentUser || auth.currentUser.uid !== uid) return [];
+  const colRef = collection(db, 'workspaces', uid, subcollection);
+  const path = `workspaces/${uid}/${subcollection}`;
+  const deletedIds: string[] = [];
+  const BATCH_LIMIT = 450;
+  const MAX_ROUNDS = 10;
+
+  try {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (!auth.currentUser || auth.currentUser.uid !== uid) break;
+      const snap = await getDocs(
+        query(colRef, where('ownerUid', '==', uid), where('createdAt', '<', cutoffIso), limit(BATCH_LIMIT))
+      );
+      if (snap.empty) break;
+
+      const batch = writeBatch(db);
+      for (const d of snap.docs) {
+        batch.delete(d.ref);
+        deletedIds.push(d.id);
+      }
+      await batch.commit();
+
+      if (snap.docs.length < BATCH_LIMIT) break;
+    }
+    return deletedIds;
+  } catch (err) {
+    if (isFailedPreconditionError(err)) {
+      try {
+        const snap = await getDocs(query(colRef, where('ownerUid', '==', uid)));
+        const expiredDocs = snap.docs.filter((d) => {
+          const data = d.data() as Record<string, unknown>;
+          const srvTs = data.serverCreatedAt as { toMillis?: () => number } | undefined;
+          const srvMs = srvTs && typeof srvTs.toMillis === 'function' ? srvTs.toMillis() : undefined;
+          return isTimestampExpired(String(data.createdAt || ''), srvMs, cutoffMs);
+        });
+        for (let i = 0; i < expiredDocs.length; i += BATCH_LIMIT) {
+          if (!auth.currentUser || auth.currentUser.uid !== uid) break;
+          const chunk = expiredDocs.slice(i, i + BATCH_LIMIT);
+          const batch = writeBatch(db);
+          for (const d of chunk) {
+            batch.delete(d.ref);
+            deletedIds.push(d.id);
+          }
+          await batch.commit();
+        }
+        return deletedIds;
+      } catch (fallbackErr) {
+        try {
+          handleFirestoreError(fallbackErr, OperationType.DELETE, path);
+        } catch {
+          // Non-fatal cleanup error
+        }
+        return deletedIds;
+      }
+    }
+    try {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    } catch {
+      // Non-fatal cleanup error
+    }
+    return deletedIds;
+  }
+}
+
+export async function purgeExpiredStockLogsFs(
+  uid: string,
+  days = LOG_RETENTION_DAYS
+): Promise<{ deletedCount: number; deletedIds: string[] }> {
+  if (!uid || !auth.currentUser || auth.currentUser.uid !== uid) {
+    return { deletedCount: 0, deletedIds: [] };
+  }
+  const cutoffMs = getLogRetentionCutoffMs(days);
+  const cutoffIso = new Date(cutoffMs).toISOString();
+
+  const deletedIds = await purgeExpiredSubcollectionDocsFs(uid, 'stockLogs', cutoffMs, cutoffIso);
+  if (deletedIds.length > 0) {
+    await deleteStockLogsFromMongoSync(deletedIds).catch(() => false);
+  }
+  const mongoCutoff = await purgeExpiredStockLogsFromMongoSync(cutoffIso).catch(() => ({
+    ok: false,
+    deletedCount: 0,
+  }));
+
+  return {
+    deletedCount: Math.max(deletedIds.length, mongoCutoff.deletedCount),
+    deletedIds,
+  };
+}
+
+export async function purgeExpiredActivityLogsFs(
+  uid: string,
+  days = LOG_RETENTION_DAYS
+): Promise<{ deletedCount: number; deletedIds: string[] }> {
+  if (!uid || !auth.currentUser || auth.currentUser.uid !== uid) {
+    return { deletedCount: 0, deletedIds: [] };
+  }
+  const cutoffMs = getLogRetentionCutoffMs(days);
+  const cutoffIso = new Date(cutoffMs).toISOString();
+
+  const deletedIds = await purgeExpiredSubcollectionDocsFs(uid, 'activityLogs', cutoffMs, cutoffIso);
+  return {
+    deletedCount: deletedIds.length,
+    deletedIds,
+  };
 }

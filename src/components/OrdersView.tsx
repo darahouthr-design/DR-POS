@@ -539,14 +539,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const handleDownloadInvoicePng = async (order: Order) => {
+  const handleDownloadInvoicePng = async (order: Order, bluetoothOnly = false) => {
     const activePaperWidth =
       printPreviewOrder && printPreviewOrder.order.id === order.id && printPreviewOrder.mode !== 'standard'
         ? printPreviewOrder.mode
         : bluetoothSize;
     try {
       setDownloadingId(order.id);
-      await downloadOrderInvoiceAsPng(order, currency, activePaperWidth);
+      await downloadOrderInvoiceAsPng(order, currency, activePaperWidth, bluetoothOnly);
     } finally {
       setDownloadingId(null);
     }
@@ -844,63 +844,72 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <div className="flex justify-between gap-2">
                       <span className="font-semibold">매장 / 그룹:</span>
                       <span className="text-right">
-                        {printPreviewOrder.order.storeName} / {printPreviewOrder.order.groupName}
+                        {printPreviewOrder.order.storeName || '-'} / {printPreviewOrder.order.groupName || '-'}
                       </span>
                     </div>
                     <div className="flex justify-between gap-2">
                       <span className="font-semibold">담당직원:</span>
-                      <span>{printPreviewOrder.order.staffName}</span>
+                      <span>{printPreviewOrder.order.staffName || '-'}</span>
                     </div>
                   </div>
 
-                  <div className="border-y border-dashed border-neutral-400 py-2 space-y-1.5 text-[11px]">
-                    <div className="flex justify-between font-bold">
-                      <span>품목명 / 수량</span>
-                      <span>금액</span>
-                    </div>
-                    {printPreviewOrder.order.items.map((it, idx) => (
-                      <div key={idx} className="flex justify-between gap-2">
-                        <span>
-                          {it.productName} × {it.quantity}
-                        </span>
-                        <span className="tabular-nums font-medium">
-                          {formatMoney(it.unitPrice * it.quantity, currency)}
-                        </span>
+                  {printPreviewOrder.mode === 'standard' && (
+                    <div className="border-y border-dashed border-neutral-400 py-2 space-y-1.5 text-[11px]">
+                      <div className="flex justify-between font-bold">
+                        <span>품목명 / 수량</span>
+                        <span>금액</span>
                       </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-1 text-[11px]">
-                    {(printPreviewOrder.order.discountAmount || 0) > 0 && (
-                      <>
-                        <div className="flex justify-between text-neutral-600">
-                          <span>소계금액:</span>
-                          <span className="tabular-nums">
-                            {formatMoney(
-                              printPreviewOrder.order.subtotalAmount ??
-                                printPreviewOrder.order.items.reduce(
-                                  (s, it) => s + it.unitPrice * it.quantity,
-                                  0
-                                ),
-                              currency
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-red-700 font-semibold">
+                      {printPreviewOrder.order.items.map((it, idx) => (
+                        <div key={idx} className="flex justify-between gap-2">
                           <span>
-                            할인금액
-                            {printPreviewOrder.order.discountType === 'percent' &&
-                            printPreviewOrder.order.discountValue
-                              ? ` (${printPreviewOrder.order.discountValue}%)`
-                              : ''}
-                            :
+                            {it.productName} × {it.quantity}
                           </span>
-                          <span className="tabular-nums">
-                            -{formatMoney(printPreviewOrder.order.discountAmount || 0, currency)}
+                          <span className="tabular-nums font-medium">
+                            {formatMoney(it.unitPrice * it.quantity, currency)}
                           </span>
                         </div>
-                      </>
-                    )}
+                      ))}
+                    </div>
+                  )}
+
+                  <div
+                    className={`space-y-1 text-[11px] ${
+                      printPreviewOrder.mode !== 'standard'
+                        ? 'border-t border-dashed border-neutral-400 pt-2'
+                        : ''
+                    }`}
+                  >
+                    {printPreviewOrder.mode === 'standard' &&
+                      (printPreviewOrder.order.discountAmount || 0) > 0 && (
+                        <>
+                          <div className="flex justify-between text-neutral-600">
+                            <span>소계금액:</span>
+                            <span className="tabular-nums">
+                              {formatMoney(
+                                printPreviewOrder.order.subtotalAmount ??
+                                  printPreviewOrder.order.items.reduce(
+                                    (s, it) => s + it.unitPrice * it.quantity,
+                                    0
+                                  ),
+                                currency
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-red-700 font-semibold">
+                            <span>
+                              할인금액
+                              {printPreviewOrder.order.discountType === 'percent' &&
+                              printPreviewOrder.order.discountValue
+                                ? ` (${printPreviewOrder.order.discountValue}%)`
+                                : ''}
+                              :
+                            </span>
+                            <span className="tabular-nums">
+                              -{formatMoney(printPreviewOrder.order.discountAmount || 0, currency)}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     <div className="flex justify-between text-sm font-bold">
                       <span>총 합계금액:</span>
                       <span className="tabular-nums">
@@ -913,13 +922,13 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         {printPreviewOrder.order.paymentStatus === 'paid' ? '결제완료' : '미결제'}
                       </span>
                     </div>
-                    {printPreviewOrder.order.dueDate && (
+                    {printPreviewOrder.mode === 'standard' && printPreviewOrder.order.dueDate && (
                       <div className="flex justify-between">
                         <span className="font-semibold">결제예정일:</span>
                         <span>{printPreviewOrder.order.dueDate}</span>
                       </div>
                     )}
-                    {printPreviewOrder.order.note && (
+                    {printPreviewOrder.mode === 'standard' && printPreviewOrder.order.note && (
                       <div className="pt-1">
                         <span className="font-semibold">비고: </span>
                         <span>{printPreviewOrder.order.note}</span>
@@ -937,7 +946,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             <div className="shrink-0 border-t border-border/60 bg-surface px-4 sm:px-5 py-3 pb-safe grid grid-cols-2 sm:flex sm:flex-wrap justify-end gap-2">
               <Button
                 tone="quiet"
-                onClick={() => handleDownloadInvoicePng(printPreviewOrder.order)}
+                onClick={() =>
+                  handleDownloadInvoicePng(
+                    printPreviewOrder.order,
+                    printPreviewOrder.mode !== 'standard'
+                  )
+                }
                 disabled={downloadingId === printPreviewOrder.order.id}
                 className="w-full sm:w-auto text-xs sm:text-sm"
               >

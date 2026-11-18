@@ -10,6 +10,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { Icon3D } from './Icon3D';
+import { ActivityLogPanel } from './ActivityLogPanel';
 import { Button, Surface } from './ui';
 import {
   cleanSaleNameDisplay,
@@ -26,6 +27,7 @@ import type {
   Order,
   PageId,
   Product,
+  SaleActivityLog,
   SalePresence,
   SaleProfile,
 } from '../types';
@@ -38,18 +40,28 @@ interface DashboardViewProps {
   isMasterAdmin?: boolean;
   salePresenceList?: SalePresence[];
   saleProfiles?: SaleProfile[];
+  saleActivityLogs?: SaleActivityLog[];
+  loadingActivityLogs?: boolean;
+  onClearExpiredActivityLogs?: () => Promise<number>;
+  autoClearedActivityCount?: number | null;
   onNavigate: (page: PageId) => void;
 }
 
-const PRESENCE_STALE_MS = 95_000;
+const PRESENCE_STALE_MS = 180_000;
 
 function getPresenceRefMs(p: SalePresence): number {
+  if (p.observedAtMs && p.observedAtMs > 0) {
+    return p.observedAtMs;
+  }
   const parsedLast = Date.parse(p.lastSeenAt || '');
   return Math.max(p.serverUpdatedMs || 0, Number.isFinite(parsedLast) ? parsedLast : 0);
 }
 
 function isPresenceSessionOnline(p: SalePresence, nowMs: number): boolean {
   if (!p.online) return false;
+  if (p.observedAtMs && p.observedAtMs > 0) {
+    return nowMs - p.observedAtMs <= PRESENCE_STALE_MS;
+  }
   const refMs = getPresenceRefMs(p);
   if (!refMs) return true;
   return nowMs - refMs <= PRESENCE_STALE_MS;
@@ -137,6 +149,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   isMasterAdmin = false,
   salePresenceList,
   saleProfiles,
+  saleActivityLogs,
+  loadingActivityLogs = false,
+  onClearExpiredActivityLogs,
+  autoClearedActivityCount = null,
   onNavigate,
 }) => {
   const { t, lang } = useI18n();
@@ -158,7 +174,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   useEffect(() => {
     if (!isMasterAdmin) return;
     setPresenceNowMs(Date.now());
-    const timer = window.setInterval(() => setPresenceNowMs(Date.now()), 15_000);
+    const timer = window.setInterval(() => setPresenceNowMs(Date.now()), 10_000);
     return () => window.clearInterval(timer);
   }, [isMasterAdmin]);
 
@@ -1559,6 +1575,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </Surface>
         </motion.div>
+      )}
+
+      {/* 3.6 Strictly Master-Admin Only: Sale Staff Chronological Activity Log */}
+      {isMasterAdmin && (
+        <ActivityLogPanel
+          logs={saleActivityLogs || []}
+          loading={loadingActivityLogs}
+          currency={currency}
+          onClearExpiredLogs={onClearExpiredActivityLogs}
+          autoClearedCount={autoClearedActivityCount}
+        />
       )}
 
       {/* 4. Middle Grid: Low Stock (<= 10) + Due Payment Customers Report */}

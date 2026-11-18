@@ -413,37 +413,21 @@ export async function tryBluetoothPrintKoreanReceipt(
     }
     const services = await server.getPrimaryServices();
     const lines = [
-      `=== DR-POS 주문 영수증 (${paperWidth}) ===`,
+      `=== DR-POS 영수증 (${paperWidth}) ===`,
       `주문번호: ${order.orderNumber}`,
       `주문일시: ${order.date} ${order.time}`,
       `고객성명: ${order.customerName}`,
       `전화번호: ${order.customerPhone || '-'}`,
       `배송주소: ${order.customerAddress || '-'}`,
-      `매장/그룹: ${order.storeName} / ${order.groupName}`,
-      `담당직원: ${order.staffName}`,
+      `매장 / 그룹: ${order.storeName || '-'} / ${order.groupName || '-'}`,
+      `담당직원: ${order.staffName || '-'}`,
       `--------------------------------`,
-      ...order.items.map(
-        (it) => `${it.productName} x${it.quantity}  ${formatMoney(it.unitPrice * it.quantity, currency)}`
-      ),
-      `--------------------------------`,
-      ...(order.discountAmount && order.discountAmount > 0
-        ? [
-            `소계금액: ${formatMoney(
-              order.subtotalAmount ?? order.totalAmount + order.discountAmount,
-              currency
-            )}`,
-            `할인금액: -${formatMoney(order.discountAmount, currency)}`,
-          ]
-        : []),
-      `합계금액: ${formatMoney(order.totalAmount, currency)}`,
+      `총 합계금액: ${formatMoney(order.totalAmount, currency)}`,
       `결제상태: ${order.paymentStatus === 'paid' ? '결제완료' : '미결제'}`,
-      order.dueDate ? `결제예정일: ${order.dueDate}` : '',
-      order.note ? `비고: ${order.note}` : '',
-      `감사합니다 - DR-POS`,
+      `--------------------------------`,
+      `이용해 주셔서 감사합니다 · DR-POS`,
       `\n\n\n`,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].join('\n');
 
     const encoder = new TextEncoder();
     const bytes = encoder.encode(lines);
@@ -526,7 +510,8 @@ function wrapCanvasText(
 export async function downloadOrderInvoiceAsPng(
   order: Order,
   currency: CurrencyCode,
-  paperWidth: '58mm' | '70mm' | '80mm' = '80mm'
+  paperWidth: '58mm' | '70mm' | '80mm' = '80mm',
+  bluetoothOnly = false
 ): Promise<void> {
   if (typeof document !== 'undefined' && 'fonts' in document) {
     try {
@@ -619,51 +604,53 @@ export async function downloadOrderInvoiceAsPng(
     drawInfoRow('고객성명:', order.customerName);
     drawInfoRow('전화번호:', order.customerPhone || '-');
     drawInfoRow('배송주소:', order.customerAddress || '-');
-    drawInfoRow('매장 / 그룹:', `${order.storeName} / ${order.groupName}`);
-    drawInfoRow('담당직원:', order.staffName);
+    drawInfoRow('매장 / 그룹:', `${order.storeName || '-'} / ${order.groupName || '-'}`);
+    drawInfoRow('담당직원:', order.staffName || '-');
 
-    // Items Section Divider & Table Header
-    y += 4;
-    drawDashedDivider(y);
-    y += 17;
-
-    if (draw) {
-      ctx.fillStyle = '#000000';
-      ctx.font = `700 11px ${fontFamily}`;
-      ctx.textAlign = 'left';
-      ctx.fillText('품목명 / 수량', padding, y);
-      ctx.textAlign = 'right';
-      ctx.fillText('금액', width - padding, y);
-    }
-    y += 18;
-
-    // Items List (wraps long product names cleanly across lines)
-    for (const item of order.items) {
-      const priceText = formatMoney(item.unitPrice * item.quantity, currency);
-      ctx.font = `500 11px ${fontFamily}`;
-      const priceWidth = ctx.measureText(priceText).width;
-      const maxTitleWidth = Math.max(88, contentWidth - priceWidth - 10);
-
-      ctx.font = `400 11px ${fontFamily}`;
-      const titleLines = wrapCanvasText(
-        ctx,
-        `${item.productName} × ${item.quantity}`,
-        maxTitleWidth
-      );
+    if (!bluetoothOnly) {
+      // Items Section Divider & Table Header
+      y += 4;
+      drawDashedDivider(y);
+      y += 17;
 
       if (draw) {
         ctx.fillStyle = '#000000';
-        ctx.font = `400 11px ${fontFamily}`;
+        ctx.font = `700 11px ${fontFamily}`;
         ctx.textAlign = 'left';
-        titleLines.forEach((line, idx) => {
-          ctx.fillText(line, padding, y + idx * 16);
-        });
-
-        ctx.font = `500 11px ${fontFamily}`;
+        ctx.fillText('품목명 / 수량', padding, y);
         ctx.textAlign = 'right';
-        ctx.fillText(priceText, width - padding, y);
+        ctx.fillText('금액', width - padding, y);
       }
-      y += titleLines.length * 16 + 3;
+      y += 18;
+
+      // Items List (wraps long product names cleanly across lines)
+      for (const item of order.items) {
+        const priceText = formatMoney(item.unitPrice * item.quantity, currency);
+        ctx.font = `500 11px ${fontFamily}`;
+        const priceWidth = ctx.measureText(priceText).width;
+        const maxTitleWidth = Math.max(88, contentWidth - priceWidth - 10);
+
+        ctx.font = `400 11px ${fontFamily}`;
+        const titleLines = wrapCanvasText(
+          ctx,
+          `${item.productName} × ${item.quantity}`,
+          maxTitleWidth
+        );
+
+        if (draw) {
+          ctx.fillStyle = '#000000';
+          ctx.font = `400 11px ${fontFamily}`;
+          ctx.textAlign = 'left';
+          titleLines.forEach((line, idx) => {
+            ctx.fillText(line, padding, y + idx * 16);
+          });
+
+          ctx.font = `500 11px ${fontFamily}`;
+          ctx.textAlign = 'right';
+          ctx.fillText(priceText, width - padding, y);
+        }
+        y += titleLines.length * 16 + 3;
+      }
     }
 
     y += 3;
@@ -671,7 +658,7 @@ export async function downloadOrderInvoiceAsPng(
     y += 18;
 
     // Totals & Payment Status (exact match to Bluetooth Korean Receipt)
-    if ((order.discountAmount || 0) > 0) {
+    if (!bluetoothOnly && (order.discountAmount || 0) > 0) {
       const subtotal =
         order.subtotalAmount ??
         order.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
@@ -722,7 +709,7 @@ export async function downloadOrderInvoiceAsPng(
     }
     y += 17;
 
-    if (order.dueDate) {
+    if (!bluetoothOnly && order.dueDate) {
       if (draw) {
         ctx.fillStyle = '#000000';
         ctx.font = `600 11px ${fontFamily}`;
@@ -735,7 +722,7 @@ export async function downloadOrderInvoiceAsPng(
       y += 17;
     }
 
-    if (order.note) {
+    if (!bluetoothOnly && order.note) {
       ctx.font = `400 11px ${fontFamily}`;
       const noteLines = wrapCanvasText(ctx, `비고: ${order.note}`, contentWidth);
       if (draw) {

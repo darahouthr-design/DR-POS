@@ -15,12 +15,17 @@ import {
   deleteProductFs,
   deleteStaffFs,
   fetchLatestWorkspaceSaleProfilesFromServer,
+  isTimestampExpired,
+  logSaleActivityFs,
   markSalePresenceOfflineFs,
+  purgeExpiredActivityLogsFs,
+  purgeExpiredStockLogsFs,
   reorderProductsFs,
   savePriceRecordFs,
   saveProductFs,
   saveStaffFs,
   seedWorkspaceIfNeeded,
+  subscribeToSaleActivityLogs,
   subscribeToSalePresence,
   subscribeToWorkspace,
   updateOrderFs,
@@ -106,6 +111,8 @@ import type {
   PriceTier,
   ProblemCustomer,
   Product,
+  SaleActivityActionType,
+  SaleActivityLog,
   SalePresence,
   SaleProfile,
   StaffMember,
@@ -114,9 +121,39 @@ import type {
   WorkspaceSettings,
 } from './types';
 
+const PRESENCE_DEVICE_KEY = 'drpos_presence_device_id_v1';
 const PRESENCE_ID_STORAGE_KEY = 'drpos_sale_presence_id';
 const PRESENCE_LOGIN_STORAGE_KEY = 'drpos_sale_logged_in_at';
 const PRESENCE_OWNER_STORAGE_KEY = 'drpos_sale_presence_owner';
+
+function hashSaleKeyAscii(input: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
+  }
+  return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+}
+
+function getOrCreateStableDeviceId(): string {
+  const randomId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.replace(
+    /[^a-zA-Z0-9]/g,
+    ''
+  );
+  try {
+    const existing = localStorage.getItem(PRESENCE_DEVICE_KEY);
+    if (existing && /^[a-zA-Z0-9]{6,40}$/.test(existing)) {
+      return existing;
+    }
+    localStorage.setItem(PRESENCE_DEVICE_KEY, randomId);
+    return randomId;
+  } catch {
+    return randomId;
+  }
+}
 
 function clearSalePresenceSessionKeys() {
   try {
@@ -130,23 +167,24 @@ function clearSalePresenceSessionKeys() {
 
 function getOrCreateTabSalePresence(ownerTag: string): { presenceId: string; loggedInAt: string } {
   const nowIso = new Date().toISOString();
-  const fallbackId = `pres_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  const deviceId = getOrCreateStableDeviceId();
+  const stablePresenceId = `sale_${deviceId}_${hashSaleKeyAscii(ownerTag)}`.slice(0, 120);
   try {
     const existingOwner = sessionStorage.getItem(PRESENCE_OWNER_STORAGE_KEY);
-    const existingId = sessionStorage.getItem(PRESENCE_ID_STORAGE_KEY);
     const existingLogin = sessionStorage.getItem(PRESENCE_LOGIN_STORAGE_KEY);
-    if (existingOwner === ownerTag && existingId && /^[a-zA-Z0-9_-]{6,120}$/.test(existingId)) {
+    if (existingOwner === ownerTag && existingLogin) {
+      sessionStorage.setItem(PRESENCE_ID_STORAGE_KEY, stablePresenceId);
       return {
-        presenceId: existingId,
-        loggedInAt: existingLogin || nowIso,
+        presenceId: stablePresenceId,
+        loggedInAt: existingLogin,
       };
     }
     sessionStorage.setItem(PRESENCE_OWNER_STORAGE_KEY, ownerTag);
-    sessionStorage.setItem(PRESENCE_ID_STORAGE_KEY, fallbackId);
+    sessionStorage.setItem(PRESENCE_ID_STORAGE_KEY, stablePresenceId);
     sessionStorage.setItem(PRESENCE_LOGIN_STORAGE_KEY, nowIso);
-    return { presenceId: fallbackId, loggedInAt: nowIso };
+    return { presenceId: stablePresenceId, loggedInAt: nowIso };
   } catch {
-    return { presenceId: fallbackId, loggedInAt: nowIso };
+    return { presenceId: stablePresenceId, loggedInAt: nowIso };
   }
 }
 
@@ -204,6 +242,10 @@ export function App() {
   const [licenseClockTick, setLicenseClockTick] = useState(0);
   const [todayDateKey, setTodayDateKey] = useState(() => todayLocalISO());
   const [salePresenceList, setSalePresenceList] = useState<SalePresence[]>([]);
+  const [saleActivityLogs, setSaleActivityLogs] = useState<SaleActivityLog[]>([]);
+  const [loadingActivityLogs, setLoadingActivityLogs] = useState<boolean>(false);
+  const [autoClearedStockCount, setAutoClearedStockCount] = useState<number | null>(null);
+  const [autoClearedActivityCount, setAutoClearedActivityCount] = useState<number | null>(null);
 
   // Image Zoom Lightbox state
   const [zoomState, setZoomState] = useState<{ url: string | null; title: string }>({
@@ -224,6 +266,10 @@ export function App() {
   const deletingAccountRef = useRef(false);
   const saleVerifyInFlightRef = useRef<string | null>(null);
   const serverVerifiedSaleProfilesRef = useRef<SaleProfile[] | null>(null);
+  const stockPurgeInFlightRef = useRef(false);
+  const stockPurgeLastRunRef = useRef(0);
+  const activityPurgeInFlightRef = useRef(false);
+  const activityPurgeLastRunRef = useRef(0);
 
   useEffect(() => {
     activeRoleRef.current = roleState;
@@ -262,6 +308,10 @@ export function App() {
         activeSalePresenceRef.current = null;
         clearSalePresenceSessionKeys();
         setSalePresenceList([]);
+        setAutoClearedStockCount(null);
+        setAutoClearedActivityCount(null);
+        stockPurgeLastRunRef.current = 0;
+        activityPurgeLastRunRef.current = 0;
         setFirebaseUser(null);
         setOperatorEmailState('');
         setRoleState({ role: 'admin' });
@@ -789,6 +839,17 @@ export function App() {
       session?.role !== 'sale' ||
       !session.saleName
     ) {
+      if (
+        activeSalePresenceRef.current &&
+        firebaseUser?.uid === activeSalePresenceRef.current.uid &&
+        session?.role !== 'sale' &&
+        !deletingAccountRef.current
+      ) {
+        void markSalePresenceOfflineFs(
+          activeSalePresenceRef.current.uid,
+          activeSalePresenceRef.current.presenceId
+        );
+      }
       activeSalePresenceRef.current = null;
       return;
     }
@@ -799,6 +860,10 @@ export function App() {
     if (!saleKey) return;
 
     const { presenceId, loggedInAt } = getOrCreateTabSalePresence(`${uid}:${saleKey}`);
+    const prev = activeSalePresenceRef.current;
+    if (prev && prev.uid === uid && prev.presenceId !== presenceId && !deletingAccountRef.current) {
+      void markSalePresenceOfflineFs(prev.uid, prev.presenceId);
+    }
     activeSalePresenceRef.current = { uid, presenceId };
 
     const ownerAdmin = (effectiveAdminEmail || masterEmailLowerComputed).trim().toLowerCase();
@@ -819,7 +884,7 @@ export function App() {
 
     pingOnline();
 
-    const heartbeat = window.setInterval(pingOnline, 25_000);
+    const heartbeat = window.setInterval(pingOnline, 15_000);
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         pingOnline();
@@ -842,9 +907,6 @@ export function App() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('pagehide', onUnload);
       window.removeEventListener('beforeunload', onUnload);
-      if (!deletingAccountRef.current && auth.currentUser?.uid === uid) {
-        void markSalePresenceOfflineFs(uid, presenceId);
-      }
     };
   }, [
     firebaseUser?.uid,
@@ -908,6 +970,192 @@ export function App() {
     return () => unsub();
   }, [firebaseUser?.uid, hasWorkspace, isMasterAdmin]);
 
+  // Real-time Sale Staff Activity Log Subscription (Strictly Master Admin ONLY)
+  useEffect(() => {
+    if (!firebaseUser?.uid || !hasWorkspace || !isMasterAdmin) {
+      setSaleActivityLogs([]);
+      setLoadingActivityLogs(false);
+      return;
+    }
+    setLoadingActivityLogs(true);
+    const unsub = subscribeToSaleActivityLogs(
+      firebaseUser.uid,
+      (items) => {
+        setSaleActivityLogs(items);
+        setLoadingActivityLogs(false);
+      },
+      () => {
+        setLoadingActivityLogs(false);
+      }
+    );
+    return () => unsub();
+  }, [firebaseUser?.uid, hasWorkspace, isMasterAdmin]);
+
+  const recordSaleActivity = useCallback(
+    (payload: {
+      actionType: SaleActivityActionType;
+      targetId?: string;
+      orderNumber?: string;
+      customerName?: string;
+      amount?: number;
+      summary: string;
+    }) => {
+      if (!firebaseUser?.uid || session?.role !== 'sale' || !session.saleName) return;
+      const saleDisplayName = session.saleName.trim();
+      const saleKey = normalizeSaleKey(saleDisplayName);
+      if (!saleKey) return;
+      void logSaleActivityFs(firebaseUser.uid, {
+        saleName: saleDisplayName,
+        saleKey,
+        ownerAdminEmail: (effectiveAdminEmail || masterEmailLowerComputed).trim().toLowerCase(),
+        actionType: payload.actionType,
+        targetId: payload.targetId,
+        orderNumber: payload.orderNumber,
+        customerName: payload.customerName,
+        amount: payload.amount,
+        summary: payload.summary,
+      });
+    },
+    [firebaseUser?.uid, session?.role, session?.saleName, effectiveAdminEmail, masterEmailLowerComputed]
+  );
+
+  const runStockLogAutoPurge = useCallback(
+    async (force = false): Promise<number> => {
+      const uid = firebaseUser?.uid;
+      if (
+        !uid ||
+        !hasWorkspace ||
+        session?.role === 'sale' ||
+        deletingAccountRef.current ||
+        auth.currentUser?.uid !== uid ||
+        stockPurgeInFlightRef.current
+      ) {
+        return 0;
+      }
+
+      const nowMs = Date.now();
+      const cooldownMs = activePageRef.current === 'stock-log' ? 60_000 : 15 * 60_000;
+      if (!force && nowMs - stockPurgeLastRunRef.current < cooldownMs) {
+        return 0;
+      }
+
+      const storageKey = `drpos_stock_autopurge_v1_${uid}`;
+      if (!force && activePageRef.current !== 'stock-log') {
+        try {
+          const lastSaved = Number(window.localStorage.getItem(storageKey) || '0');
+          if (Number.isFinite(lastSaved) && nowMs - lastSaved < 15 * 60_000) {
+            stockPurgeLastRunRef.current = lastSaved;
+            return 0;
+          }
+        } catch {
+          // Ignore storage restrictions
+        }
+      }
+
+      stockPurgeInFlightRef.current = true;
+      try {
+        const res = await purgeExpiredStockLogsFs(uid);
+        stockPurgeLastRunRef.current = Date.now();
+        try {
+          window.localStorage.setItem(storageKey, String(stockPurgeLastRunRef.current));
+        } catch {
+          // Ignore storage restrictions
+        }
+        if (res.deletedIds.length > 0) {
+          wsSubRef.current?.evictStockLogs(res.deletedIds);
+        }
+        if (res.deletedCount > 0) {
+          setAutoClearedStockCount(res.deletedCount);
+        }
+        return res.deletedCount;
+      } finally {
+        stockPurgeInFlightRef.current = false;
+      }
+    },
+    [firebaseUser?.uid, hasWorkspace, session?.role]
+  );
+
+  const runActivityLogAutoPurge = useCallback(
+    async (force = false): Promise<number> => {
+      const uid = firebaseUser?.uid;
+      if (
+        !uid ||
+        !hasWorkspace ||
+        !isMasterAdmin ||
+        deletingAccountRef.current ||
+        auth.currentUser?.uid !== uid ||
+        activityPurgeInFlightRef.current
+      ) {
+        return 0;
+      }
+
+      const nowMs = Date.now();
+      const cooldownMs = activePageRef.current === 'dashboard' ? 60_000 : 15 * 60_000;
+      if (!force && nowMs - activityPurgeLastRunRef.current < cooldownMs) {
+        return 0;
+      }
+
+      const storageKey = `drpos_activity_autopurge_v1_${uid}`;
+      if (!force && activePageRef.current !== 'dashboard') {
+        try {
+          const lastSaved = Number(window.localStorage.getItem(storageKey) || '0');
+          if (Number.isFinite(lastSaved) && nowMs - lastSaved < 15 * 60_000) {
+            activityPurgeLastRunRef.current = lastSaved;
+            return 0;
+          }
+        } catch {
+          // Ignore storage restrictions
+        }
+      }
+
+      activityPurgeInFlightRef.current = true;
+      try {
+        const res = await purgeExpiredActivityLogsFs(uid);
+        activityPurgeLastRunRef.current = Date.now();
+        try {
+          window.localStorage.setItem(storageKey, String(activityPurgeLastRunRef.current));
+        } catch {
+          // Ignore storage restrictions
+        }
+        if (res.deletedIds.length > 0) {
+          const rm = new Set(res.deletedIds);
+          setSaleActivityLogs((prev) => prev.filter((item) => !rm.has(item.id)));
+        }
+        if (res.deletedCount > 0) {
+          setAutoClearedActivityCount(res.deletedCount);
+        }
+        return res.deletedCount;
+      } finally {
+        activityPurgeInFlightRef.current = false;
+      }
+    },
+    [firebaseUser?.uid, hasWorkspace, isMasterAdmin]
+  );
+
+  // Automatic 30-day cleanup scheduler for Stock Logs (on load, on Stock Log page visit, and every 6 hours)
+  useEffect(() => {
+    if (!firebaseUser?.uid || !hasWorkspace || session?.role === 'sale') {
+      return;
+    }
+    void runStockLogAutoPurge(false);
+    const timer = window.setInterval(() => {
+      void runStockLogAutoPurge(false);
+    }, 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [firebaseUser?.uid, hasWorkspace, session?.role, activePage, runStockLogAutoPurge]);
+
+  // Automatic 30-day cleanup scheduler for Sale Activity Logs (Master Admin Dashboard + every 6 hours)
+  useEffect(() => {
+    if (!firebaseUser?.uid || !hasWorkspace || !isMasterAdmin) {
+      return;
+    }
+    void runActivityLogAutoPurge(false);
+    const timer = window.setInterval(() => {
+      void runActivityLogAutoPurge(false);
+    }, 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [firebaseUser?.uid, hasWorkspace, isMasterAdmin, activePage, runActivityLogAutoPurge]);
+
   // Strict Multi-Admin Isolation across ALL pages:
   // Admin 1 (Master) and Sub-Admins 2, 3... see ONLY their own Orders, Products, Staff,
   // Price Records, Stock Logs, and Sale Profiles. ONLY Problem Customers is shared across all Admins.
@@ -970,7 +1218,9 @@ export function App() {
     if (!workspace || !session) return [];
     if (session.role === 'sale') return [];
     return workspace.stockLogs.filter(
-      (l) => (l.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail
+      (l) =>
+        (l.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail &&
+        !isTimestampExpired(l.createdAt)
     );
   }, [workspace, session, effectiveAdminEmail]);
 
@@ -1565,6 +1815,12 @@ export function App() {
                 isMasterAdmin={isMasterAdmin}
                 salePresenceList={isMasterAdmin ? salePresenceList : undefined}
                 saleProfiles={isMasterAdmin ? workspace.settings.saleProfiles : undefined}
+                saleActivityLogs={isMasterAdmin ? saleActivityLogs : undefined}
+                loadingActivityLogs={isMasterAdmin ? loadingActivityLogs : false}
+                onClearExpiredActivityLogs={
+                  isMasterAdmin ? () => runActivityLogAutoPurge(true) : undefined
+                }
+                autoClearedActivityCount={isMasterAdmin ? autoClearedActivityCount : null}
                 onNavigate={setActivePage}
               />
             )}
@@ -1599,6 +1855,14 @@ export function App() {
                       visibleStaff,
                       visibleProducts
                     );
+                    recordSaleActivity({
+                      actionType: 'order_created',
+                      targetId: created.id,
+                      orderNumber: created.orderNumber,
+                      customerName: created.customerName,
+                      amount: created.totalAmount,
+                      summary: `${created.items.length} ${t.dashboard.itemsUnit} · ${created.storeName} / ${created.groupName} (${created.paymentStatus === 'paid' ? t.common.paid : t.common.unpaid})`,
+                    });
                     if (!notifiedOrderIdsRef.current.has(created.id)) {
                       notifiedOrderIdsRef.current.add(created.id);
                       playNewOrderNotification(
@@ -1609,9 +1873,19 @@ export function App() {
                     }
                   })
                 }
-                onAddProblemCustomer={async (payload) =>
-                  runFsMutation(() => addProblemCustomerFs(firebaseUser.uid, payload))
-                }
+                onAddProblemCustomer={async (payload) => {
+                  const ok = await runFsMutation(() =>
+                    addProblemCustomerFs(firebaseUser.uid, payload)
+                  );
+                  if (ok) {
+                    recordSaleActivity({
+                      actionType: 'problem_customer_added',
+                      customerName: payload.name,
+                      summary: `${payload.phone}${payload.note ? ` · ${payload.note}` : ''}`,
+                    });
+                  }
+                  return ok;
+                }}
               />
             )}
 
@@ -1629,8 +1903,9 @@ export function App() {
                 loadingMoreOrders={loadingMoreOrders}
                 onLoadMoreOrders={handleLoadMoreOrders}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
-                onUpdateOrder={async (id, payload) =>
-                  runFsMutation(() =>
+                onUpdateOrder={async (id, payload) => {
+                  const targetOrder = visibleOrders.find((o) => o.id === id);
+                  const ok = await runFsMutation(() =>
                     updateOrderFs(
                       firebaseUser.uid,
                       id,
@@ -1638,18 +1913,70 @@ export function App() {
                         ? { ...payload, staffName: session.saleName }
                         : payload
                     )
-                  )
-                }
+                  );
+                  if (ok) {
+                    const isPaymentOnly =
+                      !Array.isArray(payload.items) &&
+                      payload.customerName === undefined &&
+                      payload.customerPhone === undefined &&
+                      payload.customerAddress === undefined &&
+                      payload.storeName === undefined &&
+                      payload.groupName === undefined &&
+                      payload.note === undefined &&
+                      (payload.paymentStatus !== undefined || payload.dueDate !== undefined);
+                    const nextStatus = payload.paymentStatus ?? targetOrder?.paymentStatus;
+                    const statusText =
+                      nextStatus === 'paid'
+                        ? t.common.paid
+                        : nextStatus === 'unpaid'
+                        ? t.common.unpaid
+                        : '';
+                    recordSaleActivity({
+                      actionType: isPaymentOnly ? 'payment_updated' : 'order_updated',
+                      targetId: id,
+                      orderNumber: targetOrder?.orderNumber,
+                      customerName:
+                        (payload.customerName as string | undefined) || targetOrder?.customerName,
+                      amount:
+                        typeof payload.totalAmount === 'number'
+                          ? payload.totalAmount
+                          : targetOrder?.totalAmount,
+                      summary: isPaymentOnly
+                        ? `${statusText}${payload.dueDate ? ` · ${payload.dueDate}` : ''}`
+                        : `${targetOrder?.storeName || '-'} / ${targetOrder?.groupName || '-'}${statusText ? ` (${statusText})` : ''}`,
+                    });
+                  }
+                  return ok;
+                }}
                 onDeleteOrder={async (id) => {
+                  const targetOrder = visibleOrders.find((o) => o.id === id);
                   const ok = await runFsMutation(() => deleteOrderFs(firebaseUser.uid, id));
-                  if (ok) wsSubRef.current?.evictOrders([id]);
+                  if (ok) {
+                    wsSubRef.current?.evictOrders([id]);
+                    recordSaleActivity({
+                      actionType: 'order_deleted',
+                      targetId: id,
+                      orderNumber: targetOrder?.orderNumber,
+                      customerName: targetOrder?.customerName,
+                      amount: targetOrder?.totalAmount,
+                      summary: targetOrder
+                        ? `${targetOrder.storeName} / ${targetOrder.groupName}`
+                        : id,
+                    });
+                  }
                   return ok;
                 }}
                 onDeleteAllOrders={async (ids) => {
                   const ok = await runFsMutation(() =>
                     deleteOrdersNoRestoreFs(firebaseUser.uid, ids)
                   );
-                  if (ok) wsSubRef.current?.evictOrders(ids);
+                  if (ok) {
+                    wsSubRef.current?.evictOrders(ids);
+                    recordSaleActivity({
+                      actionType: 'orders_bulk_deleted',
+                      summary: `${ids.length} ${t.dashboard.invoicesUnit}`,
+                    });
+                  }
                   return ok;
                 }}
               />
@@ -1717,9 +2044,24 @@ export function App() {
                 orders={visibleOrders}
                 currency={currency}
                 readOnly={isExpired}
-                onUpdateOrder={async (id, payload) =>
-                  runFsMutation(() => updateOrderFs(firebaseUser.uid, id, payload))
-                }
+                onUpdateOrder={async (id, payload) => {
+                  const targetOrder = visibleOrders.find((o) => o.id === id);
+                  const ok = await runFsMutation(() => updateOrderFs(firebaseUser.uid, id, payload));
+                  if (ok) {
+                    const nextStatus = payload.paymentStatus ?? targetOrder?.paymentStatus;
+                    const statusText =
+                      nextStatus === 'paid' ? t.common.paid : t.common.unpaid;
+                    recordSaleActivity({
+                      actionType: 'payment_updated',
+                      targetId: id,
+                      orderNumber: targetOrder?.orderNumber,
+                      customerName: targetOrder?.customerName,
+                      amount: targetOrder?.totalAmount,
+                      summary: `${statusText}${payload.dueDate ? ` · ${payload.dueDate}` : ''}`,
+                    });
+                  }
+                  return ok;
+                }}
               />
             )}
 
@@ -1760,6 +2102,8 @@ export function App() {
                 hasMoreStockLogs={pagination.hasMoreStockLogs}
                 loadingMoreStockLogs={loadingMoreStockLogs}
                 onLoadMoreStockLogs={handleLoadMoreStockLogs}
+                onClearExpiredStockLogs={() => runStockLogAutoPurge(true)}
+                autoClearedCount={autoClearedStockCount}
                 onAddStock={async (productId, addedQuantity) =>
                   runFsMutation(() =>
                     addStockLogFs(firebaseUser.uid, productId, addedQuantity, activeAdminEmail)

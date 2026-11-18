@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Plus, Trash2, Upload, CheckCircle2, X, ChevronDown, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Upload, CheckCircle2, X, ChevronDown, Loader2, Clock3 } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import {
@@ -1417,6 +1417,8 @@ export const StockLogView: React.FC<{
   loadingMoreStockLogs?: boolean;
   onLoadMoreStockLogs?: () => Promise<void>;
   onAddStock: (productId: string, addedQuantity: number) => Promise<boolean>;
+  onClearExpiredStockLogs?: () => Promise<number>;
+  autoClearedCount?: number | null;
 }> = ({
   stockLogs,
   products,
@@ -1425,11 +1427,15 @@ export const StockLogView: React.FC<{
   loadingMoreStockLogs = false,
   onLoadMoreStockLogs,
   onAddStock,
+  onClearExpiredStockLogs,
+  autoClearedCount = null,
 }) => {
   const { t } = useI18n();
   const [selectedProdId, setSelectedProdId] = useState(products[0]?.id || '');
   const [qty, setQty] = useState('10');
   const [busy, setBusy] = useState(false);
+  const [clearingExpired, setClearingExpired] = useState(false);
+  const [clearFeedback, setClearFeedback] = useState<{ count: number } | null>(null);
   const [visibleDomCount, setVisibleDomCount] = useState(STOCK_LOG_DOM_STEP);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -1478,16 +1484,61 @@ export const StockLogView: React.FC<{
   return (
     <div className="space-y-4 sm:space-y-6">
       <Surface className="p-4 sm:p-6 space-y-4">
-        <div className="flex items-center gap-3 border-b border-border/50 pb-4">
-          <Icon3D name="stock-log" size={36} />
-          <div className="min-w-0">
-            <h2 className="text-sm sm:text-base font-semibold text-foreground">
-              {t.stockLog.title}
-            </h2>
-            <p className="text-xs text-muted leading-snug">
-              {t.stockLog.subtitle}
-            </p>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border/50 pb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Icon3D name="stock-log" size={36} />
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-semibold text-foreground">
+                {t.stockLog.title}
+              </h2>
+              <p className="text-xs text-muted leading-snug">
+                {t.stockLog.subtitle}
+              </p>
+            </div>
           </div>
+
+          {onClearExpiredStockLogs && (
+            <Button
+              tone="quiet"
+              disabled={readOnly || clearingExpired}
+              onClick={async () => {
+                setClearingExpired(true);
+                try {
+                  const deleted = await onClearExpiredStockLogs();
+                  setClearFeedback({ count: deleted });
+                } finally {
+                  setClearingExpired(false);
+                }
+              }}
+              className="w-full lg:w-auto min-h-9 px-3 text-xs whitespace-nowrap shrink-0"
+            >
+              {clearingExpired ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 text-muted shrink-0" />
+              )}
+              <span>{t.stockLog.autoClearBtn}</span>
+            </Button>
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-muted">
+          <p className="inline-flex items-start sm:items-center gap-1.5 leading-snug">
+            <Clock3 className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
+            <span>{t.stockLog.autoClearNote}</span>
+          </p>
+          {(clearFeedback !== null || (typeof autoClearedCount === 'number' && autoClearedCount > 0)) && (
+            <p className="inline-flex items-center gap-1.5 font-medium text-primary shrink-0 tabular-nums">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                {clearFeedback !== null
+                  ? clearFeedback.count > 0
+                    ? t.stockLog.autoClearedResult.replace('{count}', String(clearFeedback.count))
+                    : t.stockLog.autoClearNone
+                  : t.stockLog.autoClearedResult.replace('{count}', String(autoClearedCount))}
+              </span>
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">

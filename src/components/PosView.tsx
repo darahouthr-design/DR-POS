@@ -77,8 +77,12 @@ export const PosView: React.FC<PosViewProps> = ({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'items' | 'form'>('items');
+  const [mobileKeyboardOpen, setMobileKeyboardOpen] = useState(false);
   const cartDrawerRef = useRef<HTMLDivElement | null>(null);
   const cartSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const cartBodyRef = useRef<HTMLDivElement | null>(null);
+  const vvBaselineHeightRef = useRef<number>(0);
+  const vvPrevWidthRef = useRef<number>(0);
 
   // POS Checkout Form State
   const [date, setDate] = useState(todayLocalISO());
@@ -125,14 +129,24 @@ export const PosView: React.FC<PosViewProps> = ({
     }
   }, [readOnly, t.pos.expiredError]);
 
-  // Mobile keyboard & visualViewport guard: keep POS Form Cart properly sized while keyboard is open
-  // and restore original scale/size automatically when user taps "Done" to dismiss keyboard.
+  // Mobile & Tablet virtual keyboard visualViewport pinning:
+  // Keeps the entire POS Form Cart strictly above the on-screen keyboard on iOS & Android
+  // and keeps focused form inputs scrolled cleanly in the visible center area.
   useEffect(() => {
-    if (!cartDrawerOpen) return;
+    if (!cartDrawerOpen) {
+      setMobileKeyboardOpen(false);
+      return;
+    }
+
+    const vv = window.visualViewport;
+    const initialWinScrollX = window.scrollX;
+    const initialWinScrollY = window.scrollY;
+    vvBaselineHeightRef.current = Math.max(window.innerHeight, vv?.height || 0);
+    vvPrevWidthRef.current = vv?.width || window.innerWidth;
 
     const resetViewportZoomIfNeeded = () => {
-      const vv = window.visualViewport;
-      if (vv && vv.scale > 1.01) {
+      const curVv = window.visualViewport;
+      if (curVv && curVv.scale > 1.01) {
         const meta = document.querySelector('meta[name="viewport"]');
         if (meta) {
           const prevContent = meta.getAttribute('content') || '';
@@ -147,29 +161,117 @@ export const PosView: React.FC<PosViewProps> = ({
           });
         }
       }
-      if (window.scrollX !== 0 || window.scrollY !== 0) {
-        window.scrollTo(0, 0);
+      if (window.scrollX !== initialWinScrollX || window.scrollY !== initialWinScrollY) {
+        window.scrollTo(initialWinScrollX, initialWinScrollY);
       }
+    };
+
+    const scrollActiveFieldInsideModal = (smooth = true) => {
+      const bodyEl = cartBodyRef.current;
+      const active = document.activeElement as HTMLElement | null;
+      if (!bodyEl || !active || !bodyEl.contains(active)) return;
+      if (!['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)) return;
+      const targetEl = (active.closest('label') as HTMLElement | null) || active;
+      const bodyRect = bodyEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      if (bodyRect.height <= 0) return;
+
+      const offsetInBody = targetRect.top - bodyRect.top;
+      const desiredTopInBody = Math.max(10, Math.min(44, (bodyRect.height - targetRect.height) * 0.28));
+      const nextScrollTop = Math.max(0, bodyEl.scrollTop + offsetInBody - desiredTopInBody);
+      bodyEl.scrollTo({
+        top: nextScrollTop,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
     };
 
     const syncDrawerToVisualViewport = () => {
+      const drawerEl = cartDrawerRef.current;
       const surfaceEl = cartSurfaceRef.current;
-      const vv = window.visualViewport;
-      if (!surfaceEl || !vv) return;
-      const isKeyboardLikelyOpen = vv.height < window.innerHeight * 0.86;
-      if (isKeyboardLikelyOpen) {
-        const edgeGap = window.innerWidth >= 640 ? 24 : 8;
+      if (!drawerEl || !surfaceEl) return;
+
+      const curVv = window.visualViewport;
+      const vvWidth = curVv ? curVv.width : window.innerWidth;
+      const vvHeight = curVv ? curVv.height : window.innerHeight;
+      const vvTop = curVv ? curVv.offsetTop : 0;
+
+      if (Math.abs(vvWidth - vvPrevWidthRef.current) > 80) {
+        vvPrevWidthRef.current = vvWidth;
+        vvBaselineHeightRef.current = Math.max(window.innerHeight, vvHeight);
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const activeType =
+        active?.tagName === 'INPUT' ? ((active as HTMLInputElement).type || '').toLowerCase() : '';
+      const isEditingTextControl = Boolean(
+        active &&
+          drawerEl.contains(active) &&
+          (active.tagName === 'TEXTAREA' ||
+            (active.tagName === 'INPUT' &&
+              !['checkbox', 'radio', 'button', 'submit', 'date'].includes(activeType)))
+      );
+
+      if (!isEditingTextControl || vvHeight >= window.innerHeight * 0.94) {
+        vvBaselineHeightRef.current = Math.max(
+          vvBaselineHeightRef.current,
+          window.innerHeight,
+          vvHeight
+        );
+      }
+
+      const isNarrowOrTouch =
+        vvWidth < 1024 ||
+        (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches) ||
+        (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+      const shrinkFromWindow = vvHeight < window.innerHeight * 0.85;
+      const shrinkFromBase =
+        vvBaselineHeightRef.current > 0 && vvHeight < vvBaselineHeightRef.current * 0.82;
+      const keyboardOpen =
+        isNarrowOrTouch &&
+        (shrinkFromWindow || shrinkFromBase || (isEditingTextControl && vvHeight < 580));
+
+      setMobileKeyboardOpen(keyboardOpen);
+
+      if (keyboardOpen) {
+        drawerEl.style.top = `${Math.max(0, Math.round(vvTop))}px`;
+        drawerEl.style.height = `${Math.max(220, Math.round(vvHeight))}px`;
+        drawerEl.style.bottom = 'auto';
+        const edgeGap = vvWidth >= 640 ? 12 : 4;
         surfaceEl.style.setProperty(
           '--pos-vv-max-h',
-          `${Math.max(240, Math.floor(vv.height - edgeGap))}px`
+          `${Math.max(200, Math.floor(vvHeight - edgeGap))}px`
         );
+        window.requestAnimationFrame(() => scrollActiveFieldInsideModal(false));
       } else {
+        drawerEl.style.removeProperty('top');
+        drawerEl.style.removeProperty('height');
+        drawerEl.style.removeProperty('bottom');
         surfaceEl.style.removeProperty('--pos-vv-max-h');
-        resetViewportZoomIfNeeded();
+        if (!isEditingTextControl) {
+          resetViewportZoomIfNeeded();
+        }
       }
     };
 
-    let blurTimer: number | null = null;
+    let focusTimer1 = 0;
+    let focusTimer2 = 0;
+    let blurTimer = 0;
+
+    const handleFocusIn = () => {
+      if (blurTimer) window.clearTimeout(blurTimer);
+      window.clearTimeout(focusTimer1);
+      window.clearTimeout(focusTimer2);
+      syncDrawerToVisualViewport();
+      focusTimer1 = window.setTimeout(() => {
+        syncDrawerToVisualViewport();
+        scrollActiveFieldInsideModal(true);
+      }, 90);
+      focusTimer2 = window.setTimeout(() => {
+        syncDrawerToVisualViewport();
+        scrollActiveFieldInsideModal(true);
+      }, 320);
+    };
+
     const handleFocusOut = () => {
       if (blurTimer) window.clearTimeout(blurTimer);
       blurTimer = window.setTimeout(() => {
@@ -179,25 +281,43 @@ export const PosView: React.FC<PosViewProps> = ({
           Boolean(cartDrawerRef.current?.contains(active)) &&
           ['INPUT', 'SELECT', 'TEXTAREA'].includes(active!.tagName);
         if (!stillEditingInsideDrawer) {
+          setMobileKeyboardOpen(false);
+          const drawerEl = cartDrawerRef.current;
+          if (drawerEl) {
+            drawerEl.style.removeProperty('top');
+            drawerEl.style.removeProperty('height');
+            drawerEl.style.removeProperty('bottom');
+          }
           cartSurfaceRef.current?.style.removeProperty('--pos-vv-max-h');
           resetViewportZoomIfNeeded();
         }
-      }, 120);
+      }, 140);
     };
 
     const drawerEl = cartDrawerRef.current;
-    const vv = window.visualViewport;
     syncDrawerToVisualViewport();
     vv?.addEventListener('resize', syncDrawerToVisualViewport);
     vv?.addEventListener('scroll', syncDrawerToVisualViewport);
+    window.addEventListener('resize', syncDrawerToVisualViewport);
+    drawerEl?.addEventListener('focusin', handleFocusIn);
     drawerEl?.addEventListener('focusout', handleFocusOut);
 
     return () => {
-      if (blurTimer) window.clearTimeout(blurTimer);
+      window.clearTimeout(focusTimer1);
+      window.clearTimeout(focusTimer2);
+      window.clearTimeout(blurTimer);
       vv?.removeEventListener('resize', syncDrawerToVisualViewport);
       vv?.removeEventListener('scroll', syncDrawerToVisualViewport);
+      window.removeEventListener('resize', syncDrawerToVisualViewport);
+      drawerEl?.removeEventListener('focusin', handleFocusIn);
       drawerEl?.removeEventListener('focusout', handleFocusOut);
+      if (drawerEl) {
+        drawerEl.style.removeProperty('top');
+        drawerEl.style.removeProperty('height');
+        drawerEl.style.removeProperty('bottom');
+      }
       cartSurfaceRef.current?.style.removeProperty('--pos-vv-max-h');
+      setMobileKeyboardOpen(false);
       resetViewportZoomIfNeeded();
     };
   }, [cartDrawerOpen]);
@@ -1140,7 +1260,11 @@ export const PosView: React.FC<PosViewProps> = ({
             role="dialog"
             aria-modal="true"
             aria-label={t.pos.cartModalAria}
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-foreground/60 p-0 sm:p-5"
+            className={`fixed inset-x-0 top-0 bottom-0 z-50 flex justify-center bg-foreground/60 ${
+              mobileKeyboardOpen
+                ? 'items-end p-0 sm:p-2'
+                : 'items-end sm:items-center p-0 sm:p-5'
+            }`}
             onClick={() => setCartDrawerOpen(false)}
           >
             <motion.div
@@ -1167,85 +1291,103 @@ export const PosView: React.FC<PosViewProps> = ({
                 </div>
 
                 {/* Mobile Bottom-Sheet Drag Handle */}
-                <div className="relative z-10 sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
-                  <div className="w-10 h-1.5 rounded-full bg-border" />
-                </div>
+                {!mobileKeyboardOpen && (
+                  <div className="relative z-10 sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+                    <div className="w-10 h-1.5 rounded-full bg-border" />
+                  </div>
+                )}
 
                 {/* Sticky Sheet Header & Animated 2-Step Segmented Tabs */}
                 <div className="relative z-10 border-b border-border/60 bg-surface shrink-0">
-                  <div className="flex items-center justify-between gap-2.5 px-4 sm:px-6 py-3">
+                  <div
+                    className={`flex items-center justify-between gap-2.5 px-4 sm:px-6 ${
+                      mobileKeyboardOpen ? 'py-2' : 'py-3'
+                    }`}
+                  >
                     <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-                      <Icon3D name="cart" size={30} />
+                      {!mobileKeyboardOpen && <Icon3D name="cart" size={30} />}
                       <div className="min-w-0">
                         <h3 className="text-sm sm:text-base font-semibold text-foreground truncate leading-snug">
                           {checkoutStep === 'items'
                             ? `${t.pos.cartStepItemsTitle} (${totalItems} ${t.pos.mobileItemsUnit})`
                             : t.pos.cartStepFormTitle}
                         </h3>
-                        <p className="text-xs text-muted tabular-nums">
-                          {t.pos.totalAmountLabel}{' '}
-                          <strong className="text-primary">
-                            {formatMoney(cartFinalTotal, currency)}
-                          </strong>
-                          {discountAmount > 0 && (
-                            <span className="ml-1.5 text-danger">
-                              ({t.pos.discountLabel} -{formatMoney(discountAmount, currency)})
-                            </span>
-                          )}
-                        </p>
+                        {!mobileKeyboardOpen && (
+                          <p className="text-xs text-muted tabular-nums">
+                            {t.pos.totalAmountLabel}{' '}
+                            <strong className="text-primary">
+                              {formatMoney(cartFinalTotal, currency)}
+                            </strong>
+                            {discountAmount > 0 && (
+                              <span className="ml-1.5 text-danger">
+                                ({t.pos.discountLabel} -{formatMoney(discountAmount, currency)})
+                              </span>
+                            )}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <Button
                       tone="quiet"
                       onClick={() => setCartDrawerOpen(false)}
-                      className="min-h-11 min-w-11 px-3 shrink-0"
+                      className={`${
+                        mobileKeyboardOpen ? 'min-h-9 min-w-9 px-2.5' : 'min-h-11 min-w-11 px-3'
+                      } shrink-0`}
                       aria-label={t.common.close}
                     >
-                      <X className="h-4 w-4" /> <span className="hidden sm:inline">{t.common.close}</span>
+                      <X className="h-4 w-4" />{' '}
+                      {!mobileKeyboardOpen && (
+                        <span className="hidden sm:inline">{t.common.close}</span>
+                      )}
                     </Button>
                   </div>
 
-                  {/* Animated Pill Step Switcher */}
-                  <div className="px-4 sm:px-6 pb-3">
-                    <div className="grid grid-cols-2 gap-1.5 p-1 rounded-control border border-border/75 bg-background/85">
-                      {([
-                        { id: 'items' as const, label: `${t.pos.tabItems} (${totalItems})`, disabled: false },
-                        {
-                          id: 'form' as const,
-                          label: t.pos.tabForm,
-                          disabled: liveCart.length === 0 || hasStockBlocker,
-                        },
-                      ]).map((tab) => {
-                        const active = checkoutStep === tab.id;
-                        return (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            disabled={tab.disabled}
-                            onClick={() => setCheckoutStep(tab.id)}
-                            className={`relative min-h-10 rounded-control px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer truncate disabled:opacity-45 disabled:cursor-not-allowed ${
-                              active
-                                ? 'text-primary-foreground'
-                                : 'text-muted hover:text-foreground'
-                            }`}
-                          >
-                            {active && (
-                              <motion.span
-                                layoutId="pos-cart-active-step"
-                                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                                className="absolute inset-0 rounded-control bg-primary shadow-xs -z-0"
-                              />
-                            )}
-                            <span className="relative z-10">{tab.label}</span>
-                          </button>
-                        );
-                      })}
+                  {/* Animated Pill Step Switcher (Hidden briefly while keyboard is open to maximize form visibility) */}
+                  {!mobileKeyboardOpen && (
+                    <div className="px-4 sm:px-6 pb-3">
+                      <div className="grid grid-cols-2 gap-1.5 p-1 rounded-control border border-border/75 bg-background/85">
+                        {([
+                          { id: 'items' as const, label: `${t.pos.tabItems} (${totalItems})`, disabled: false },
+                          {
+                            id: 'form' as const,
+                            label: t.pos.tabForm,
+                            disabled: liveCart.length === 0 || hasStockBlocker,
+                          },
+                        ]).map((tab) => {
+                          const active = checkoutStep === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              disabled={tab.disabled}
+                              onClick={() => setCheckoutStep(tab.id)}
+                              className={`relative min-h-10 rounded-control px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer truncate disabled:opacity-45 disabled:cursor-not-allowed ${
+                                active
+                                  ? 'text-primary-foreground'
+                                  : 'text-muted hover:text-foreground'
+                              }`}
+                            >
+                              {active && (
+                                <motion.span
+                                  layoutId="pos-cart-active-step"
+                                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                                  className="absolute inset-0 rounded-control bg-primary shadow-xs -z-0"
+                                />
+                              )}
+                              <span className="relative z-10">{tab.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Scrollable Body */}
-                <div className="relative z-10 flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+                <div
+                  ref={cartBodyRef}
+                  className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 space-y-4"
+                >
                   {readOnly && (
                     <div
                       role="alert"
@@ -2049,7 +2191,11 @@ export const PosView: React.FC<PosViewProps> = ({
                 </div>
 
                 {/* Sticky Sheet Footer */}
-                <div className="relative z-10 shrink-0 border-t border-border/60 bg-surface px-4 sm:px-6 py-3 pb-safe">
+                <div
+                  className={`relative z-10 shrink-0 border-t border-border/60 bg-surface px-4 sm:px-6 ${
+                    mobileKeyboardOpen ? 'py-2' : 'py-3 pb-safe'
+                  }`}
+                >
                   {checkoutStep === 'items' ? (
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -2067,6 +2213,35 @@ export const PosView: React.FC<PosViewProps> = ({
                         className="px-5 shrink-0"
                       >
                         {t.pos.nextStepBtn}
+                      </Button>
+                    </div>
+                  ) : mobileKeyboardOpen ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        tone="quiet"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (document.activeElement instanceof HTMLElement) {
+                            document.activeElement.blur();
+                          }
+                        }}
+                        className="min-h-10 px-3 text-xs shrink-0"
+                      >
+                        {t.pos.hideKeyboardBtn}
+                      </Button>
+                      <Button
+                        type="submit"
+                        form="pos-checkout-form"
+                        tone="primary"
+                        disabled={readOnly || submitting || liveCart.length === 0 || hasStockBlocker}
+                        className="min-h-10 flex-1 py-2 text-xs font-semibold truncate"
+                      >
+                        <Icon3D name="check" size={16} />
+                        <span className="truncate tabular-nums">
+                          {submitting
+                            ? t.common.saving
+                            : `${t.pos.completePurchaseBtn} · ${formatMoney(cartFinalTotal, currency)}`}
+                        </span>
                       </Button>
                     </div>
                   ) : (
