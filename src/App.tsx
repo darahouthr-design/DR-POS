@@ -1,6 +1,14 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { AlertTriangle, ArrowLeftRight, Menu, Send, Volume2, VolumeX, Wifi, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  Menu,
+  Send,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { deleteUser, onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { auth, setOrLinkCurrentAdminPassword } from './firebase';
 import {
@@ -246,6 +254,9 @@ export function App() {
   const [loadingActivityLogs, setLoadingActivityLogs] = useState<boolean>(false);
   const [autoClearedStockCount, setAutoClearedStockCount] = useState<number | null>(null);
   const [autoClearedActivityCount, setAutoClearedActivityCount] = useState<number | null>(null);
+  const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
 
   // Image Zoom Lightbox state
   const [zoomState, setZoomState] = useState<{ url: string | null; title: string }>({
@@ -287,6 +298,62 @@ export function App() {
       document.documentElement.classList.toggle('dark', Boolean(workspace.settings.darkMode));
     }
   }, [workspace]);
+
+  const verifyNetworkConnectivity = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setIsNetworkOnline(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4500);
+    try {
+      const res = await fetch(`/manifest.webmanifest?ping=${Date.now()}`, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      setIsNetworkOnline(res.ok || res.status < 500);
+    } catch {
+      setIsNetworkOnline(false);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleOffline = () => {
+      setIsNetworkOnline(false);
+    };
+    const handleOnline = () => {
+      setIsNetworkOnline(true);
+      void verifyNetworkConnectivity();
+    };
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void verifyNetworkConnectivity();
+      }
+    };
+
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    void verifyNetworkConnectivity();
+    const pollTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void verifyNetworkConnectivity();
+      }
+    }, 25_000);
+
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.clearInterval(pollTimer);
+    };
+  }, [verifyNetworkConnectivity]);
 
   // Persistent Firebase Authentication + Realtime Multi-Device Firestore Sync
   useEffect(() => {
@@ -1401,8 +1468,17 @@ export function App() {
             )}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-muted">
-                <span className="flex items-center gap-1.5">
-                  <Wifi className="h-3.5 w-3.5 text-primary" /> Realtime Sync
+                <span
+                  className={`flex items-center gap-1.5 font-medium ${
+                    isNetworkOnline ? 'text-success' : 'text-danger'
+                  }`}
+                >
+                  {isNetworkOnline ? (
+                    <Wifi className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  )}
+                  {isNetworkOnline ? 'Realtime Sync' : 'Offline'}
                 </span>
                 <span className="font-semibold text-primary">
                   {session.role === 'sale'
@@ -1489,8 +1565,17 @@ export function App() {
                   )}
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-muted">
-                      <span className="flex items-center gap-1.5">
-                        <Wifi className="h-3.5 w-3.5 text-primary" /> Realtime Sync
+                      <span
+                        className={`flex items-center gap-1.5 font-medium ${
+                          isNetworkOnline ? 'text-success' : 'text-danger'
+                        }`}
+                      >
+                        {isNetworkOnline ? (
+                          <Wifi className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        )}
+                        {isNetworkOnline ? 'Realtime Sync' : 'Offline'}
                       </span>
                       <span className="font-semibold text-primary">
                         {session.role === 'sale'
@@ -1565,41 +1650,39 @@ export function App() {
                 </div>
               )}
 
-              {/* Sound Notification Quick Toggle (Admin only — User/Sale cannot alter settings) */}
-              {!isSaleRole && (
-                <Button
-                  tone="quiet"
-                  disabled={isExpired}
-                  onClick={() =>
-                    runFsMutation(() =>
-                      updateSettingsFs(firebaseUser.uid, workspace.settings, {
-                        soundEnabled: !workspace.settings.soundEnabled,
-                      })
-                    )
-                  }
-                  className="min-h-10 h-10 min-w-10 px-2.5 sm:px-3"
-                  title={t.header.toggleSoundTitle}
-                  aria-label={t.header.toggleSoundTitle}
-                >
-                  {workspace.settings.soundEnabled ? (
-                    <Volume2 className="h-4 w-4 text-primary" />
-                  ) : (
-                    <VolumeX className="h-4 w-4 text-muted" />
-                  )}
-                </Button>
-              )}
+              {/* Accurate Online / Offline Connectivity Indicator */}
+              <button
+                type="button"
+                role="status"
+                aria-live="polite"
+                onClick={() => void verifyNetworkConnectivity()}
+                title={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
+                aria-label={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
+                className={`inline-flex items-center justify-center gap-1.5 w-[82px] sm:w-[92px] h-10 min-h-[40px] px-0 py-0 rounded-control border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                  isNetworkOnline
+                    ? 'border-success/35 bg-success/10 text-success hover:bg-success/15'
+                    : 'border-danger/45 bg-danger/12 text-danger hover:bg-danger/18'
+                }`}
+              >
+                {isNetworkOnline ? (
+                  <Wifi className="h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : (
+                  <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                <span>{isNetworkOnline ? t.header.networkOnline : t.header.networkOffline}</span>
+              </button>
 
               {/* Bell Notification Icon */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <Button
                   tone="quiet"
                   onClick={() => setBellOpen((v) => !v)}
-                  className="min-h-10 h-10 px-2.5 sm:px-3 relative"
+                  className="w-[82px] sm:w-[92px] h-10 min-h-[40px]! px-0! sm:px-0! py-0! relative shrink-0 whitespace-nowrap"
                   aria-label={t.header.notifications}
                 >
                   <Icon3D name="bell" size={22} />
                   {totalBellAlerts > 0 && (
-                    <span className="ml-0.5 text-xs font-bold tabular-nums text-danger">
+                    <span className="text-xs font-bold tabular-nums text-danger">
                       {totalBellAlerts}
                     </span>
                   )}
@@ -1734,16 +1817,6 @@ export function App() {
                   )}
                 </AnimatePresence>
               </div>
-
-              {activePage !== 'pos' && (isSaleRole || !blockedPages.includes('pos')) && (
-                <Button
-                  tone="primary"
-                  onClick={() => setActivePage('pos')}
-                  className="hidden sm:inline-flex min-h-10"
-                >
-                  <Icon3D name="pos" size={20} /> POS
-                </Button>
-              )}
             </div>
           </header>
 

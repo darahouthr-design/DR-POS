@@ -166,6 +166,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [selectedMonthNum, setSelectedMonthNum] = useState<string>(currentMonthNum);
   const [lineMetric, setLineMetric] = useState<'units' | 'orders' | 'revenue'>('units');
   const [focusedStaffKey, setFocusedStaffKey] = useState<string | null>(null);
+  const [hoveredBarIso, setHoveredBarIso] = useState<string | null>(null);
   const [hoveredMonthIdx, setHoveredMonthIdx] = useState<number | null>(null);
   const [recentStatusFilter, setRecentStatusFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
   const [presenceFilter, setPresenceFilter] = useState<'all' | 'online'>('all');
@@ -303,6 +304,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     () => chartPoints.reduce((s, p) => s + p.total, 0),
     [chartPoints]
   );
+
+  const periodOrdersCount = useMemo(
+    () => chartPoints.reduce((s, p) => s + p.count, 0),
+    [chartPoints]
+  );
+
+  const periodDailyAvg = useMemo(
+    () => (chartPoints.length > 0 ? periodTotal / chartPoints.length : 0),
+    [chartPoints, periodTotal]
+  );
+
+  const peakDayPoint = useMemo(() => {
+    let best: (typeof chartPoints)[number] | null = null;
+    for (const pt of chartPoints) {
+      if (!best || pt.total > best.total) {
+        best = pt;
+      }
+    }
+    return best;
+  }, [chartPoints]);
+
+  const activeBarPoint = useMemo(() => {
+    if (hoveredBarIso) {
+      const matched = chartPoints.find((p) => p.iso === hoveredBarIso);
+      if (matched) return matched;
+    }
+    return chartPoints.find((p) => p.iso === today) || chartPoints[chartPoints.length - 1] || null;
+  }, [chartPoints, hoveredBarIso, today]);
 
   // Monthly Staff Comparison Line Graphic Data (12 months of selectedYear)
   const staffMonthlySeries = useMemo(() => {
@@ -866,125 +895,148 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 3. Side-by-Side Analytics Charts: Daily Sales Bar Chart (Left) + Staff Monthly Sales Line Graphic (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch">
-        {/* Left: Sales Data Chart Form Card */}
+        {/* Left: Highlighted Sales Data Chart Form Card */}
         <motion.div
           className="lg:col-span-6 flex"
           initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.24, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
         >
-          <Surface className="w-full p-4 sm:p-6 flex flex-col">
+          <Surface className="w-full p-4 sm:p-6 flex flex-col border-primary/35 bg-gradient-to-b from-primary/[0.045] via-surface to-surface ring-1 ring-primary/12">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-4">
               <div className="flex items-center gap-3 min-w-0">
-                <Icon3D name="dashboard" size={34} />
+                <Icon3D name="dashboard" size={36} />
                 <div className="min-w-0">
-                  <h2 className="text-sm sm:text-base font-semibold text-foreground">
+                  <h2 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
                     {t.dashboard.salesChartTitle}
                   </h2>
-                  <p className="text-xs text-muted">
-                    {t.dashboard.selectedPeriodTotal}{' '}
-                    <strong
-                      title={formatMoney(periodTotal, currency)}
-                      className="tabular-nums text-foreground"
-                    >
-                      {formatCompactMoney(periodTotal, currency)}
-                    </strong>
+                  <p className="text-xs text-muted leading-snug tabular-nums">
+                    {chartRange === '7d'
+                      ? t.dashboard.days7
+                      : chartRange === '14d'
+                      ? t.dashboard.days14
+                      : t.dashboard.days30}{' '}
+                    · {formatCompactCount(periodOrdersCount)} {t.dashboard.invoicesUnit}
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-3 sm:flex gap-1.5 shrink-0">
-                {(['7d', '14d', '30d'] as const).map((r) => (
-                  <Button
-                    key={r}
-                    tone={chartRange === r ? 'primary' : 'quiet'}
-                    onClick={() => setChartRange(r)}
-                    className="min-h-10 sm:min-h-9 px-2.5 sm:px-3 py-1 text-xs whitespace-nowrap"
-                  >
-                    {r === '7d' ? t.dashboard.days7 : r === '14d' ? t.dashboard.days14 : t.dashboard.days30}
-                  </Button>
-                ))}
+
+              <div
+                role="tablist"
+                aria-label={t.dashboard.salesChartTitle}
+                className="grid grid-cols-3 sm:flex items-center gap-1 rounded-control border border-border/75 bg-background/85 p-1 shrink-0"
+              >
+                {(['7d', '14d', '30d'] as const).map((r) => {
+                  const active = chartRange === r;
+                  return (
+                    <button
+                      key={r}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => {
+                        setChartRange(r);
+                        setHoveredBarIso(null);
+                      }}
+                      className={`min-h-9 rounded-control px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                        active
+                          ? 'bg-primary text-primary-foreground shadow-xs'
+                          : 'text-muted hover:text-foreground'
+                      }`}
+                    >
+                      {r === '7d'
+                        ? t.dashboard.days7
+                        : r === '14d'
+                        ? t.dashboard.days14
+                        : t.dashboard.days30}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="mt-4 flex-1 flex items-center w-full overflow-x-auto">
-              <svg
-                viewBox="0 0 760 250"
-                className={`h-auto w-full ${chartRange === '7d' ? '' : 'min-w-[520px]'}`}
-                role="img"
-                aria-label={t.dashboard.chartAriaLabel}
-              >
-                {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
-                  const y = 205 - ratio * 165;
-                  const val = maxChartVal * ratio;
-                  return (
-                    <g key={idx}>
-                      <line
-                        x1="76"
-                        y1={y}
-                        x2="740"
-                        y2={y}
-                        stroke="var(--color-border)"
-                        strokeDasharray={idx === 0 ? undefined : '4 4'}
-                        strokeWidth="1"
-                      />
-                      <text
-                        x="68"
-                        y={y + 4}
-                        textAnchor="end"
-                        fontSize="11"
-                        fill="var(--color-muted)"
-                        style={{
-                          paintOrder: 'stroke',
-                          stroke: 'var(--color-surface)',
-                          strokeWidth: '4px',
-                          strokeLinejoin: 'round',
-                        }}
-                      >
-                        {formatCompactMoney(val, currency)}
-                      </text>
-                    </g>
-                  );
-                })}
+            {/* Clean 3-Column Period Summary Strip */}
+            <div className="grid grid-cols-3 divide-x divide-border/50 border-b border-border/50 py-3 gap-2">
+              <div className="min-w-0 pr-2">
+                <p className="text-[11px] text-muted truncate">{t.dashboard.selectedPeriodTotal}</p>
+                <p
+                  title={formatMoney(periodTotal, currency)}
+                  className="text-base sm:text-xl font-bold tabular-nums text-primary mt-0.5 truncate"
+                >
+                  {formatCompactMoney(periodTotal, currency)}
+                </p>
+              </div>
+              <div className="min-w-0 px-2 sm:px-3">
+                <p className="text-[11px] text-muted truncate">{t.dashboard.dailyAverageLabel}</p>
+                <p
+                  title={formatMoney(periodDailyAvg, currency)}
+                  className="text-sm sm:text-base font-semibold tabular-nums text-foreground mt-0.5 truncate"
+                >
+                  {formatCompactMoney(periodDailyAvg, currency)}
+                </p>
+              </div>
+              <div className="min-w-0 pl-2 sm:pl-3">
+                <p className="text-[11px] text-muted truncate">{t.dashboard.peakDayLabel}</p>
+                <p
+                  title={
+                    peakDayPoint && peakDayPoint.total > 0
+                      ? `${peakDayPoint.iso}: ${formatMoney(peakDayPoint.total, currency)}`
+                      : undefined
+                  }
+                  className="text-sm sm:text-base font-semibold tabular-nums text-foreground mt-0.5 truncate"
+                >
+                  {peakDayPoint && peakDayPoint.total > 0
+                    ? formatCompactMoney(peakDayPoint.total, currency)
+                    : '—'}
+                  {peakDayPoint && peakDayPoint.total > 0 && (
+                    <span className="ml-1 text-[11px] font-normal text-muted">
+                      ({peakDayPoint.label})
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
 
-                {chartPoints.map((pt, i) => {
-                  const plotW = 656;
-                  const step = plotW / chartPoints.length;
-                  const barW = Math.min(34, Math.max(10, step * 0.56));
-                  const x = 80 + i * step + (step - barW) / 2;
-                  const barH = Math.max(2, (pt.total / maxChartVal) * 165);
-                  const y = 205 - barH;
-                  const showLabel =
-                    chartPoints.length <= 14 || i % 3 === 0 || i === chartPoints.length - 1;
+            <div className="mt-3 flex-1 flex flex-col justify-between gap-2.5">
+              <div className="w-full overflow-x-auto">
+                <svg
+                  viewBox="0 0 760 238"
+                  className={`h-auto w-full ${chartRange === '7d' ? '' : 'min-w-[500px]'}`}
+                  role="img"
+                  aria-label={t.dashboard.chartAriaLabel}
+                  onMouseLeave={() => setHoveredBarIso(null)}
+                >
+                  <defs>
+                    <linearGradient id="sales-bar-active" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="1" />
+                      <stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0.68" />
+                    </linearGradient>
+                    <linearGradient id="sales-bar-default" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="oklch(0.60 0.105 164)" stopOpacity="0.95" />
+                      <stop offset="100%" stopColor="oklch(0.70 0.065 164)" stopOpacity="0.58" />
+                    </linearGradient>
+                  </defs>
 
-                  return (
-                    <g key={`${chartRange}-${pt.iso}`}>
-                      <title>
-                        {pt.iso}: {formatMoney(pt.total, currency)} ({pt.count} {t.dashboard.invoicesUnit})
-                      </title>
-                      <motion.rect
-                        x={x}
-                        y={y}
-                        width={barW}
-                        height={barH}
-                        rx="5"
-                        fill={pt.iso === today ? 'var(--color-primary)' : 'oklch(0.62 0.10 165)'}
-                        style={{ transformOrigin: `${x + barW / 2}px 205px` }}
-                        initial={prefersReducedMotion ? false : { scaleY: 0, opacity: 0.35 }}
-                        animate={{ scaleY: 1, opacity: 1 }}
-                        transition={{
-                          duration: 0.35,
-                          delay: Math.min(i * 0.015, 0.2),
-                          ease: [0.16, 1, 0.3, 1],
-                        }}
-                      />
-                      {pt.total > 0 && chartPoints.length <= 14 && (
+                  {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
+                    const y = 200 - ratio * 164;
+                    const val = maxChartVal * ratio;
+                    return (
+                      <g key={idx}>
+                        <line
+                          x1="76"
+                          y1={y}
+                          x2="742"
+                          y2={y}
+                          stroke="var(--color-border)"
+                          strokeDasharray={idx === 0 ? undefined : '4 4'}
+                          strokeWidth="1"
+                        />
                         <text
-                          x={x + barW / 2}
-                          y={Math.max(16, y - 8)}
-                          textAnchor="middle"
-                          fontSize="10.5"
-                          fontWeight="600"
-                          fill="var(--color-foreground)"
+                          x="68"
+                          y={y + 4}
+                          textAnchor="end"
+                          fontSize="11"
+                          fill="var(--color-muted)"
                           style={{
                             paintOrder: 'stroke',
                             stroke: 'var(--color-surface)',
@@ -992,30 +1044,163 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             strokeLinejoin: 'round',
                           }}
                         >
-                          {formatCompactMoney(pt.total, currency)}
+                          {formatCompactMoney(val, currency)}
                         </text>
-                      )}
-                      {showLabel && (
-                        <text
-                          x={x + barW / 2}
-                          y={228}
-                          textAnchor="middle"
-                          fontSize="11"
-                          fill="var(--color-muted)"
-                          style={{
-                            paintOrder: 'stroke',
-                            stroke: 'var(--color-surface)',
-                            strokeWidth: '3px',
-                            strokeLinejoin: 'round',
+                      </g>
+                    );
+                  })}
+
+                  {chartPoints.map((pt, i) => {
+                    const plotW = 656;
+                    const step = plotW / chartPoints.length;
+                    const colX = 80 + i * step;
+                    const barW = Math.min(38, Math.max(10, step * 0.56));
+                    const x = colX + (step - barW) / 2;
+                    const barH = pt.total > 0 ? Math.max(4, (pt.total / maxChartVal) * 164) : 2;
+                    const y = 200 - barH;
+                    const showLabel =
+                      chartPoints.length <= 14 || i % 3 === 0 || i === chartPoints.length - 1;
+                    const isActiveBar = activeBarPoint?.iso === pt.iso;
+                    const isHoverDimmed = Boolean(hoveredBarIso && !isActiveBar);
+
+                    return (
+                      <g key={`${chartRange}-${pt.iso}`}>
+                        {isActiveBar && (
+                          <rect
+                            x={colX + 2}
+                            y={26}
+                            width={Math.max(4, step - 4)}
+                            height={174}
+                            rx="6"
+                            fill="var(--color-primary)"
+                            fillOpacity="0.065"
+                          />
+                        )}
+
+                        {isActiveBar && pt.total > 0 && (
+                          <line
+                            x1={76}
+                            y1={y}
+                            x2={x}
+                            y2={y}
+                            stroke="var(--color-primary)"
+                            strokeOpacity="0.45"
+                            strokeDasharray="3 3"
+                            strokeWidth="1"
+                          />
+                        )}
+
+                        <motion.rect
+                          x={x}
+                          y={y}
+                          width={barW}
+                          height={barH}
+                          rx="5"
+                          fill={
+                            isActiveBar || pt.iso === today
+                              ? 'url(#sales-bar-active)'
+                              : 'url(#sales-bar-default)'
+                          }
+                          stroke={isActiveBar ? 'var(--color-primary)' : 'none'}
+                          strokeWidth={isActiveBar ? 1.25 : 0}
+                          style={{ transformOrigin: `${x + barW / 2}px 200px` }}
+                          initial={prefersReducedMotion ? false : { scaleY: 0, opacity: 0.35 }}
+                          animate={{
+                            scaleY: 1,
+                            opacity: isHoverDimmed ? 0.48 : 1,
                           }}
+                          transition={{
+                            scaleY: {
+                              duration: 0.34,
+                              delay: Math.min(i * 0.015, 0.2),
+                              ease: [0.16, 1, 0.3, 1],
+                            },
+                            opacity: { duration: 0.16 },
+                          }}
+                        />
+
+                        {pt.total > 0 && (chartPoints.length <= 14 || isActiveBar) && (
+                          <text
+                            x={x + barW / 2}
+                            y={Math.max(16, y - 7)}
+                            textAnchor="middle"
+                            fontSize="10.5"
+                            fontWeight="700"
+                            fill={isActiveBar ? 'var(--color-primary)' : 'var(--color-foreground)'}
+                            style={{
+                              paintOrder: 'stroke',
+                              stroke: 'var(--color-surface)',
+                              strokeWidth: '4px',
+                              strokeLinejoin: 'round',
+                            }}
+                          >
+                            {formatCompactMoney(pt.total, currency)}
+                          </text>
+                        )}
+
+                        {(showLabel || isActiveBar) && (
+                          <text
+                            x={x + barW / 2}
+                            y={223}
+                            textAnchor="middle"
+                            fontSize="11"
+                            fontWeight={isActiveBar ? '700' : '500'}
+                            fill={isActiveBar ? 'var(--color-primary)' : 'var(--color-muted)'}
+                            style={{
+                              paintOrder: 'stroke',
+                              stroke: 'var(--color-surface)',
+                              strokeWidth: '3px',
+                              strokeLinejoin: 'round',
+                            }}
+                          >
+                            {pt.label}
+                          </text>
+                        )}
+
+                        {/* Full-column hit zone for smooth mouse & touch selection */}
+                        <rect
+                          x={colX}
+                          y={20}
+                          width={step}
+                          height={212}
+                          fill="transparent"
+                          className="cursor-pointer"
+                          onMouseEnter={() => setHoveredBarIso(pt.iso)}
+                          onClick={() => setHoveredBarIso(pt.iso)}
                         >
-                          {pt.label}
-                        </text>
-                      )}
-                    </g>
-                  );
-                })}
-              </svg>
+                          <title>
+                            {pt.iso}: {formatMoney(pt.total, currency)} ({pt.count}{' '}
+                            {t.dashboard.invoicesUnit})
+                          </title>
+                        </rect>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+
+              {/* Active Day Readout Strip (symmetric with Staff Line Chart) */}
+              {activeBarPoint && (
+                <div className="border-t border-border/50 pt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-foreground whitespace-nowrap">
+                    {t.dashboard.selectedDayReadout}:{' '}
+                    <span className="text-primary tabular-nums">{activeBarPoint.iso}</span>
+                    {activeBarPoint.iso === today && (
+                      <span className="ml-1.5 text-[11px] font-medium text-muted">
+                        ({t.dashboard.todayTag})
+                      </span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-3 tabular-nums">
+                    <strong className="text-foreground">
+                      {formatMoney(activeBarPoint.total, currency)}
+                    </strong>
+                    <span className="text-muted">
+                      {formatCompactCount(activeBarPoint.count)} {t.dashboard.invoicesUnit}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </Surface>
         </motion.div>

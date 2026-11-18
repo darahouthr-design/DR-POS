@@ -28,6 +28,7 @@ const DOM_PAGE_STEP = 40;
 
 interface OrderCardProps {
   order: Order;
+  productById: Map<string, Product>;
   currency: CurrencyCode;
   hideWarehouse: boolean;
   readOnly: boolean;
@@ -36,6 +37,7 @@ interface OrderCardProps {
   tOrders: TranslationDict['orders'];
   tCommon: TranslationDict['common'];
   onOpenReport: (order: Order) => void;
+  onZoomImage?: (url: string, title: string) => void;
   onDownloadPng: (order: Order) => void;
   onBluetoothPrint: (order: Order) => void;
   onStandardPrint: (order: Order) => void;
@@ -46,6 +48,7 @@ interface OrderCardProps {
 const OrderCard = React.memo<OrderCardProps>(
   ({
     order,
+    productById,
     currency,
     hideWarehouse,
     readOnly,
@@ -54,6 +57,7 @@ const OrderCard = React.memo<OrderCardProps>(
     tOrders,
     tCommon,
     onOpenReport,
+    onZoomImage,
     onDownloadPng,
     onBluetoothPrint,
     onStandardPrint,
@@ -117,11 +121,11 @@ const OrderCard = React.memo<OrderCardProps>(
               <span className="text-muted">{tOrders.staffLabel} </span>
               <strong className="text-foreground break-words">{order.staffName}</strong>
             </div>
-            <div className="min-w-0">
-              <span className="text-muted">{tOrders.storeGroupLabel} </span>
-              <span className="text-foreground break-words">
-                {order.storeName} · {order.groupName}
-              </span>
+            <div className="min-w-0 sm:col-span-2">
+              <span className="text-muted">{tOrders.storeLabel} </span>
+              <span className="text-foreground font-medium break-words">{order.storeName || '-'}</span>
+              <span className="text-muted"> / {tOrders.groupLabel} </span>
+              <span className="text-foreground font-medium break-words">{order.groupName || '-'}</span>
             </div>
             {!hideWarehouse && (
               <div className="min-w-0">
@@ -131,25 +135,47 @@ const OrderCard = React.memo<OrderCardProps>(
             )}
           </div>
 
-          <div className="border-t border-border/40 pt-2.5 space-y-1">
-            {order.items.map((it, idx) => (
-              <div key={`${it.productId}-${idx}`} className="flex justify-between gap-2 text-xs">
-                <span className="text-foreground min-w-0 truncate">
-                  {it.productName} × <strong>{it.quantity}</strong>
-                  {it.catalogUnitPrice !== undefined &&
-                    Math.abs(it.catalogUnitPrice - it.unitPrice) > 0.001 && (
-                      <span className="ml-1.5 text-[11px] text-primary font-medium">
-                        {tOrders.priceEditedTag}
-                      </span>
-                    )}
-                </span>
-                <span className="tabular-nums font-medium text-muted shrink-0">
-                  {formatMoney(it.unitPrice * it.quantity, currency)}
-                </span>
-              </div>
-            ))}
+          <div className="border-t border-border/40 pt-3 space-y-2">
+            {order.items.map((it, idx) => {
+              const prodImage = productById.get(it.productId)?.imageUrl || '';
+              return (
+                <div
+                  key={`${it.productId}-${idx}`}
+                  className="flex items-center justify-between gap-2.5 rounded-control border border-border/50 bg-background/60 px-2.5 py-2"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <ProductImage
+                      src={prodImage}
+                      alt={it.productName}
+                      className="h-11 w-11 shrink-0"
+                      onZoom={onZoomImage}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-foreground truncate leading-snug">
+                        {it.productName}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted tabular-nums mt-0.5">
+                        <span>
+                          {formatMoney(it.unitPrice, currency)} ×{' '}
+                          <strong className="text-foreground">{it.quantity}</strong>
+                        </span>
+                        {it.catalogUnitPrice !== undefined &&
+                          Math.abs(it.catalogUnitPrice - it.unitPrice) > 0.001 && (
+                            <span className="text-primary font-medium">
+                              {tOrders.priceEditedTag}
+                            </span>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="tabular-nums text-xs font-semibold text-foreground shrink-0">
+                    {formatMoney(it.unitPrice * it.quantity, currency)}
+                  </span>
+                </div>
+              );
+            })}
             {(order.discountAmount || 0) > 0 && (
-              <div className="flex justify-between gap-2 text-xs text-danger pt-1 border-t border-dashed border-border/50">
+              <div className="flex justify-between gap-2 text-xs text-danger pt-1.5 border-t border-dashed border-border/50">
                 <span>
                   {tOrders.discountLabel}
                   {order.discountType === 'percent' && order.discountValue
@@ -270,6 +296,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [storeFilter, setStoreFilter] = useState('ALL');
   const [groupFilter, setGroupFilter] = useState('ALL');
   const [warehouseFilter, setWarehouseFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleDomCount, setVisibleDomCount] = useState(DOM_PAGE_STEP);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -300,6 +327,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     storeFilter,
     groupFilter,
     warehouseFilter,
+    searchQuery,
   });
 
   const productById = useMemo(
@@ -317,7 +345,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       storeFilter: stf,
       groupFilter: gf,
       warehouseFilter: wf,
+      searchQuery: sq,
     } = deferredFilters;
+    const q = sq.trim().toLowerCase();
+    const qDigits = q.replace(/[^0-9]/g, '');
+
     return orders.filter((o) => {
       if (df && o.date < df) return false;
       if (dt && o.date > dt) return false;
@@ -327,6 +359,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       if (stf !== 'ALL' && o.storeName !== stf) return false;
       if (gf !== 'ALL' && o.groupName !== gf) return false;
       if (!hideWarehouse && wf !== 'ALL' && o.warehouse !== wf) return false;
+      if (q) {
+        const nameMatch = (o.customerName || '').toLowerCase().includes(q);
+        const orderNoMatch = (o.orderNumber || '').toLowerCase().includes(q);
+        const rawPhone = (o.customerPhone || '').toLowerCase();
+        const phoneMatch =
+          rawPhone.includes(q) ||
+          (qDigits.length >= 2 && rawPhone.replace(/[^0-9]/g, '').includes(qDigits));
+        if (!nameMatch && !orderNoMatch && !phoneMatch) return false;
+      }
       return true;
     });
   }, [orders, deferredFilters, hideWarehouse]);
@@ -354,6 +395,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     deferredFilters.storeFilter,
     deferredFilters.groupFilter,
     deferredFilters.warehouseFilter,
+    deferredFilters.searchQuery,
   ]);
 
   useEffect(() => {
@@ -566,13 +608,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      {/* Header Card with Filter Trigger, Print Controls & Export Excel */}
+      {/* Header Card with Filter Trigger, Search Bar, Print Controls & Export Excel */}
       <Surface className="p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
-        <div
-          className={`flex flex-col lg:flex-row lg:items-center justify-between gap-3 ${
-            statusMessage ? 'border-b border-border/50 pb-3.5 sm:pb-4' : ''
-          }`}
-        >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border/50 pb-3.5 sm:pb-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
               <Icon3D name="orders" size={34} />
@@ -658,6 +696,32 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           </div>
         </div>
 
+        {/* Invoice Search Bar (Customer Name, Order Number, or Phone) */}
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
+          />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t.orders.searchOrdersPlaceholder}
+            aria-label={t.orders.searchOrdersPlaceholder}
+            className={`${inputClass} min-h-10 pl-9 ${searchQuery ? 'pr-9' : 'pr-3'}`}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label={t.orders.clearFilters}
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
         {statusMessage && (
           <div
             role="status"
@@ -681,8 +745,27 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
       {/* Order Form Cards List (Progressive Windowing + Firestore Cursor Pagination) */}
       {filteredOrders.length === 0 ? (
-        <Surface className="p-10 text-center text-sm text-muted">
-          {t.orders.noMatchingOrders}
+        <Surface className="p-10 text-center space-y-3">
+          <p className="text-sm text-muted">{t.orders.noMatchingOrders}</p>
+          {(searchQuery.trim() || activeFilterCount > 0) && (
+            <Button
+              tone="quiet"
+              onClick={() => {
+                setSearchQuery('');
+                setDateFrom('');
+                setDateTo('');
+                setTimeFrom('');
+                setTimeTo('');
+                setStaffFilter('ALL');
+                setStoreFilter('ALL');
+                setGroupFilter('ALL');
+                setWarehouseFilter('ALL');
+              }}
+              className="min-h-10 px-4 text-xs"
+            >
+              {t.orders.clearFilters}
+            </Button>
+          )}
         </Surface>
       ) : (
         <div className="space-y-4">
@@ -691,6 +774,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               <OrderCard
                 key={order.id}
                 order={order}
+                productById={productById}
                 currency={currency}
                 hideWarehouse={hideWarehouse}
                 readOnly={readOnly}
@@ -699,6 +783,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 tOrders={t.orders}
                 tCommon={t.common}
                 onOpenReport={setReportOrder}
+                onZoomImage={onZoomImage}
                 onDownloadPng={handleDownloadInvoicePng}
                 onBluetoothPrint={handleBluetoothPrint}
                 onStandardPrint={(o) => setPrintPreviewOrder({ order: o, mode: 'standard' })}
@@ -1680,10 +1765,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       <span className="text-muted">{t.orders.staffLabel} </span>
                       <strong className="text-foreground break-words">{reportOrder.staffName}</strong>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-muted">{t.orders.storeGroupLabel} </span>
-                      <span className="text-foreground break-words">
-                        {reportOrder.storeName} · {reportOrder.groupName}
+                    <div className="min-w-0 sm:col-span-2">
+                      <span className="text-muted">{t.orders.storeLabel} </span>
+                      <span className="text-foreground font-medium break-words">
+                        {reportOrder.storeName || '-'}
+                      </span>
+                      <span className="text-muted"> / {t.orders.groupLabel} </span>
+                      <span className="text-foreground font-medium break-words">
+                        {reportOrder.groupName || '-'}
                       </span>
                     </div>
                     {!hideWarehouse && (

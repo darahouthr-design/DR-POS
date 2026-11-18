@@ -1017,44 +1017,50 @@ export const PosView: React.FC<PosViewProps> = ({
           </div>
         </div>
 
-        <div className="mt-3.5 sm:mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+        <div className="mt-3.5 sm:mt-4 grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3">
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t.pos.searchPlaceholder}
-            className={inputClass}
+            className={`${inputClass} lg:col-span-5`}
           />
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className={inputClass}
-            aria-label="Filter Category"
+          <div
+            className={`grid ${
+              hideWarehouse ? 'grid-cols-1' : 'grid-cols-2'
+            } gap-2.5 sm:gap-3 lg:col-span-7`}
           >
-            <option value="ALL">{t.pos.allCategories}</option>
-            {settings.categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat}
-              </option>
-            ))}
-          </select>
-
-          {!hideWarehouse && (
             <select
-              value={warehouseFilter}
-              onChange={(e) => setWarehouseFilter(e.target.value)}
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
               className={inputClass}
-              aria-label="Filter Warehouse"
+              aria-label="Filter Category"
             >
-              <option value="ALL">{t.pos.allWarehouses}</option>
-              {settings.warehouses.map((wh) => (
-                <option key={wh} value={wh}>
-                  {wh}
+              <option value="ALL">{t.pos.allCategories}</option>
+              {settings.categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
                 </option>
               ))}
             </select>
-          )}
+
+            {!hideWarehouse && (
+              <select
+                value={warehouseFilter}
+                onChange={(e) => setWarehouseFilter(e.target.value)}
+                className={inputClass}
+                aria-label="Filter Warehouse"
+              >
+                <option value="ALL">{t.pos.allWarehouses}</option>
+                {settings.warehouses.map((wh) => (
+                  <option key={wh} value={wh}>
+                    {wh}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
 
         {statusFeedback && (

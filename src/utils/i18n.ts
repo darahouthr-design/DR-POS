@@ -66,6 +66,10 @@ export interface TranslationDict {
     expiredBody: string;
     contactDevTelegram: string;
     switchAdminLabel: string;
+    networkOnline: string;
+    networkOffline: string;
+    networkOnlineTitle: string;
+    networkOfflineTitle: string;
   };
   ui: {
     zoomTitle: string;
@@ -101,6 +105,10 @@ export interface TranslationDict {
     days14: string;
     days30: string;
     chartAriaLabel: string;
+    dailyAverageLabel: string;
+    peakDayLabel: string;
+    selectedDayReadout: string;
+    todayTag: string;
     lowStockCardTitle: string;
     lowStockCardSubtitle: string;
     manageStockBtn: string;
@@ -328,6 +336,7 @@ export interface TranslationDict {
     allGroups: string;
     allWarehouses: string;
     clearFilters: string;
+    searchOrdersPlaceholder: string;
     noMatchingOrders: string;
     atTime: string;
     dueAt: string;
@@ -336,6 +345,8 @@ export interface TranslationDict {
     addressLabel: string;
     staffLabel: string;
     storeGroupLabel: string;
+    storeLabel: string;
+    groupLabel: string;
     warehouseLabel: string;
     priceEditedTag: string;
     discountLabel: string;
@@ -796,6 +807,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
         'លោកអ្នកអាចមើលបានតែរបាយការណ៍លក់ និង Export Excel ប៉ុណ្ណោះ (មុខងារលក់ បង្កើតថ្មី កែប្រែ និងលុបត្រូវបានផ្អាកបណ្ដោះអាសន្ន)។',
       contactDevTelegram: 'ទាក់ទង Developer តាម Telegram',
       switchAdminLabel: 'ប្ដូរគណនី Admin',
+      networkOnline: 'Online',
+      networkOffline: 'Offline',
+      networkOnlineTitle: 'មានអ៊ីនធឺណិត (Online) · ចុចដើម្បីពិនិត្យការតភ្ជាប់',
+      networkOfflineTitle: 'គ្មានអ៊ីនធឺណិត (Offline) · កំពុងដំណើរការទិន្នន័យក្នុងម៉ាស៊ីន',
     },
     ui: {
       zoomTitle: 'ចុចដើម្បីពង្រីករូបភាព (Zoom In / Out)',
@@ -831,6 +846,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       days14: '14 ថ្ងៃ',
       days30: '30 ថ្ងៃ',
       chartAriaLabel: 'ក្រាហ្វិកទិន្នន័យលក់ប្រចាំថ្ងៃ',
+      dailyAverageLabel: 'មធ្យមប្រចាំថ្ងៃ',
+      peakDayLabel: 'ថ្ងៃលក់ខ្ពស់បំផុត',
+      selectedDayReadout: 'ទិន្នន័យថ្ងៃ',
+      todayTag: 'ថ្ងៃនេះ',
       lowStockCardTitle: 'ស្តុកជិតអស់ (កំណត់ 10 ចុះ)',
       lowStockCardSubtitle: 'ទំនិញដែលមានចំនួនស្តុក ≤ 10 ក្នុងឃ្លាំង',
       manageStockBtn: 'គ្រប់គ្រងស្តុក',
@@ -929,8 +948,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       scanBarcode: 'ស្កេនបារកូដ',
       cartBtn: 'កន្ត្រក',
       searchPlaceholder: 'ស្វែងរកឈ្មោះទំនិញ ឬ លេខបារកូដ...',
-      allCategories: 'គ្រប់ប្រភេទទំនិញ (All Categories)',
-      allWarehouses: 'គ្រប់ឃ្លាំងទំនិញ (All Warehouses)',
+      allCategories: 'គ្រប់ប្រភេទទំនិញ',
+      allWarehouses: 'គ្រប់ឃ្លាំងទំនិញ',
       expiredError: 'គណនីបានផុតកំណត់ (Expired)! អនុញ្ញាតឱ្យមើលតែរបាយការណ៍ និង Export Excel ប៉ុណ្ណោះ។',
       outOfStockErrorPrefix: 'ទំនិញ "',
       outOfStockErrorSuffix: '" អស់ពីស្តុកហើយ! មិនអនុញ្ញាតឱ្យបញ្ជាទិញជាដាច់ខាត។',
@@ -1058,6 +1077,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       allGroups: 'គ្រប់ Groups (All Groups)',
       allWarehouses: 'គ្រប់ឃ្លាំង (All Warehouses)',
       clearFilters: 'សម្អាតការស្វែងរក',
+      searchOrdersPlaceholder: 'ស្វែងរកតាមឈ្មោះអតិថិជន, លេខវិក្កយបត្រ ឬលេខទូរស័ព្ទ...',
       noMatchingOrders: 'មិនមានទិន្នន័យការបញ្ជាទិញតាមលក្ខខណ្ឌស្វែងរកទេ។',
       atTime: 'ម៉ោង',
       dueAt: 'ណាត់ទូទាត់៖',
@@ -1066,6 +1086,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       addressLabel: 'អាសយដ្ឋាន៖',
       staffLabel: 'បុគ្គលិកលក់៖',
       storeGroupLabel: 'ហាង / Group៖',
+      storeLabel: 'ហាង៖',
+      groupLabel: 'Group៖',
       warehouseLabel: 'ឃ្លាំង៖',
       priceEditedTag: '(កែតម្លៃ)',
       discountLabel: 'បញ្ចុះតម្លៃ',
@@ -1544,6 +1566,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
         'You can only view sales reports and Export Excel (creating, editing, deleting, and POS checkout are temporarily paused).',
       contactDevTelegram: 'Contact Developer on Telegram',
       switchAdminLabel: 'Switch Admin Account',
+      networkOnline: 'Online',
+      networkOffline: 'Offline',
+      networkOnlineTitle: 'Connected to internet (Online) · Click to verify',
+      networkOfflineTitle: 'No internet connection (Offline) · Working in offline mode',
     },
     ui: {
       zoomTitle: 'Click to zoom image (Zoom In / Out)',
@@ -1579,6 +1605,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       days14: '14 Days',
       days30: '30 Days',
       chartAriaLabel: 'Daily sales chart',
+      dailyAverageLabel: 'Daily Average',
+      peakDayLabel: 'Peak Day',
+      selectedDayReadout: 'Day Detail',
+      todayTag: 'Today',
       lowStockCardTitle: 'Low Stock (10 & below)',
       lowStockCardSubtitle: 'Products with stock ≤ 10 in warehouse',
       manageStockBtn: 'Manage Stock',
@@ -1806,6 +1836,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       allGroups: 'All Groups',
       allWarehouses: 'All Warehouses',
       clearFilters: 'Clear Filters',
+      searchOrdersPlaceholder: 'Search by customer name, order number, or phone...',
       noMatchingOrders: 'No orders match the current filters.',
       atTime: 'Time',
       dueAt: 'Due:',
@@ -1814,6 +1845,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       addressLabel: 'Address:',
       staffLabel: 'Staff:',
       storeGroupLabel: 'Store / Group:',
+      storeLabel: 'Store:',
+      groupLabel: 'Group:',
       warehouseLabel: 'Warehouse:',
       priceEditedTag: '(Edited Price)',
       discountLabel: 'Discount',
@@ -2290,6 +2323,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
         '매출 리포트 조회 및 Excel 내보내기만 가능합니다. (판매, 신규 등록, 수정, 삭제 기능은 일시 중지됩니다.)',
       contactDevTelegram: 'Telegram으로 개발자 문의',
       switchAdminLabel: '관리자 계정 전환',
+      networkOnline: 'Online',
+      networkOffline: 'Offline',
+      networkOnlineTitle: '인터넷 연결됨 (Online) · 클릭하여 확인',
+      networkOfflineTitle: '인터넷 연결 안 됨 (Offline) · 오프라인 모드로 작동 중',
     },
     ui: {
       zoomTitle: '클릭하여 이미지 확대/축소 (Zoom In / Out)',
@@ -2325,6 +2362,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       days14: '14일',
       days30: '30일',
       chartAriaLabel: '일일 매출 차트',
+      dailyAverageLabel: '일평균 매출',
+      peakDayLabel: '최고 매출일',
+      selectedDayReadout: '선택일 매출',
+      todayTag: '오늘',
       lowStockCardTitle: '재고 부족 품목 (10개 이하)',
       lowStockCardSubtitle: '창고 재고가 10개 이하인 상품 목록',
       manageStockBtn: '재고 관리',
@@ -2552,6 +2593,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       allGroups: '전체 그룹',
       allWarehouses: '전체 창고',
       clearFilters: '필터 초기화',
+      searchOrdersPlaceholder: '고객명, 주문번호, 전화번호 검색...',
       noMatchingOrders: '검색 조건에 해당하는 주문이 없습니다.',
       atTime: '시간',
       dueAt: '결제예정일:',
@@ -2560,6 +2602,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       addressLabel: '주소:',
       staffLabel: '담당 직원:',
       storeGroupLabel: '매장 / 그룹:',
+      storeLabel: '매장:',
+      groupLabel: '그룹:',
       warehouseLabel: '창고:',
       priceEditedTag: '(단가수정)',
       discountLabel: '할인',

@@ -1737,12 +1737,25 @@ export async function createOrderFs(
 
   try {
     const commitPromise = batch.commit();
-    // If browser is currently offline, persistentLocalCache already applies the atomic batch locally
-    // and will sync cleanly once online, so don't hang the POS submit button waiting on network ack.
+    // With IndexedDB offline persistence enabled, Firestore applies the atomic batch locally
+    // right away and syncs to the backend once connectivity stabilizes. Do not freeze POS
+    // order submission if the browser is offline or experiencing intermittent network stalls.
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       commitPromise.catch(() => {});
     } else {
-      await commitPromise;
+      const INTERMITTENT_COMMIT_GRACE_MS = 2500;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        commitPromise.finally(() => {
+          if (timer !== undefined) clearTimeout(timer);
+        }),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            commitPromise.catch(() => {});
+            resolve();
+          }, INTERMITTENT_COMMIT_GRACE_MS);
+        }),
+      ]);
     }
   } catch (err) {
     const code = (err as { code?: string })?.code || '';

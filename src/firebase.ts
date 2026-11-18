@@ -17,34 +17,37 @@ import {
 } from 'firebase/auth';
 import {
   doc,
+  enableIndexedDbPersistence,
   getDocFromServer,
   getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   type Firestore,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-function createPrimaryFirestore(): Firestore {
-  try {
-    return initializeFirestore(
-      app,
-      {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
-      },
-      firebaseConfig.firestoreDatabaseId
-    );
-  } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  }
-}
+export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-export const db = createPrimaryFirestore();
+export const firestorePersistenceReady: Promise<void> =
+  typeof window !== 'undefined'
+    ? enableIndexedDbPersistence(db).catch((err: { code?: string }) => {
+        if (err?.code === 'failed-precondition') {
+          // Multiple tabs open; offline persistence can only be enabled in one tab at a time.
+          console.warn(
+            'Firestore IndexedDB persistence unavailable (multiple tabs open):',
+            err
+          );
+        } else if (err?.code === 'unimplemented') {
+          // Browser environment does not support all required IndexedDB features.
+          console.warn(
+            'Firestore IndexedDB persistence is not supported in this browser:',
+            err
+          );
+        } else {
+          console.warn('Failed to enable Firestore IndexedDB persistence:', err);
+        }
+      })
+    : Promise.resolve();
 export const auth = getAuth(app);
 
 setPersistence(auth, browserLocalPersistence).catch((err) => {
@@ -174,6 +177,7 @@ export function handleFirestoreError(
 }
 
 async function testConnection() {
+  await firestorePersistenceReady;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -182,4 +186,4 @@ async function testConnection() {
     }
   }
 }
-testConnection();
+void testConnection();

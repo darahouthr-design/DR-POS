@@ -80,10 +80,11 @@ export const ProductImage: React.FC<{
   if (!resolved || failed) {
     return (
       <div
-        className={`flex flex-col items-center justify-center rounded-control border border-border/60 bg-background px-3 text-center ${className}`}
+        className={`flex flex-col items-center justify-center overflow-hidden rounded-control border border-border/60 bg-background px-1.5 text-center ${className}`}
       >
-        <span className="text-xs font-semibold text-primary line-clamp-2">{alt}</span>
-        <span className="mt-0.5 text-[11px] text-muted">DR-POS</span>
+        <span className="text-[10px] sm:text-xs font-semibold text-primary line-clamp-2 leading-tight break-words">
+          {alt}
+        </span>
       </div>
     );
   }
