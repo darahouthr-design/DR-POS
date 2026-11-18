@@ -272,6 +272,32 @@ service cloud.firestore {
         data.serverCreatedAt is timestamp;
     }
 
+    function isValidSalePresence(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'id', 'ownerUid', 'saleName', 'saleKey', 'ownerAdminEmail',
+          'online', 'activePage', 'deviceType', 'loggedInAt', 'lastSeenAt',
+          'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerUid', 'saleName', 'saleKey', 'ownerAdminEmail',
+          'online', 'activePage', 'deviceType', 'loggedInAt', 'lastSeenAt',
+          'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.saleName is string && data.saleName.size() > 0 && data.saleName.size() <= 200 &&
+        data.saleKey is string && data.saleKey.size() > 0 && data.saleKey.size() <= 200 &&
+        data.ownerAdminEmail is string && data.ownerAdminEmail.size() <= 200 &&
+        data.online is bool &&
+        data.activePage is string && data.activePage.size() <= 64 &&
+        data.deviceType is string && data.deviceType.size() <= 32 &&
+        data.loggedInAt is string && data.loggedInAt.size() <= 64 &&
+        data.lastSeenAt is string && data.lastSeenAt.size() <= 64 &&
+        data.serverUpdatedAt is timestamp;
+    }
+
     function isValidDeveloperVaultId(vaultId) {
       return isValidId(vaultId) && vaultId == 'devvault_a882249ff19ca7af4920b868d2613325';
     }
@@ -455,6 +481,32 @@ service cloud.firestore {
 
         allow update: if false;
         allow delete: if isValidId(workspaceId) && isValidId(problemCustomerId) && isWorkspaceOwner(workspaceId);
+      }
+
+      // Sale Online Presence Subcollection
+      match /salePresence/{presenceId} {
+        allow get: if isValidId(workspaceId) && isValidId(presenceId) && isWorkspaceOwner(workspaceId);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(presenceId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidSalePresence(incoming()) &&
+          incoming().id == presenceId &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(presenceId) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidSalePresence(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().loggedInAt == existing().loggedInAt &&
+          incoming().serverUpdatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'saleName', 'saleKey', 'ownerAdminEmail', 'online',
+            'activePage', 'deviceType', 'lastSeenAt', 'serverUpdatedAt'
+          ]);
+
+        allow delete: if isValidId(workspaceId) && isValidId(presenceId) && isWorkspaceOwner(workspaceId);
       }
     }
 

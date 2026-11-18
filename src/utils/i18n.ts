@@ -123,6 +123,50 @@ export interface TranslationDict {
     colOrderDate: string;
     colCustomerName: string;
     colSoldItems: string;
+    monthlyYearlyTitle: string;
+    monthlyYearlySubtitle: string;
+    selectMonthLabel: string;
+    selectYearLabel: string;
+    monthlyRevenue: string;
+    monthlyNetProfit: string;
+    monthlyItemsSold: string;
+    yearlyRevenue: string;
+    yearlyNetProfit: string;
+    yearlyItemsSold: string;
+    profitMarginLabel: string;
+    staffLineChartTitle: string;
+    staffLineChartSubtitle: string;
+    metricUnits: string;
+    metricOrders: string;
+    metricRevenue: string;
+    allStaffOption: string;
+    noStaffChartData: string;
+    monthActiveReadout: string;
+    recentFilterAll: string;
+    recentFilterPaid: string;
+    recentFilterUnpaid: string;
+    colInvoiceDate: string;
+    colStatus: string;
+    noFilteredOrders: string;
+    salePresenceTitle: string;
+    salePresenceSubtitle: string;
+    onlineCountSummary: string;
+    statusOnline: string;
+    statusOffline: string;
+    filterOnlineOnly: string;
+    filterAllSales: string;
+    noOnlineSalesYet: string;
+    noConfiguredSales: string;
+    lastSeenPrefix: string;
+    loggedInAtPrefix: string;
+    neverLoggedIn: string;
+    justNow: string;
+    minutesAgo: string;
+    hoursAgo: string;
+    deviceMobile: string;
+    deviceTablet: string;
+    deviceDesktop: string;
+    manageSalesBtn: string;
   };
   pos: {
     title: string;
@@ -779,6 +823,50 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colOrderDate: 'កាលបរិច្ឆេទបញ្ជាទិញ',
       colCustomerName: 'ឈ្មោះអតិថិជន',
       colSoldItems: 'ឈ្មោះទំនិញលក់បាន',
+      monthlyYearlyTitle: 'របាយការណ៍ចំណូលលក់ និងប្រាក់ចំណេញសុទ្ធ (ប្រចាំខែ / ប្រចាំឆ្នាំ)',
+      monthlyYearlySubtitle: 'សង្ខេបចំណូលលក់ និងប្រាក់ចំណេញសុទ្ធសម្រាប់ខែ និងឆ្នាំដែលបានជ្រើសរើស',
+      selectMonthLabel: 'ខែ',
+      selectYearLabel: 'ឆ្នាំ',
+      monthlyRevenue: 'ចំណូលលក់ប្រចាំខែ',
+      monthlyNetProfit: 'ប្រាក់ចំណេញសុទ្ធប្រចាំខែ',
+      monthlyItemsSold: 'ទំនិញលក់បានប្រចាំខែ',
+      yearlyRevenue: 'ចំណូលលក់ប្រចាំឆ្នាំ',
+      yearlyNetProfit: 'ប្រាក់ចំណេញសុទ្ធប្រចាំឆ្នាំ',
+      yearlyItemsSold: 'ទំនិញលក់បានប្រចាំឆ្នាំ',
+      profitMarginLabel: 'អត្រាចំណេញ',
+      staffLineChartTitle: 'ក្រាហ្វិកប្រៀបធៀបការលក់បុគ្គលិកប្រចាំខែ (Line Graphic)',
+      staffLineChartSubtitle: 'ប្រៀបធៀបចំនួនលក់របស់បុគ្គលិកតាមខែនីមួយៗក្នុងឆ្នាំ',
+      metricUnits: 'ចំនួនលក់',
+      metricOrders: 'វិក្កយបត្រ',
+      metricRevenue: 'ចំណូល',
+      allStaffOption: 'បុគ្គលិកទាំងអស់',
+      noStaffChartData: 'មិនទាន់មានទិន្នន័យលក់របស់បុគ្គលិកសម្រាប់ឆ្នាំនេះនៅឡើយទេ។',
+      monthActiveReadout: 'ព័ត៌មានលក់ប្រចាំខែ',
+      recentFilterAll: 'ទាំងអស់',
+      recentFilterPaid: 'ទូទាត់រួច',
+      recentFilterUnpaid: 'មិនទាន់ទូទាត់',
+      colInvoiceDate: 'វិក្កយបត្រ / កាលបរិច្ឆេទ',
+      colStatus: 'ស្ថានភាព',
+      noFilteredOrders: 'មិនមានការបញ្ជាទិញតាមស្ថានភាពដែលបានជ្រើសរើសទេ។',
+      salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់ Sale (Online)',
+      salePresenceSubtitle: 'បង្ហាញការចូលប្រើប្រាស់ Web App របស់បុគ្គលិក Sale ម្នាក់ៗក្នុងពេលជាក់ស្ដែង (សម្រាប់តែ Admin មេ)',
+      onlineCountSummary: 'កំពុង Online',
+      statusOnline: 'Online',
+      statusOffline: 'Offline',
+      filterOnlineOnly: 'កំពុង Online',
+      filterAllSales: 'ទាំងអស់',
+      noOnlineSalesYet: 'មិនទាន់មាន Sale កំពុងចូលប្រើប្រាស់ Web App នៅពេលនេះទេ។',
+      noConfiguredSales: 'មិនទាន់មានឈ្មោះ Sale ក្នុងការកំណត់នៅឡើយទេ។',
+      lastSeenPrefix: 'សកម្មចុងក្រោយ៖',
+      loggedInAtPrefix: 'ចូលប្រើ៖',
+      neverLoggedIn: 'មិនទាន់ធ្លាប់ចូលប្រើ',
+      justNow: 'ឥឡូវនេះ',
+      minutesAgo: '{n} នាទីមុន',
+      hoursAgo: '{n} ម៉ោងមុន',
+      deviceMobile: 'ទូរស័ព្ទ',
+      deviceTablet: 'Tablet',
+      deviceDesktop: 'កុំព្យូទ័រ',
+      manageSalesBtn: 'គ្រប់គ្រង Sale',
     },
     pos: {
       title: 'ផ្ទាំងលក់ទំនិញ',
@@ -1453,6 +1541,50 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colOrderDate: 'Order Date',
       colCustomerName: 'Customer Name',
       colSoldItems: 'Sold Products',
+      monthlyYearlyTitle: 'Monthly & Yearly Revenue & Net Profit',
+      monthlyYearlySubtitle: 'Sales revenue and net profit breakdown for selected month and year',
+      selectMonthLabel: 'Month',
+      selectYearLabel: 'Year',
+      monthlyRevenue: 'Monthly Revenue',
+      monthlyNetProfit: 'Monthly Net Profit',
+      monthlyItemsSold: 'Monthly Items Sold',
+      yearlyRevenue: 'Yearly Revenue',
+      yearlyNetProfit: 'Yearly Net Profit',
+      yearlyItemsSold: 'Yearly Items Sold',
+      profitMarginLabel: 'Margin',
+      staffLineChartTitle: 'Staff Monthly Sales Comparison (Line Graphic)',
+      staffLineChartSubtitle: 'Compare monthly sales volume across staff in',
+      metricUnits: 'Units Sold',
+      metricOrders: 'Orders',
+      metricRevenue: 'Revenue',
+      allStaffOption: 'All Staff',
+      noStaffChartData: 'No staff sales data recorded for this year yet.',
+      monthActiveReadout: 'Monthly Breakdown',
+      recentFilterAll: 'All',
+      recentFilterPaid: 'Paid',
+      recentFilterUnpaid: 'Unpaid',
+      colInvoiceDate: 'Invoice / Date',
+      colStatus: 'Status',
+      noFilteredOrders: 'No orders match the selected payment filter.',
+      salePresenceTitle: 'Live Sale Access Status (Online)',
+      salePresenceSubtitle: 'Real-time web app login status for each Sale user (Master Admin Only)',
+      onlineCountSummary: 'Online Now',
+      statusOnline: 'Online',
+      statusOffline: 'Offline',
+      filterOnlineOnly: 'Online Only',
+      filterAllSales: 'All Sales',
+      noOnlineSalesYet: 'No Sale users are currently online right now.',
+      noConfiguredSales: 'No Sale profiles configured in Settings yet.',
+      lastSeenPrefix: 'Last active:',
+      loggedInAtPrefix: 'Signed in:',
+      neverLoggedIn: 'Not signed in yet',
+      justNow: 'Just now',
+      minutesAgo: '{n}m ago',
+      hoursAgo: '{n}h ago',
+      deviceMobile: 'Mobile',
+      deviceTablet: 'Tablet',
+      deviceDesktop: 'Desktop',
+      manageSalesBtn: 'Manage Sales',
     },
     pos: {
       title: 'POS Terminal',
@@ -2125,6 +2257,50 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colOrderDate: '주문 일시',
       colCustomerName: '고객명',
       colSoldItems: '판매 상품',
+      monthlyYearlyTitle: '월간 및 연간 매출 · 순이익 리포트',
+      monthlyYearlySubtitle: '선택한 월과 연도의 매출 및 순이익 요약',
+      selectMonthLabel: '월',
+      selectYearLabel: '연도',
+      monthlyRevenue: '월간 매출',
+      monthlyNetProfit: '월간 순이익',
+      monthlyItemsSold: '월간 판매 수량',
+      yearlyRevenue: '연간 매출',
+      yearlyNetProfit: '연간 순이익',
+      yearlyItemsSold: '연간 판매 수량',
+      profitMarginLabel: '수익률',
+      staffLineChartTitle: '직원별 월간 판매 비교 (Line Graphic)',
+      staffLineChartSubtitle: '연도별 직원 월간 판매 실적 비교:',
+      metricUnits: '판매 수량',
+      metricOrders: '주문 건수',
+      metricRevenue: '매출액',
+      allStaffOption: '전체 직원',
+      noStaffChartData: '해당 연도의 직원 판매 데이터가 아직 없습니다.',
+      monthActiveReadout: '월별 상세 내역',
+      recentFilterAll: '전체',
+      recentFilterPaid: '결제완료',
+      recentFilterUnpaid: '미결제',
+      colInvoiceDate: '주문번호 / 일시',
+      colStatus: '상태',
+      noFilteredOrders: '선택한 결제 상태에 해당하는 주문이 없습니다.',
+      salePresenceTitle: '실시간 Sale 접속 현황 (Online)',
+      salePresenceSubtitle: '각 Sale 직원의 웹앱 실시간 접속 상태 (메인 관리자 전용)',
+      onlineCountSummary: '현재 접속 중',
+      statusOnline: 'Online',
+      statusOffline: 'Offline',
+      filterOnlineOnly: '접속 중만',
+      filterAllSales: '전체 Sale',
+      noOnlineSalesYet: '현재 웹앱에 접속 중인 Sale 직원이 없습니다.',
+      noConfiguredSales: '설정에 등록된 Sale 계정이 아직 없습니다.',
+      lastSeenPrefix: '마지막 활동:',
+      loggedInAtPrefix: '접속 시간:',
+      neverLoggedIn: '접속 기록 없음',
+      justNow: '방금 전',
+      minutesAgo: '{n}분 전',
+      hoursAgo: '{n}시간 전',
+      deviceMobile: '모바일',
+      deviceTablet: '태블릿',
+      deviceDesktop: '데스크톱',
+      manageSalesBtn: 'Sale 관리',
     },
     pos: {
       title: '판매 포스 (POS Terminal)',

@@ -53,6 +53,7 @@ import type {
   PriceTier,
   ProblemCustomer,
   Product,
+  SalePresence,
   SaleProfile,
   StaffMember,
   StockLogEntry,
@@ -2333,6 +2334,7 @@ export async function deleteAccountWorkspaceFs(
     'priceRecords',
     'stockLogs',
     'problemCustomers',
+    'salePresence',
   ] as const;
 
   for (const sub of subcollections) {
@@ -2360,4 +2362,123 @@ export async function deleteAccountWorkspaceFs(
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `workspaces/${uid}`);
   }
+}
+
+function stripSalePresence(raw: Record<string, unknown>): SalePresence {
+  const srvTs = raw.serverUpdatedAt as { toMillis?: () => number } | undefined;
+  const serverUpdatedMs =
+    srvTs && typeof srvTs.toMillis === 'function' ? srvTs.toMillis() : undefined;
+  return {
+    id: String(raw.id || ''),
+    ownerUid: String(raw.ownerUid || ''),
+    saleName: String(raw.saleName || ''),
+    saleKey: String(raw.saleKey || ''),
+    ownerAdminEmail: String(raw.ownerAdminEmail || '').toLowerCase(),
+    online: Boolean(raw.online),
+    activePage: String(raw.activePage || 'dashboard'),
+    deviceType: String(raw.deviceType || 'desktop'),
+    loggedInAt: String(raw.loggedInAt || ''),
+    lastSeenAt: String(raw.lastSeenAt || ''),
+    ...(serverUpdatedMs ? { serverUpdatedMs } : {}),
+  };
+}
+
+export async function upsertSalePresenceFs(
+  uid: string,
+  payload: {
+    presenceId: string;
+    saleName: string;
+    saleKey: string;
+    ownerAdminEmail: string;
+    online: boolean;
+    activePage: string;
+    deviceType: string;
+    loggedInAt: string;
+  }
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+  const cleanId = payload.presenceId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+  const cleanName = payload.saleName.trim().slice(0, 200);
+  const cleanKey = payload.saleKey.trim().toLowerCase().slice(0, 200);
+  if (!cleanId || !cleanName || !cleanKey) return;
+
+  const ref = doc(db, 'workspaces', uid, 'salePresence', cleanId);
+  const nowIso = new Date().toISOString();
+  const updateBody = {
+    saleName: cleanName,
+    saleKey: cleanKey,
+    ownerAdminEmail: payload.ownerAdminEmail.trim().toLowerCase().slice(0, 200),
+    online: Boolean(payload.online),
+    activePage: String(payload.activePage || 'dashboard').slice(0, 64),
+    deviceType: String(payload.deviceType || 'desktop').slice(0, 32),
+    lastSeenAt: nowIso,
+    serverUpdatedAt: serverTimestamp(),
+  };
+
+  try {
+    await updateDoc(ref, updateBody);
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    const msg = err instanceof Error ? err.message : String(err || '');
+    if (
+      code === 'not-found' ||
+      msg.toLowerCase().includes('no document to update') ||
+      msg.toLowerCase().includes('not-found')
+    ) {
+      try {
+        await setDoc(ref, {
+          id: cleanId,
+          ownerUid: uid,
+          ...updateBody,
+          loggedInAt: String(payload.loggedInAt || nowIso).slice(0, 64),
+        });
+      } catch {
+        // Ignore transient offline/unauthenticated teardown races
+      }
+      return;
+    }
+  }
+}
+
+export async function markSalePresenceOfflineFs(
+  uid: string,
+  presenceId: string
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) return;
+  const cleanId = presenceId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128);
+  if (!cleanId) return;
+  try {
+    await updateDoc(doc(db, 'workspaces', uid, 'salePresence', cleanId), {
+      online: false,
+      lastSeenAt: new Date().toISOString(),
+      serverUpdatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Ignore if document wasn't created yet or user signed out mid-flight
+  }
+}
+
+export function subscribeToSalePresence(
+  uid: string,
+  onUpdate: (items: SalePresence[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = `workspaces/${uid}/salePresence`;
+  const q = query(collection(db, 'workspaces', uid, 'salePresence'), where('ownerUid', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs.map((d) => stripSalePresence(d.data()));
+      onUpdate(list);
+    },
+    (err) => {
+      if (onError) {
+        try {
+          handleFirestoreError(err, OperationType.LIST, path);
+        } catch (wrapped) {
+          onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+        }
+      }
+    }
+  );
 }

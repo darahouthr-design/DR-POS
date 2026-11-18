@@ -15,15 +15,18 @@ import {
   deleteProductFs,
   deleteStaffFs,
   fetchLatestWorkspaceSaleProfilesFromServer,
+  markSalePresenceOfflineFs,
   reorderProductsFs,
   savePriceRecordFs,
   saveProductFs,
   saveStaffFs,
   seedWorkspaceIfNeeded,
+  subscribeToSalePresence,
   subscribeToWorkspace,
   updateOrderFs,
   updateSettingsFs,
   updateWorkspaceLicenseFs,
+  upsertSalePresenceFs,
   type WorkspaceSubscription,
 } from './services/firestoreWorkspace';
 import {
@@ -103,12 +106,56 @@ import type {
   PriceTier,
   ProblemCustomer,
   Product,
+  SalePresence,
   SaleProfile,
   StaffMember,
   WorkspaceData,
   WorkspacePaginationState,
   WorkspaceSettings,
 } from './types';
+
+const PRESENCE_ID_STORAGE_KEY = 'drpos_sale_presence_id';
+const PRESENCE_LOGIN_STORAGE_KEY = 'drpos_sale_logged_in_at';
+const PRESENCE_OWNER_STORAGE_KEY = 'drpos_sale_presence_owner';
+
+function clearSalePresenceSessionKeys() {
+  try {
+    sessionStorage.removeItem(PRESENCE_ID_STORAGE_KEY);
+    sessionStorage.removeItem(PRESENCE_LOGIN_STORAGE_KEY);
+    sessionStorage.removeItem(PRESENCE_OWNER_STORAGE_KEY);
+  } catch {
+    // Ignore storage unavailability
+  }
+}
+
+function getOrCreateTabSalePresence(ownerTag: string): { presenceId: string; loggedInAt: string } {
+  const nowIso = new Date().toISOString();
+  const fallbackId = `pres_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    const existingOwner = sessionStorage.getItem(PRESENCE_OWNER_STORAGE_KEY);
+    const existingId = sessionStorage.getItem(PRESENCE_ID_STORAGE_KEY);
+    const existingLogin = sessionStorage.getItem(PRESENCE_LOGIN_STORAGE_KEY);
+    if (existingOwner === ownerTag && existingId && /^[a-zA-Z0-9_-]{6,120}$/.test(existingId)) {
+      return {
+        presenceId: existingId,
+        loggedInAt: existingLogin || nowIso,
+      };
+    }
+    sessionStorage.setItem(PRESENCE_OWNER_STORAGE_KEY, ownerTag);
+    sessionStorage.setItem(PRESENCE_ID_STORAGE_KEY, fallbackId);
+    sessionStorage.setItem(PRESENCE_LOGIN_STORAGE_KEY, nowIso);
+    return { presenceId: fallbackId, loggedInAt: nowIso };
+  } catch {
+    return { presenceId: fallbackId, loggedInAt: nowIso };
+  }
+}
+
+function detectPresenceDeviceType(): string {
+  if (typeof window === 'undefined') return 'desktop';
+  if (window.innerWidth < 768) return 'mobile';
+  if (window.innerWidth < 1024) return 'tablet';
+  return 'desktop';
+}
 
 const NAV_ITEMS: Array<{ id: PageId; icon: Icon3DName }> = [
   { id: 'dashboard', icon: 'dashboard' },
@@ -156,6 +203,7 @@ export function App() {
   const [loadingMoreStockLogs, setLoadingMoreStockLogs] = useState(false);
   const [licenseClockTick, setLicenseClockTick] = useState(0);
   const [todayDateKey, setTodayDateKey] = useState(() => todayLocalISO());
+  const [salePresenceList, setSalePresenceList] = useState<SalePresence[]>([]);
 
   // Image Zoom Lightbox state
   const [zoomState, setZoomState] = useState<{ url: string | null; title: string }>({
@@ -169,6 +217,8 @@ export function App() {
   const langRef = useRef<'kh' | 'en' | 'kr'>('kh');
   const activeRoleRef = useRef<StoredRolePref>({ role: 'admin' });
   const activeAdminEmailRef = useRef<string>('');
+  const activePageRef = useRef<PageId>('dashboard');
+  const activeSalePresenceRef = useRef<{ uid: string; presenceId: string } | null>(null);
   const latestWorkspaceRef = useRef<WorkspaceData | null>(null);
   const licenseSyncSeqRef = useRef(0);
   const deletingAccountRef = useRef(false);
@@ -178,6 +228,10 @@ export function App() {
   useEffect(() => {
     activeRoleRef.current = roleState;
   }, [roleState]);
+
+  useEffect(() => {
+    activePageRef.current = activePage;
+  }, [activePage]);
 
   useEffect(() => {
     latestWorkspaceRef.current = workspace;
@@ -205,6 +259,9 @@ export function App() {
       notifiedOrderIdsRef.current.clear();
 
       if (!fbUser) {
+        activeSalePresenceRef.current = null;
+        clearSalePresenceSessionKeys();
+        setSalePresenceList([]);
         setFirebaseUser(null);
         setOperatorEmailState('');
         setRoleState({ role: 'admin' });
@@ -270,6 +327,14 @@ export function App() {
 
         const rejectSaleLogin = () => {
           licenseSyncSeqRef.current += 1;
+          if (activeSalePresenceRef.current) {
+            void markSalePresenceOfflineFs(
+              activeSalePresenceRef.current.uid,
+              activeSalePresenceRef.current.presenceId
+            ).catch(() => {});
+            activeSalePresenceRef.current = null;
+          }
+          clearSalePresenceSessionKeys();
           if (wsSubRef.current) {
             wsSubRef.current.unsubscribe();
             wsSubRef.current = null;
@@ -699,6 +764,149 @@ export function App() {
   useEffect(() => {
     activeAdminEmailRef.current = effectiveAdminEmail;
   }, [effectiveAdminEmail]);
+
+  const masterEmailLowerComputed = useMemo(
+    () => (firebaseUser?.email || workspace?.email || '').trim().toLowerCase(),
+    [firebaseUser?.email, workspace?.email]
+  );
+
+  const isMasterAdmin = useMemo(
+    () =>
+      Boolean(
+        firebaseUser &&
+          workspace &&
+          session?.role === 'admin' &&
+          effectiveAdminEmail === masterEmailLowerComputed
+      ),
+    [firebaseUser, workspace, session?.role, effectiveAdminEmail, masterEmailLowerComputed]
+  );
+
+  // Live Sale Web App Presence Heartbeat (tracks when a Sale signs in / navigates / closes tab)
+  useEffect(() => {
+    if (
+      !firebaseUser?.uid ||
+      !hasWorkspace ||
+      session?.role !== 'sale' ||
+      !session.saleName
+    ) {
+      activeSalePresenceRef.current = null;
+      return;
+    }
+
+    const uid = firebaseUser.uid;
+    const saleDisplayName = session.saleName.trim();
+    const saleKey = normalizeSaleKey(saleDisplayName);
+    if (!saleKey) return;
+
+    const { presenceId, loggedInAt } = getOrCreateTabSalePresence(`${uid}:${saleKey}`);
+    activeSalePresenceRef.current = { uid, presenceId };
+
+    const ownerAdmin = (effectiveAdminEmail || masterEmailLowerComputed).trim().toLowerCase();
+
+    const pingOnline = () => {
+      if (deletingAccountRef.current || auth.currentUser?.uid !== uid) return;
+      void upsertSalePresenceFs(uid, {
+        presenceId,
+        saleName: saleDisplayName,
+        saleKey,
+        ownerAdminEmail: ownerAdmin,
+        online: true,
+        activePage: activePageRef.current || 'dashboard',
+        deviceType: detectPresenceDeviceType(),
+        loggedInAt,
+      });
+    };
+
+    pingOnline();
+
+    const heartbeat = window.setInterval(pingOnline, 25_000);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        pingOnline();
+      }
+    };
+    const onOnline = () => pingOnline();
+    const onUnload = () => {
+      if (deletingAccountRef.current) return;
+      void markSalePresenceOfflineFs(uid, presenceId);
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
+
+    return () => {
+      window.clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
+      if (!deletingAccountRef.current && auth.currentUser?.uid === uid) {
+        void markSalePresenceOfflineFs(uid, presenceId);
+      }
+    };
+  }, [
+    firebaseUser?.uid,
+    hasWorkspace,
+    session?.role,
+    session?.saleName,
+    effectiveAdminEmail,
+    masterEmailLowerComputed,
+  ]);
+
+  // Immediately update activePage in Sale's live presence when navigating between tabs
+  useEffect(() => {
+    if (
+      !firebaseUser?.uid ||
+      !hasWorkspace ||
+      session?.role !== 'sale' ||
+      !session.saleName ||
+      !activeSalePresenceRef.current
+    ) {
+      return;
+    }
+    const saleDisplayName = session.saleName.trim();
+    const saleKey = normalizeSaleKey(saleDisplayName);
+    if (!saleKey) return;
+    const { presenceId, loggedInAt } = getOrCreateTabSalePresence(
+      `${firebaseUser.uid}:${saleKey}`
+    );
+    void upsertSalePresenceFs(firebaseUser.uid, {
+      presenceId,
+      saleName: saleDisplayName,
+      saleKey,
+      ownerAdminEmail: (effectiveAdminEmail || masterEmailLowerComputed).trim().toLowerCase(),
+      online: true,
+      activePage,
+      deviceType: detectPresenceDeviceType(),
+      loggedInAt,
+    });
+  }, [
+    activePage,
+    firebaseUser?.uid,
+    hasWorkspace,
+    session?.role,
+    session?.saleName,
+    effectiveAdminEmail,
+    masterEmailLowerComputed,
+  ]);
+
+  // Real-time Sale Presence Subscription (Strictly Master Admin ONLY)
+  useEffect(() => {
+    if (!firebaseUser?.uid || !hasWorkspace || !isMasterAdmin) {
+      setSalePresenceList([]);
+      return;
+    }
+    const unsub = subscribeToSalePresence(
+      firebaseUser.uid,
+      (items) => setSalePresenceList(items),
+      () => {
+        // Presence subscription error is non-fatal for core POS operation
+      }
+    );
+    return () => unsub();
+  }, [firebaseUser?.uid, hasWorkspace, isMasterAdmin]);
 
   // Strict Multi-Admin Isolation across ALL pages:
   // Admin 1 (Master) and Sub-Admins 2, 3... see ONLY their own Orders, Products, Staff,
@@ -1354,6 +1562,9 @@ export function App() {
                 products={visibleProducts}
                 currency={currency}
                 saleName={isSaleRole ? session.saleName : undefined}
+                isMasterAdmin={isMasterAdmin}
+                salePresenceList={isMasterAdmin ? salePresenceList : undefined}
+                saleProfiles={isMasterAdmin ? workspace.settings.saleProfiles : undefined}
                 onNavigate={setActivePage}
               />
             )}
@@ -1667,6 +1878,14 @@ export function App() {
                 }}
                 onLogout={async () => {
                   licenseSyncSeqRef.current += 1;
+                  if (activeSalePresenceRef.current) {
+                    await markSalePresenceOfflineFs(
+                      activeSalePresenceRef.current.uid,
+                      activeSalePresenceRef.current.presenceId
+                    ).catch(() => {});
+                    activeSalePresenceRef.current = null;
+                  }
+                  clearSalePresenceSessionKeys();
                   if (wsSubRef.current) {
                     wsSubRef.current.unsubscribe();
                     wsSubRef.current = null;

@@ -184,6 +184,25 @@
         "serverUpdatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["vaultId", "telegramUrl", "masterAdmins", "subAdminEmails", "updatedAt", "serverUpdatedAt"]
+    },
+    "SalePresence": {
+      "title": "SalePresence",
+      "description": "Real-time Sale user online presence and active session telemetry scoped to workspaceId.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "saleName": { "type": "string", "maxLength": 200 },
+        "saleKey": { "type": "string", "maxLength": 200 },
+        "ownerAdminEmail": { "type": "string", "maxLength": 200 },
+        "online": { "type": "boolean" },
+        "activePage": { "type": "string", "maxLength": 64 },
+        "deviceType": { "type": "string", "maxLength": 32 },
+        "loggedInAt": { "type": "string", "maxLength": 64 },
+        "lastSeenAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "saleName", "saleKey", "ownerAdminEmail", "online", "activePage", "deviceType", "loggedInAt", "lastSeenAt", "serverUpdatedAt"]
     }
   },
   "firestore": {
@@ -214,6 +233,10 @@
     "/workspaces/{workspaceId}/problemCustomers/{problemCustomerId}": {
       "schema": { "$ref": "#/entities/ProblemCustomer" },
       "description": "Problem customer warning records scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/salePresence/{presenceId}": {
+      "schema": { "$ref": "#/entities/SalePresence" },
+      "description": "Real-time Sale online presence sessions scoped to workspaceId."
     },
     "/developerVault/{vaultId}": {
       "schema": { "$ref": "#/entities/DeveloperVault" },

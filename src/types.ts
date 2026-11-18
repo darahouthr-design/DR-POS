@@ -200,3 +200,17 @@ export interface CartItem {
   quantity: number;
   customUnitPrice?: number;
 }
+
+export interface SalePresence {
+  id: string;
+  ownerUid: string;
+  saleName: string;
+  saleKey: string;
+  ownerAdminEmail: string;
+  online: boolean;
+  activePage: string;
+  deviceType: string;
+  loggedInAt: string;
+  lastSeenAt: string;
+  serverUpdatedMs?: number;
+}
