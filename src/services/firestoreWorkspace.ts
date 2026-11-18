@@ -1634,17 +1634,35 @@ export async function createOrderFs(
   const paymentStatus: 'paid' | 'unpaid' =
     payload.paymentStatus === 'unpaid' ? 'unpaid' : 'paid';
 
+  const customerNameClean = String(payload.customerName || '').trim().slice(0, 200);
+  const customerPhoneClean = String(payload.customerPhone || '').trim().slice(0, 64);
+  const customerAddressClean = String(payload.customerAddress || '').trim().slice(0, 500);
+  const storeNameClean = String(payload.storeName || '').trim().slice(0, 120);
+  const groupNameClean = String(payload.groupName || '').trim().slice(0, 120);
+
+  if (
+    !customerNameClean ||
+    !customerPhoneClean ||
+    !customerAddressClean ||
+    !storeNameClean ||
+    !groupNameClean
+  ) {
+    throw new Error(
+      'មិនអនុញ្ញាតឱ្យបញ្ជាទិញជាដាច់ខាត៖ សូមបំពេញ ឈ្មោះអតិថិជន, លេខទូរស័ព្ទ, អាសយដ្ឋាន, ឈ្មោះហាង និង ឈ្មោះ Groups ជាមុនសិន!'
+    );
+  }
+
   const createdOrder: Order = {
     id: orderId,
     orderNumber: `DR-${dateStamp}-${uniqSuffix}`,
     date: String(payload.date || formatDateLocal(now)).slice(0, 32),
     time: String(payload.time || formatTimeLocal(now)).slice(0, 32),
     createdAt: nowIso,
-    customerName: String(payload.customerName || 'អតិថិជនទូទៅ').trim().slice(0, 200),
-    customerPhone: String(payload.customerPhone || '').trim().slice(0, 64),
-    customerAddress: String(payload.customerAddress || '').trim().slice(0, 500),
-    storeName: String(payload.storeName || settings.stores[0] || '').trim().slice(0, 120),
-    groupName: String(payload.groupName || settings.groups[0] || '').trim().slice(0, 120),
+    customerName: customerNameClean,
+    customerPhone: customerPhoneClean,
+    customerAddress: customerAddressClean,
+    storeName: storeNameClean,
+    groupName: groupNameClean,
     staffName: String(payload.staffName || staff[0]?.name || displayName).trim().slice(0, 120),
     warehouse: (builtItems[0]?.warehouse || settings.warehouses[0] || '').slice(0, 120),
     paymentStatus,

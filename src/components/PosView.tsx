@@ -108,6 +108,12 @@ export const PosView: React.FC<PosViewProps> = ({
   const prevCurrencyRef = useRef<CurrencyCode>(currency);
 
   const [submitting, setSubmitting] = useState(false);
+  const [formValidationAttempted, setFormValidationAttempted] = useState(false);
+  const customerNameInputRef = useRef<HTMLInputElement | null>(null);
+  const customerPhoneInputRef = useRef<HTMLInputElement | null>(null);
+  const customerAddressInputRef = useRef<HTMLInputElement | null>(null);
+  const storeSelectRef = useRef<HTMLSelectElement | null>(null);
+  const groupSelectRef = useRef<HTMLSelectElement | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -394,6 +400,54 @@ export const PosView: React.FC<PosViewProps> = ({
     }
   }, [filteredStaff, staffName, lockedSaleName]);
 
+  const effectiveStoreName = filteredStores.includes(storeName) ? storeName.trim() : '';
+  const effectiveGroupName = filteredGroups.includes(groupName) ? groupName.trim() : '';
+
+  const missingRequiredFields = useMemo(() => {
+    const missing: Array<{
+      key: 'customerName' | 'customerPhone' | 'customerAddress' | 'storeName' | 'groupName';
+      label: string;
+    }> = [];
+    if (!customerName.trim()) {
+      missing.push({ key: 'customerName', label: t.pos.fieldCustomerName });
+    }
+    if (!customerPhone.trim()) {
+      missing.push({ key: 'customerPhone', label: t.pos.fieldPhone });
+    }
+    if (!customerAddress.trim()) {
+      missing.push({ key: 'customerAddress', label: t.pos.fieldAddress });
+    }
+    if (!effectiveStoreName) {
+      missing.push({ key: 'storeName', label: t.pos.fieldStore });
+    }
+    if (!effectiveGroupName) {
+      missing.push({ key: 'groupName', label: t.pos.fieldGroups });
+    }
+    return missing;
+  }, [
+    customerName,
+    customerPhone,
+    customerAddress,
+    effectiveStoreName,
+    effectiveGroupName,
+    t.pos.fieldCustomerName,
+    t.pos.fieldPhone,
+    t.pos.fieldAddress,
+    t.pos.fieldStore,
+    t.pos.fieldGroups,
+  ]);
+
+  const missingFieldKeys = useMemo(
+    () => new Set(missingRequiredFields.map((m) => m.key)),
+    [missingRequiredFields]
+  );
+
+  useEffect(() => {
+    if (!cartDrawerOpen || checkoutStep !== 'form') {
+      setFormValidationAttempted(false);
+    }
+  }, [cartDrawerOpen, checkoutStep]);
+
   // Keep cart products synced with live Firestore stock so multi-device stock-outs block checkout immediately
   const liveCart = useMemo(
     () =>
@@ -509,6 +563,7 @@ export const PosView: React.FC<PosViewProps> = ({
     setPriceDrafts({});
     setDiscountType('amount');
     setDiscountInput('');
+    setFormValidationAttempted(false);
   };
 
   useEffect(() => {
@@ -617,15 +672,34 @@ export const PosView: React.FC<PosViewProps> = ({
       setCheckoutStep('items');
       return;
     }
+    setFormValidationAttempted(true);
+    if (missingRequiredFields.length > 0) {
+      const firstMissingKey = missingRequiredFields[0]?.key;
+      const targetEl =
+        firstMissingKey === 'customerName'
+          ? customerNameInputRef.current
+          : firstMissingKey === 'customerPhone'
+          ? customerPhoneInputRef.current
+          : firstMissingKey === 'customerAddress'
+          ? customerAddressInputRef.current
+          : firstMissingKey === 'storeName'
+          ? storeSelectRef.current
+          : groupSelectRef.current;
+      window.requestAnimationFrame(() => {
+        targetEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        targetEl?.focus();
+      });
+      return;
+    }
     setSubmitting(true);
     setStatusFeedback(null);
     const ok = await onCreateOrder({
       date,
-      customerName: customerName.trim() || t.pos.walkInCustomer,
+      customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
       customerAddress: customerAddress.trim(),
-      storeName: storeName || settings.stores[0] || '',
-      groupName: groupName || settings.groups[0] || '',
+      storeName: effectiveStoreName,
+      groupName: effectiveGroupName,
       staffName: lockedSaleName || staffName || availableSalesAndStaff[0]?.name || '',
       paymentStatus,
       note: note.trim(),
@@ -641,6 +715,7 @@ export const PosView: React.FC<PosViewProps> = ({
     setSubmitting(false);
     if (ok) {
       clearCartAll();
+      setFormValidationAttempted(false);
       setCheckoutStep('items');
       setCartDrawerOpen(false);
       setCustomerName('');
@@ -1426,7 +1501,29 @@ export const PosView: React.FC<PosViewProps> = ({
                       )}
                     </div>
                   ) : (
-                    <form id="pos-checkout-form" onSubmit={handleCompletePurchase} className="space-y-4">
+                    <form id="pos-checkout-form" noValidate onSubmit={handleCompletePurchase} className="space-y-4">
+                      {formValidationAttempted && missingRequiredFields.length > 0 && (
+                        <div
+                          role="alert"
+                          className="rounded-control border border-danger bg-danger/10 p-3.5 text-xs sm:text-sm text-danger space-y-1.5 shadow-xs"
+                        >
+                          <div className="flex items-start gap-2 font-bold leading-relaxed">
+                            <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 shrink-0 mt-0.5" />
+                            <span>{t.pos.requiredFormAlertTitle}</span>
+                          </div>
+                          <ul className="list-disc pl-6 space-y-0.5 text-xs font-medium">
+                            {missingRequiredFields.map((field) => (
+                              <li key={field.key}>{field.label}</li>
+                            ))}
+                          </ul>
+                          {(settings.stores.length === 0 || settings.groups.length === 0) && (
+                            <p className="text-[11px] font-medium text-danger/90 pt-0.5 leading-relaxed">
+                              {t.pos.requiredSettingsConfigHint}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
                       <div className="rounded-card border border-primary/20 bg-surface-elevated/90 p-3.5 sm:p-4 shadow-xs grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
                         <Field label={t.pos.fieldDate}>
                           <input
@@ -1438,28 +1535,46 @@ export const PosView: React.FC<PosViewProps> = ({
                           />
                         </Field>
 
-                        <Field label={t.pos.fieldCustomerName}>
+                        <Field label={t.pos.fieldCustomerName} required>
                           <input
+                            ref={customerNameInputRef}
                             type="text"
                             required
+                            aria-required="true"
+                            aria-invalid={formValidationAttempted && missingFieldKeys.has('customerName')}
                             value={customerName}
                             onChange={(e) => setCustomerName(e.target.value)}
                             placeholder={t.pos.placeholderCustomerName}
-                            className={inputClass}
+                            className={`${inputClass} ${
+                              formValidationAttempted && missingFieldKeys.has('customerName')
+                                ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                : ''
+                            }`}
                           />
+                          {formValidationAttempted && missingFieldKeys.has('customerName') && (
+                            <span className="block text-[11px] font-semibold text-danger">
+                              {t.pos.requiredFieldEmptyError}
+                            </span>
+                          )}
                         </Field>
 
                         <div className="sm:col-span-2">
-                          <Field label={t.pos.fieldPhone}>
+                          <Field label={t.pos.fieldPhone} required>
                             <div className="relative">
                               <input
+                                ref={customerPhoneInputRef}
                                 type="tel"
+                                required
+                                aria-required="true"
+                                aria-invalid={formValidationAttempted && missingFieldKeys.has('customerPhone')}
                                 value={customerPhone}
                                 onChange={(e) => setCustomerPhone(e.target.value)}
                                 placeholder={t.pos.placeholderPhone}
                                 className={`${inputClass} ${
                                   phoneAlerts.problemMatch || phoneAlerts.unpaidOrders.length > 0
                                     ? 'border-danger focus:ring-danger/40 pr-10 bg-danger/5 font-semibold text-danger'
+                                    : formValidationAttempted && missingFieldKeys.has('customerPhone')
+                                    ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
                                     : ''
                                 }`}
                               />
@@ -1469,6 +1584,11 @@ export const PosView: React.FC<PosViewProps> = ({
                                 </div>
                               )}
                             </div>
+                            {formValidationAttempted && missingFieldKeys.has('customerPhone') && (
+                              <span className="block text-[11px] font-semibold text-danger">
+                                {t.pos.requiredFieldEmptyError}
+                              </span>
+                            )}
                           </Field>
 
                           {/* Inline Warning in POS Form Cart showing the 6 fields */}
@@ -1500,23 +1620,45 @@ export const PosView: React.FC<PosViewProps> = ({
                         </div>
 
                         <div className="sm:col-span-2">
-                          <Field label={t.pos.fieldAddress}>
+                          <Field label={t.pos.fieldAddress} required>
                             <input
+                              ref={customerAddressInputRef}
                               type="text"
+                              required
+                              aria-required="true"
+                              aria-invalid={formValidationAttempted && missingFieldKeys.has('customerAddress')}
                               value={customerAddress}
                               onChange={(e) => setCustomerAddress(e.target.value)}
                               placeholder={t.pos.placeholderAddress}
-                              className={inputClass}
+                              className={`${inputClass} ${
+                                formValidationAttempted && missingFieldKeys.has('customerAddress')
+                                  ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                  : ''
+                              }`}
                             />
+                            {formValidationAttempted && missingFieldKeys.has('customerAddress') && (
+                              <span className="block text-[11px] font-semibold text-danger">
+                                {t.pos.requiredFieldEmptyError}
+                              </span>
+                            )}
                           </Field>
                         </div>
                       </div>
 
                       {/* Search + Filter Store, Group, Sales Staff */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="rounded-control border border-border/75 bg-surface-elevated/85 p-3 shadow-xs space-y-2">
+                        <div
+                          className={`rounded-control border p-3 shadow-xs space-y-2 ${
+                            formValidationAttempted && missingFieldKeys.has('storeName')
+                              ? 'border-danger bg-danger/5'
+                              : 'border-border/75 bg-surface-elevated/85'
+                          }`}
+                        >
                           <span className="block text-xs font-semibold text-foreground leading-relaxed">
                             {t.pos.fieldStore}
+                            <span className="ml-1 font-bold text-danger" aria-hidden="true">
+                              *
+                            </span>
                           </span>
                           <input
                             type="search"
@@ -1526,9 +1668,17 @@ export const PosView: React.FC<PosViewProps> = ({
                             className={inputClass}
                           />
                           <select
-                            value={storeName}
+                            ref={storeSelectRef}
+                            required
+                            aria-required="true"
+                            aria-invalid={formValidationAttempted && missingFieldKeys.has('storeName')}
+                            value={effectiveStoreName}
                             onChange={(e) => setStoreName(e.target.value)}
-                            className={inputClass}
+                            className={`${inputClass} ${
+                              formValidationAttempted && missingFieldKeys.has('storeName')
+                                ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                : ''
+                            }`}
                           >
                             {filteredStores.length === 0 ? (
                               <option value="">{t.pos.noStoreOption}</option>
@@ -1540,11 +1690,25 @@ export const PosView: React.FC<PosViewProps> = ({
                               ))
                             )}
                           </select>
+                          {formValidationAttempted && missingFieldKeys.has('storeName') && (
+                            <span className="block text-[11px] font-semibold text-danger">
+                              {t.pos.requiredFieldEmptyError}
+                            </span>
+                          )}
                         </div>
 
-                        <div className="rounded-control border border-border/75 bg-surface-elevated/85 p-3 shadow-xs space-y-2">
+                        <div
+                          className={`rounded-control border p-3 shadow-xs space-y-2 ${
+                            formValidationAttempted && missingFieldKeys.has('groupName')
+                              ? 'border-danger bg-danger/5'
+                              : 'border-border/75 bg-surface-elevated/85'
+                          }`}
+                        >
                           <span className="block text-xs font-semibold text-foreground leading-relaxed">
                             {t.pos.fieldGroups}
+                            <span className="ml-1 font-bold text-danger" aria-hidden="true">
+                              *
+                            </span>
                           </span>
                           <input
                             type="search"
@@ -1554,9 +1718,17 @@ export const PosView: React.FC<PosViewProps> = ({
                             className={inputClass}
                           />
                           <select
-                            value={groupName}
+                            ref={groupSelectRef}
+                            required
+                            aria-required="true"
+                            aria-invalid={formValidationAttempted && missingFieldKeys.has('groupName')}
+                            value={effectiveGroupName}
                             onChange={(e) => setGroupName(e.target.value)}
-                            className={inputClass}
+                            className={`${inputClass} ${
+                              formValidationAttempted && missingFieldKeys.has('groupName')
+                                ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                : ''
+                            }`}
                           >
                             {filteredGroups.length === 0 ? (
                               <option value="">{t.pos.noGroupOption}</option>
@@ -1568,6 +1740,11 @@ export const PosView: React.FC<PosViewProps> = ({
                               ))
                             )}
                           </select>
+                          {formValidationAttempted && missingFieldKeys.has('groupName') && (
+                            <span className="block text-[11px] font-semibold text-danger">
+                              {t.pos.requiredFieldEmptyError}
+                            </span>
+                          )}
                         </div>
 
                         <div className="rounded-control border border-border/75 bg-surface-elevated/85 p-3 shadow-xs space-y-2">
@@ -1893,40 +2070,54 @@ export const PosView: React.FC<PosViewProps> = ({
                       </Button>
                     </div>
                   ) : (
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <Button
-                        type="submit"
-                        form="pos-checkout-form"
-                        tone="primary"
-                        disabled={readOnly || submitting || liveCart.length === 0 || hasStockBlocker}
-                        className="w-full sm:w-auto sm:order-3 py-3 text-sm sm:text-base font-semibold"
-                      >
-                        <Icon3D name="check" size={18} />
-                        <span className="tabular-nums">
-                          {submitting
-                            ? t.common.saving
-                            : `${t.pos.completePurchaseBtn} · ${formatMoney(cartFinalTotal, currency)}`}
-                        </span>
-                      </Button>
-
-                      <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:order-1">
-                        <Button
-                          tone="quiet"
-                          onClick={() => setCheckoutStep('items')}
-                          className="w-full sm:w-auto text-xs sm:text-sm"
+                    <div className="space-y-2">
+                      {formValidationAttempted && missingRequiredFields.length > 0 && (
+                        <div
+                          role="status"
+                          className="flex items-start gap-2 rounded-control border border-danger/50 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger"
                         >
-                          {t.pos.backStepBtn}
+                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                          <span className="leading-snug">
+                            {t.pos.requiredMissingListPrefix}{' '}
+                            {missingRequiredFields.map((f) => f.label).join(', ')}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <Button
+                          type="submit"
+                          form="pos-checkout-form"
+                          tone="primary"
+                          disabled={readOnly || submitting || liveCart.length === 0 || hasStockBlocker}
+                          className="w-full sm:w-auto sm:order-3 py-3 text-sm sm:text-base font-semibold"
+                        >
+                          <Icon3D name="check" size={18} />
+                          <span className="tabular-nums">
+                            {submitting
+                              ? t.common.saving
+                              : `${t.pos.completePurchaseBtn} · ${formatMoney(cartFinalTotal, currency)}`}
+                          </span>
                         </Button>
 
-                        <Button
-                          tone="danger"
-                          disabled={readOnly}
-                          onClick={handleFlagProblemCustomer}
-                          className="w-full sm:w-auto text-xs sm:text-sm sm:order-2"
-                        >
-                          <Icon3D name="problem-customers" size={18} />
-                          <span className="truncate">{t.pos.flagProblemBtn}</span>
-                        </Button>
+                        <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:order-1">
+                          <Button
+                            tone="quiet"
+                            onClick={() => setCheckoutStep('items')}
+                            className="w-full sm:w-auto text-xs sm:text-sm"
+                          >
+                            {t.pos.backStepBtn}
+                          </Button>
+
+                          <Button
+                            tone="danger"
+                            disabled={readOnly}
+                            onClick={handleFlagProblemCustomer}
+                            className="w-full sm:w-auto text-xs sm:text-sm sm:order-2"
+                          >
+                            <Icon3D name="problem-customers" size={18} />
+                            <span className="truncate">{t.pos.flagProblemBtn}</span>
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   )}

@@ -42,11 +42,19 @@ export const Button: React.FC<
 export const Field: React.FC<{
   label: string;
   hint?: string;
+  required?: boolean;
   children: React.ReactNode;
   className?: string;
-}> = ({ label, hint, children, className = '' }) => (
+}> = ({ label, hint, required = false, children, className = '' }) => (
   <label className={`block min-w-0 space-y-1.5 ${className}`}>
-    <span className="block text-[13px] sm:text-sm font-medium text-foreground leading-relaxed">{label}</span>
+    <span className="block text-[13px] sm:text-sm font-medium text-foreground leading-relaxed">
+      {label}
+      {required && (
+        <span className="ml-1 font-bold text-danger" aria-hidden="true">
+          *
+        </span>
+      )}
+    </span>
     {children}
     {hint && <span className="block text-xs text-muted leading-relaxed">{hint}</span>}
   </label>

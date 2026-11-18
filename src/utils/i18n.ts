@@ -236,6 +236,10 @@ export interface TranslationDict {
     barcodeAddedMsg: string;
     barcodeFoundMsg: string;
     showMoreProductsBtn: string;
+    requiredFormAlertTitle: string;
+    requiredMissingListPrefix: string;
+    requiredFieldEmptyError: string;
+    requiredSettingsConfigHint: string;
   };
   orders: {
     saleTitlePrefix: string;
@@ -888,6 +892,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: 'បានបន្ថែម "{name}" តាមបារកូដ ({code})!',
       barcodeFoundMsg: 'រកឃើញលេខបារកូដ {code} — កំពុងស្វែងរកក្នុងបញ្ជី។',
       showMoreProductsBtn: 'បង្ហាញទំនិញបន្ថែម ({remaining})',
+      requiredFormAlertTitle: 'មិនអនុញ្ញាតឱ្យបញ្ជាទិញជាដាច់ខាត៖ សូមបំពេញព័ត៌មានចាំបាច់ទាំង ៥ ខាងក្រោមជាមុនសិន!',
+      requiredMissingListPrefix: 'ខ្វះព័ត៌មានចាំបាច់៖',
+      requiredFieldEmptyError: 'តម្រូវឱ្យបំពេញជាដាច់ខាត',
+      requiredSettingsConfigHint: 'ប្រសិនបើមិនទាន់មាន ឈ្មោះហាង ឬ Groups សូមឱ្យ Admin បន្ថែមនៅក្នុងទំព័រ "ការកំណត់ (Settings)" ជាមុនសិន។',
     },
     orders: {
       saleTitlePrefix: 'របាយការណ៍ Orders របស់ Sale៖',
@@ -1558,6 +1566,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: 'Added "{name}" via barcode ({code})!',
       barcodeFoundMsg: 'Detected barcode {code} — filtering product list.',
       showMoreProductsBtn: 'Show More Products ({remaining})',
+      requiredFormAlertTitle: 'Checkout blocked: All 5 required order fields must be filled in before ordering!',
+      requiredMissingListPrefix: 'Missing required:',
+      requiredFieldEmptyError: 'This field is required',
+      requiredSettingsConfigHint: 'If Store or Groups list is empty, ask Admin to configure them in Settings first.',
     },
     orders: {
       saleTitlePrefix: 'Orders Report for Sale:',
@@ -2226,6 +2238,10 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: '바코드({code})로 "{name}" 상품이 추가되었습니다!',
       barcodeFoundMsg: '바코드 {code} 인식됨 — 목록에서 검색 중입니다.',
       showMoreProductsBtn: '상품 더 보기 ({remaining})',
+      requiredFormAlertTitle: '주문 불가: 아래 필수 입력 항목 5가지를 모두 입력해야 주문할 수 있습니다!',
+      requiredMissingListPrefix: '미입력 필수 항목:',
+      requiredFieldEmptyError: '필수 입력 항목입니다',
+      requiredSettingsConfigHint: '매장 또는 그룹 목록이 비어 있다면 먼저 설정(Settings)에서 추가해 주세요.',
     },
     orders: {
       saleTitlePrefix: '개인 주문 내역 (Sale):',
