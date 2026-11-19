@@ -606,6 +606,11 @@ export interface TranslationDict {
     userRestrictedTitle: string;
     userRestrictedNameLabel: string;
     userRestrictedNotice: string;
+    salePersonalPrefsTitle: string;
+    salePersonalPrefsNote: string;
+    saleDarkModeLabel: string;
+    saleSoundLabel: string;
+    saleLanguageLabel: string;
     saleActiveAdminPrefix: string;
     saleSwitchAdminTitle: string;
     saleSwitchAdminSubtitle: string;
@@ -1374,7 +1379,13 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       userRestrictedTitle: 'ព័ត៌មានគណនី (Sale Settings)',
       userRestrictedNameLabel: 'ឈ្មោះ Sale៖',
       userRestrictedNotice:
-        'គណនី Sale លើ Mobile និង Tablet មានសិទ្ធិត្រឹមតែប្ដូរគណនី Admin (Switch Account) និងចាកចេញពីគណនី (Sign out) ប៉ុណ្ណោះ ដោយនៅតែឈរលើឈ្មោះ Sale ផ្ទាល់ខ្លួនដដែល។',
+        'គណនី Sale អាចប្ដូរ Dark Mode, សម្លេងជូនដំណឹង, ភាសា (KH / EN / KR) ផ្ទាល់ខ្លួន, ប្ដូរគណនី Admin (Switch Account) និងចាកចេញពីគណនី (Sign out) ដោយរក្សាឈ្មោះ Sale ផ្ទាល់ខ្លួនដដែល។',
+      salePersonalPrefsTitle: 'ការកំណត់ផ្ទាល់ខ្លួន (Dark Mode, សម្លេង និង ភាសា)',
+      salePersonalPrefsNote:
+        'ការផ្លាស់ប្ដូរនៅទីនេះអនុវត្តចំពោះតែឈ្មោះ Sale របស់អ្នកម្នាក់ប៉ុណ្ណោះ — បុគ្គលិក Sale ផ្សេងទៀត ឬ Admin មិនផ្លាស់ប្ដូរតាមឡើយ។',
+      saleDarkModeLabel: 'Dark Mode / Light Mode',
+      saleSoundLabel: 'សម្លេងជូនដំណឹង',
+      saleLanguageLabel: 'Language (ភាសា — kh / en / kr)',
       saleActiveAdminPrefix: 'Admin កំពុងប្រើ៖',
       saleSwitchAdminTitle: 'ប្ដូរគណនី Admin (Switch Account)',
       saleSwitchAdminSubtitle:
@@ -2156,7 +2167,13 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       userRestrictedTitle: 'Account Info (Sale Settings)',
       userRestrictedNameLabel: 'Sale Name:',
       userRestrictedNotice:
-        'On Mobile & Tablet, Sale accounts only have permission to Switch Account (Admin) and Sign out while staying under your own Sale name.',
+        'Sale accounts can customize personal Dark Mode, Notification Sound, Language (KH / EN / KR), Switch Account (Admin), and Sign out while staying under your own Sale name.',
+      salePersonalPrefsTitle: 'Personal Preferences (Dark Mode, Sound & Language)',
+      salePersonalPrefsNote:
+        'Changes here apply strictly to your own Sale account only — other Sale staff and Admin remain completely unaffected.',
+      saleDarkModeLabel: 'Dark Mode / Light Mode',
+      saleSoundLabel: 'Notification Sound',
+      saleLanguageLabel: 'Language (KH / EN / KR)',
       saleActiveAdminPrefix: 'Active Admin:',
       saleSwitchAdminTitle: 'Switch Account (Admin)',
       saleSwitchAdminSubtitle:
@@ -2938,7 +2955,13 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       userRestrictedTitle: '계정 정보 (Sale 설정)',
       userRestrictedNameLabel: 'Sale 이름:',
       userRestrictedNotice:
-        '모바일 및 태블릿의 Sale 계정은 본인 Sale 이름을 유지한 상태로 관리자 계정 전환(Switch Account) 및 로그아웃(Sign out) 권한만 허용됩니다.',
+        'Sale 계정은 본인 Sale 이름을 유지한 상태로 다크 모드, 알림음, 언어(KH / EN / KR) 개인 설정, 관리자 계정 전환(Switch Account), 로그아웃(Sign out)을 이용할 수 있습니다.',
+      salePersonalPrefsTitle: '개인 설정 (다크 모드, 알림음 및 언어)',
+      salePersonalPrefsNote:
+        '여기서 변경한 설정은 본인 Sale 계정에만 적용되며 다른 Sale 직원이나 관리자에게 영향을 주지 않습니다.',
+      saleDarkModeLabel: '다크 모드 / 라이트 모드',
+      saleSoundLabel: '알림음',
+      saleLanguageLabel: '언어 (KH / EN / KR)',
       saleActiveAdminPrefix: '현재 Admin:',
       saleSwitchAdminTitle: '관리자 계정 전환 (Switch Account)',
       saleSwitchAdminSubtitle:

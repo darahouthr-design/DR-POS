@@ -3,6 +3,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import {
   AlertTriangle,
   ArrowLeftRight,
+  Bell,
   Menu,
   Send,
   Wifi,
@@ -38,6 +39,7 @@ import {
   subscribeToWorkspace,
   updateOrderFs,
   updateProductImageFs,
+  updateSalePreferencesFs,
   updateSettingsFs,
   updateWorkspaceLicenseFs,
   upsertSalePresenceFs,
@@ -116,6 +118,7 @@ import { LanguageProvider } from './utils/i18nContext';
 import type {
   AdminProfile,
   AuthSession,
+  LanguageCode,
   PageId,
   PriceTier,
   ProblemCustomer,
@@ -124,6 +127,7 @@ import type {
   SaleActivityLog,
   SalePresence,
   SaleProfile,
+  SaleUserPreferences,
   StaffMember,
   WorkspaceData,
   WorkspacePaginationState,
@@ -145,6 +149,51 @@ function hashSaleKeyAscii(input: string): string {
     h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
   }
   return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+}
+
+const SALE_PREFS_STORAGE_PREFIX = 'drpos_sale_prefs_v1_';
+
+function getSalePrefsStorageKey(uid: string, saleName: string): string {
+  const saleKey = normalizeSaleKey(saleName);
+  if (!uid || !saleKey) return '';
+  return `${SALE_PREFS_STORAGE_PREFIX}${uid}_${hashSaleKeyAscii(saleKey)}`;
+}
+
+function sanitizeSalePrefs(raw: unknown): SaleUserPreferences | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const out: SaleUserPreferences = {};
+  if (typeof obj.darkMode === 'boolean') out.darkMode = obj.darkMode;
+  if (typeof obj.soundEnabled === 'boolean') out.soundEnabled = obj.soundEnabled;
+  if (obj.language === 'kh' || obj.language === 'en' || obj.language === 'kr') {
+    out.language = obj.language;
+  }
+  if (typeof obj.updatedAt === 'string' && obj.updatedAt) {
+    out.updatedAt = obj.updatedAt;
+  }
+  return out;
+}
+
+function loadSalePrefsFromStorage(uid: string, saleName: string): SaleUserPreferences | null {
+  const key = getSalePrefsStorageKey(uid, saleName);
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return sanitizeSalePrefs(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function saveSalePrefsToStorage(uid: string, saleName: string, prefs: SaleUserPreferences): void {
+  const key = getSalePrefsStorageKey(uid, saleName);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(prefs));
+  } catch {
+    // Ignore storage access restrictions
+  }
 }
 
 function getOrCreateStableDeviceId(): string {
@@ -258,6 +307,10 @@ export function App() {
   const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
+  const [salePrefsState, setSalePrefsState] = useState<{
+    key: string;
+    prefs: SaleUserPreferences;
+  } | null>(null);
 
   // Image Zoom Lightbox state
   const [zoomState, setZoomState] = useState<{ url: string | null; title: string }>({
@@ -318,11 +371,6 @@ export function App() {
 
   useEffect(() => {
     latestWorkspaceRef.current = workspace;
-    if (workspace) {
-      soundEnabledRef.current = workspace.settings.soundEnabled;
-      langRef.current = workspace.settings.language;
-      document.documentElement.classList.toggle('dark', Boolean(workspace.settings.darkMode));
-    }
   }, [workspace]);
 
   const verifyNetworkConnectivity = useCallback(async () => {
@@ -892,6 +940,85 @@ export function App() {
     );
   }, [workspace, session?.role, session?.saleName]);
 
+  const activeSaleStorageKey = useMemo(() => {
+    if (!firebaseUser?.uid || session?.role !== 'sale' || !session.saleName) return '';
+    return getSalePrefsStorageKey(firebaseUser.uid, session.saleName);
+  }, [firebaseUser?.uid, session?.role, session?.saleName]);
+
+  const resolvedSalePrefs = useMemo<SaleUserPreferences | null>(() => {
+    if (!firebaseUser?.uid || session?.role !== 'sale' || !session.saleName || !activeSaleStorageKey) {
+      return null;
+    }
+    const targetSaleKey = normalizeSaleKey(session.saleName);
+    const localPrefs =
+      salePrefsState && salePrefsState.key === activeSaleStorageKey
+        ? salePrefsState.prefs
+        : loadSalePrefsFromStorage(firebaseUser.uid, session.saleName);
+
+    let cloudPrefs: SaleUserPreferences | null = null;
+    let cloudTs = -1;
+    for (const sp of workspace?.settings.saleProfiles || []) {
+      if (normalizeSaleKey(sp?.name || '') !== targetSaleKey) continue;
+      const sanitized = sanitizeSalePrefs(sp.preferences);
+      if (!sanitized) continue;
+      const ts = Date.parse(String(sanitized.updatedAt || '')) || 0;
+      if (ts >= cloudTs) {
+        cloudTs = ts;
+        cloudPrefs = sanitized;
+      }
+    }
+
+    if (!localPrefs && !cloudPrefs) return null;
+    if (!localPrefs) return cloudPrefs;
+    if (!cloudPrefs) return localPrefs;
+
+    const localTs = Date.parse(String(localPrefs.updatedAt || '')) || 0;
+    return localTs >= cloudTs ? { ...cloudPrefs, ...localPrefs } : { ...localPrefs, ...cloudPrefs };
+  }, [
+    firebaseUser?.uid,
+    session?.role,
+    session?.saleName,
+    activeSaleStorageKey,
+    salePrefsState,
+    workspace?.settings.saleProfiles,
+  ]);
+
+  const effectiveDarkMode = useMemo(() => {
+    if (!workspace) return false;
+    if (session?.role === 'sale' && typeof resolvedSalePrefs?.darkMode === 'boolean') {
+      return resolvedSalePrefs.darkMode;
+    }
+    return Boolean(workspace.settings.darkMode);
+  }, [workspace, session?.role, resolvedSalePrefs?.darkMode]);
+
+  const effectiveSoundEnabled = useMemo(() => {
+    if (!workspace) return true;
+    if (session?.role === 'sale' && typeof resolvedSalePrefs?.soundEnabled === 'boolean') {
+      return resolvedSalePrefs.soundEnabled;
+    }
+    return workspace.settings.soundEnabled ?? true;
+  }, [workspace, session?.role, resolvedSalePrefs?.soundEnabled]);
+
+  const effectiveLanguage: LanguageCode = useMemo(() => {
+    if (!workspace) return 'kh';
+    if (
+      session?.role === 'sale' &&
+      (resolvedSalePrefs?.language === 'kh' ||
+        resolvedSalePrefs?.language === 'en' ||
+        resolvedSalePrefs?.language === 'kr')
+    ) {
+      return resolvedSalePrefs.language;
+    }
+    return workspace.settings.language || 'kh';
+  }, [workspace, session?.role, resolvedSalePrefs?.language]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    soundEnabledRef.current = effectiveSoundEnabled;
+    langRef.current = effectiveLanguage;
+    document.documentElement.classList.toggle('dark', Boolean(effectiveDarkMode));
+  }, [workspace, effectiveDarkMode, effectiveSoundEnabled, effectiveLanguage]);
+
   const effectiveAdminEmail = useMemo(() => {
     if (!workspace || !session) return '';
     if (session.role === 'sale') {
@@ -1303,9 +1430,12 @@ export function App() {
     if (!workspace) return null;
     return {
       ...workspace.settings,
+      darkMode: effectiveDarkMode,
+      soundEnabled: effectiveSoundEnabled,
+      language: effectiveLanguage,
       saleProfiles: visibleSaleProfiles,
     };
-  }, [workspace, visibleSaleProfiles]);
+  }, [workspace, effectiveDarkMode, effectiveSoundEnabled, effectiveLanguage, visibleSaleProfiles]);
 
   const visibleStockLogs = useMemo(() => {
     if (!workspace || !session) return [];
@@ -1384,7 +1514,7 @@ export function App() {
     );
   }
 
-  const t = TRANSLATIONS[workspace.settings.language] || TRANSLATIONS.kh;
+  const t = TRANSLATIONS[effectiveLanguage] || TRANSLATIONS.kh;
   const currency = workspace.settings.currency;
   void licenseClockTick;
   const isExpired = isWorkspaceExpired(workspace.license);
@@ -1435,7 +1565,7 @@ export function App() {
   };
 
   return (
-    <LanguageProvider language={workspace.settings.language}>
+    <LanguageProvider language={effectiveLanguage}>
       <MotionConfig reducedMotion="user">
         <div className="min-h-dvh w-full bg-background text-foreground flex">
         {/* Desktop Sidebar (For Sale on Mobile & Tablet, strictly uses the 6-tab bottom bar) */}
@@ -1676,43 +1806,124 @@ export function App() {
                 </div>
               )}
 
-              {/* Accurate Online / Offline Connectivity Indicator */}
-              <button
+              {/* Accurate Online / Offline Signal Tower Indicator */}
+              <motion.button
                 type="button"
                 role="status"
                 aria-live="polite"
                 onClick={() => void verifyNetworkConnectivity()}
+                whileHover={{ scale: 1.07 }}
+                whileTap={{ scale: 0.9 }}
                 title={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
                 aria-label={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
-                className={`inline-flex items-center justify-center gap-1.5 w-[82px] sm:w-[92px] h-10 min-h-[40px] px-0 py-0 rounded-control border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                className={`relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-transparent shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                   isNetworkOnline
-                    ? 'border-success/35 bg-success/10 text-success hover:bg-success/15'
-                    : 'border-danger/45 bg-danger/12 text-danger hover:bg-danger/18'
+                    ? 'text-success hover:bg-success/10'
+                    : 'text-danger hover:bg-danger/10'
                 }`}
               >
-                {isNetworkOnline ? (
-                  <Wifi className="h-4 w-4 shrink-0" aria-hidden="true" />
-                ) : (
-                  <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
-                )}
-                <span>{isNetworkOnline ? t.header.networkOnline : t.header.networkOffline}</span>
-              </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  className="h-6 w-6"
+                >
+                  {/* Signal Tower Mast & Base */}
+                  <path d="M12 9.5v11.5M8.5 21l3.5-10 3.5 10M9.7 17.2h4.6" />
+                  {isNetworkOnline ? (
+                    <>
+                      {/* Center Beacon */}
+                      <motion.circle
+                        cx="12"
+                        cy="7.5"
+                        r="1.6"
+                        fill="currentColor"
+                        stroke="none"
+                        animate={{ scale: [1, 1.25, 1], opacity: [0.85, 1, 0.85] }}
+                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                      {/* Inner Signal Waves */}
+                      <motion.path
+                        d="M8.7 11a4.7 4.7 0 0 1 0-6.8"
+                        animate={{ opacity: [0.35, 1, 0.35] }}
+                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                      <motion.path
+                        d="M15.3 4.2a4.7 4.7 0 0 1 0 6.8"
+                        animate={{ opacity: [0.35, 1, 0.35] }}
+                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                      {/* Outer Signal Waves */}
+                      <motion.path
+                        d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6"
+                        animate={{ opacity: [0.18, 0.95, 0.18] }}
+                        transition={{
+                          duration: 1.8,
+                          delay: 0.35,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                        }}
+                      />
+                      <motion.path
+                        d="M18.2 1.8a8.2 8.2 0 0 1 0 11.6"
+                        animate={{ opacity: [0.18, 0.95, 0.18] }}
+                        transition={{
+                          duration: 1.8,
+                          delay: 0.35,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <circle cx="12" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
+                      <path d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6M18.2 1.8a8.2 8.2 0 0 1 0 11.6" opacity="0.35" />
+                      <path d="M4 4l16 16" strokeWidth="2.1" />
+                    </>
+                  )}
+                </svg>
+              </motion.button>
 
               {/* Bell Notification Icon */}
               <div className="relative shrink-0">
-                <Button
-                  tone="quiet"
+                <motion.button
+                  type="button"
                   onClick={() => setBellOpen((v) => !v)}
-                  className="w-[82px] sm:w-[92px] h-10 min-h-[40px]! px-0! sm:px-0! py-0! relative shrink-0 whitespace-nowrap"
+                  whileHover={{ rotate: [0, -12, 12, -8, 6, 0], transition: { duration: 0.65 } }}
+                  whileTap={{ scale: 0.9 }}
                   aria-label={t.header.notifications}
+                  aria-expanded={bellOpen}
+                  className={`relative inline-flex h-10 w-10 items-center justify-center rounded-full cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                    bellOpen
+                      ? 'bg-amber-500/12 text-amber-600 dark:text-amber-400'
+                      : 'bg-transparent text-amber-600 hover:bg-amber-500/10 dark:text-amber-400'
+                  }`}
                 >
-                  <Icon3D name="bell" size={22} />
+                  <motion.span
+                    aria-hidden="true"
+                    style={{ transformOrigin: '50% 18%' }}
+                    animate={{ rotate: [0, -9, 9, -6, 5, -2, 0] }}
+                    transition={{
+                      duration: 1.05,
+                      repeat: Infinity,
+                      repeatDelay: totalBellAlerts > 0 ? 3.2 : 5.5,
+                      ease: 'easeInOut',
+                    }}
+                    className="inline-flex items-center justify-center"
+                  >
+                    <Bell className="h-6 w-6 fill-amber-400/25 stroke-[2]" />
+                  </motion.span>
                   {totalBellAlerts > 0 && (
-                    <span className="text-xs font-bold tabular-nums text-danger">
-                      {totalBellAlerts}
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-danger text-danger-foreground text-[10px] font-bold leading-none flex items-center justify-center tabular-nums shadow-xs ring-2 ring-surface">
+                      {totalBellAlerts > 99 ? '99+' : totalBellAlerts}
                     </span>
                   )}
-                </Button>
+                </motion.button>
 
                 <AnimatePresence>
                   {bellOpen && (
@@ -1969,9 +2180,9 @@ export function App() {
                     if (!notifiedOrderIdsRef.current.has(created.id)) {
                       notifiedOrderIdsRef.current.add(created.id);
                       playNewOrderNotification(
-                        workspace.settings.soundEnabled,
+                        effectiveSoundEnabled,
                         created.orderNumber,
-                        workspace.settings.language
+                        effectiveLanguage
                       );
                     }
                   })
@@ -2271,6 +2482,40 @@ export function App() {
                     }
                   }
                   return ok;
+                }}
+                onSaveSalePreferences={async (patch: Partial<SaleUserPreferences>) => {
+                  if (!isSaleRole || !session.saleName || !firebaseUser?.uid) return false;
+                  const cleanSale = session.saleName.trim();
+                  const storageKey = getSalePrefsStorageKey(firebaseUser.uid, cleanSale);
+                  const base: SaleUserPreferences = resolvedSalePrefs || {
+                    darkMode: effectiveDarkMode,
+                    soundEnabled: effectiveSoundEnabled,
+                    language: effectiveLanguage,
+                  };
+                  const nextPrefs: SaleUserPreferences = {
+                    ...base,
+                    ...patch,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  saveSalePrefsToStorage(firebaseUser.uid, cleanSale, nextPrefs);
+                  setSalePrefsState({ key: storageKey, prefs: nextPrefs });
+                  if (typeof nextPrefs.darkMode === 'boolean') {
+                    document.documentElement.classList.toggle('dark', nextPrefs.darkMode);
+                  }
+                  if (typeof nextPrefs.soundEnabled === 'boolean') {
+                    soundEnabledRef.current = nextPrefs.soundEnabled;
+                  }
+                  if (nextPrefs.language) {
+                    langRef.current = nextPrefs.language;
+                  }
+                  if (!isWorkspaceExpired(latestWorkspaceRef.current?.license)) {
+                    try {
+                      await updateSalePreferencesFs(firebaseUser.uid, cleanSale, patch);
+                    } catch {
+                      // Local isolated preferences already saved cleanly for this Sale user
+                    }
+                  }
+                  return true;
                 }}
                 onSaveStaff={async (payload: Partial<StaffMember>) => {
                   if (isSaleRole) return false;

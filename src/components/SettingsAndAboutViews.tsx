@@ -17,6 +17,9 @@ import {
   ArrowLeftRight,
   CalendarClock,
   Send,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
   ChevronRight,
   X,
 } from 'lucide-react';
@@ -37,6 +40,7 @@ import type {
   LanguageCode,
   PageId,
   SaleProfile,
+  SaleUserPreferences,
   StaffMember,
   UserAccessRule,
   WorkspaceLicense,
@@ -67,6 +71,7 @@ interface SettingsViewProps {
   isExpired?: boolean;
   isDesktop: boolean;
   onSaveSettings: (next: Partial<WorkspaceSettings>) => Promise<boolean | void> | void;
+  onSaveSalePreferences?: (next: Partial<SaleUserPreferences>) => Promise<boolean | void> | void;
   onSaveStaff: (payload: Partial<StaffMember>) => Promise<boolean>;
   onDeleteStaff: (id: string) => Promise<boolean>;
   onSetAdminPassword: (password: string) => Promise<{ ok: boolean; message: string }>;
@@ -85,6 +90,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isExpired = false,
   isDesktop,
   onSaveSettings,
+  onSaveSalePreferences,
   onSaveStaff,
   onDeleteStaff,
   onSetAdminPassword,
@@ -473,6 +479,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <div className="rounded-control border border-border/70 bg-background/60 px-4 py-3.5 text-xs sm:text-sm text-muted leading-relaxed">
             {t.settings.userRestrictedNotice}
+          </div>
+        </Surface>
+
+        {/* Per-Sale Personal Preferences (Dark Mode, Notification Sound, Language) */}
+        <Surface className="p-4 sm:p-6 space-y-4">
+          <div className="flex items-start gap-3 border-b border-border/60 pb-4">
+            <div className="h-10 w-10 rounded-control bg-primary/10 border border-primary/25 text-primary flex items-center justify-center shrink-0">
+              <SlidersHorizontal className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <h3 className="text-sm sm:text-base font-semibold text-foreground leading-snug">
+                {t.settings.salePersonalPrefsTitle}
+              </h3>
+              <p className="text-xs text-muted leading-relaxed">
+                {t.settings.salePersonalPrefsNote}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+            <Field label={t.settings.saleDarkModeLabel}>
+              <Button
+                type="button"
+                tone={settings.darkMode ? 'primary' : 'quiet'}
+                aria-pressed={Boolean(settings.darkMode)}
+                onClick={() => onSaveSalePreferences?.({ darkMode: !settings.darkMode })}
+                className="w-full h-11 px-3 text-xs sm:text-sm justify-center whitespace-nowrap"
+              >
+                {settings.darkMode ? (
+                  <Moon className="h-4 w-4 shrink-0" />
+                ) : (
+                  <Sun className="h-4 w-4 shrink-0" />
+                )}
+                <span className="truncate">
+                  {settings.darkMode ? t.settings.darkModeText : t.settings.lightModeText}
+                </span>
+              </Button>
+            </Field>
+
+            <Field label={t.settings.saleSoundLabel}>
+              <Button
+                type="button"
+                tone={settings.soundEnabled ? 'primary' : 'quiet'}
+                aria-pressed={Boolean(settings.soundEnabled)}
+                onClick={() => onSaveSalePreferences?.({ soundEnabled: !settings.soundEnabled })}
+                className="w-full h-11 px-3 text-xs sm:text-sm justify-center whitespace-nowrap"
+              >
+                {settings.soundEnabled ? (
+                  <Volume2 className="h-4 w-4 shrink-0" />
+                ) : (
+                  <VolumeX className="h-4 w-4 shrink-0" />
+                )}
+                <span className="truncate">
+                  {settings.soundEnabled ? t.settings.soundOn : t.settings.soundOff}
+                </span>
+              </Button>
+            </Field>
+
+            <Field label={t.settings.saleLanguageLabel} className="sm:col-span-2 lg:col-span-1">
+              <select
+                value={settings.language}
+                onChange={(e) =>
+                  onSaveSalePreferences?.({ language: e.target.value as LanguageCode })
+                }
+                className={inputClass}
+              >
+                <option value="kh">ភាសាខ្មែរ (KH)</option>
+                <option value="en">English (EN)</option>
+                <option value="kr">한국어 (KR)</option>
+              </select>
+            </Field>
           </div>
         </Surface>
 

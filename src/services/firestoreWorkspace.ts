@@ -23,7 +23,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import { normalizePhone, roundUsdPrecision } from '../utils/helpers';
+import { normalizePhone, normalizeSaleKey, roundUsdPrecision } from '../utils/helpers';
 import {
   backfillWorkspaceToMongoOnce,
   deleteOrdersFromMongoBackground,
@@ -59,6 +59,7 @@ import type {
   SaleActivityLog,
   SalePresence,
   SaleProfile,
+  SaleUserPreferences,
   StaffMember,
   StockLogEntry,
   WorkspaceData,
@@ -2303,6 +2304,103 @@ export async function updateSettingsFs(
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateSalePreferencesFs(
+  uid: string,
+  saleName: string,
+  patch: Partial<SaleUserPreferences>
+): Promise<SaleUserPreferences> {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) {
+    throw new Error('សូមចូលគណនីជាមុនសិន មុនពេលរក្សាទុកការកំណត់ផ្ទាល់ខ្លួន។');
+  }
+  const targetSaleKey = normalizeSaleKey(saleName);
+  if (!targetSaleKey) {
+    return {};
+  }
+  const path = `workspaces/${uid}`;
+  const wsRef = doc(db, 'workspaces', uid);
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(wsRef);
+      if (!snap.exists()) {
+        throw new Error('មិនមានទិន្នន័យ Workspace នៅក្នុងប្រព័ន្ធទេ។');
+      }
+      const data = snap.data() || {};
+      const latestSettings = (data.settings || {}) as Partial<WorkspaceSettings>;
+      const currentProfiles = Array.isArray(latestSettings.saleProfiles)
+        ? (latestSettings.saleProfiles as SaleProfile[])
+        : [];
+
+      const matchingProfiles = currentProfiles.filter(
+        (sp) => normalizeSaleKey(sp?.name || '') === targetSaleKey
+      );
+      if (matchingProfiles.length === 0) {
+        const standalonePrefs: SaleUserPreferences = {
+          ...(typeof patch.darkMode === 'boolean' ? { darkMode: patch.darkMode } : {}),
+          ...(typeof patch.soundEnabled === 'boolean' ? { soundEnabled: patch.soundEnabled } : {}),
+          ...(patch.language === 'kh' || patch.language === 'en' || patch.language === 'kr'
+            ? { language: patch.language }
+            : {}),
+          updatedAt: new Date().toISOString().slice(0, 64),
+        };
+        return standalonePrefs;
+      }
+
+      let latestPrevPrefs: SaleUserPreferences = {};
+      let latestPrevMs = -1;
+      for (const mp of matchingProfiles) {
+        if (mp.preferences && typeof mp.preferences === 'object') {
+          const ts = Date.parse(String(mp.preferences.updatedAt || '')) || 0;
+          if (ts >= latestPrevMs) {
+            latestPrevMs = ts;
+            latestPrevPrefs = mp.preferences;
+          }
+        }
+      }
+
+      const nextPrefs: SaleUserPreferences = {
+        ...(typeof patch.darkMode === 'boolean'
+          ? { darkMode: patch.darkMode }
+          : typeof latestPrevPrefs.darkMode === 'boolean'
+            ? { darkMode: latestPrevPrefs.darkMode }
+            : {}),
+        ...(typeof patch.soundEnabled === 'boolean'
+          ? { soundEnabled: patch.soundEnabled }
+          : typeof latestPrevPrefs.soundEnabled === 'boolean'
+            ? { soundEnabled: latestPrevPrefs.soundEnabled }
+            : {}),
+        ...(patch.language === 'kh' || patch.language === 'en' || patch.language === 'kr'
+          ? { language: patch.language }
+          : latestPrevPrefs.language === 'kh' ||
+              latestPrevPrefs.language === 'en' ||
+              latestPrevPrefs.language === 'kr'
+            ? { language: latestPrevPrefs.language }
+            : {}),
+        updatedAt: new Date().toISOString().slice(0, 64),
+      };
+
+      const nextProfiles = currentProfiles.map((sp) =>
+        normalizeSaleKey(sp?.name || '') === targetSaleKey
+          ? { ...sp, preferences: nextPrefs }
+          : sp
+      );
+
+      tx.update(wsRef, {
+        settings: {
+          ...latestSettings,
+          saleProfiles: nextProfiles.slice(0, 100),
+        },
+        serverUpdatedAt: serverTimestamp(),
+      });
+
+      return nextPrefs;
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+    return {};
   }
 }
 

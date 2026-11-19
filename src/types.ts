@@ -127,6 +127,13 @@ export interface UserAccessRule {
 
 export type UserRole = 'admin' | 'sale';
 
+export interface SaleUserPreferences {
+  darkMode?: boolean;
+  soundEnabled?: boolean;
+  language?: LanguageCode;
+  updatedAt?: string;
+}
+
 export interface SaleProfile {
   id: string;
   name: string;
@@ -134,6 +141,7 @@ export interface SaleProfile {
   phone?: string;
   ownerAdminEmail?: string;
   createdAt: string;
+  preferences?: SaleUserPreferences;
 }
 
 export interface AdminProfile {
