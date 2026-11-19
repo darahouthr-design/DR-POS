@@ -82,6 +82,14 @@ export interface TranslationDict {
     useBarcode: string;
     errorBoundaryTitle: string;
     reloadApp: string;
+    cameraPhotoTitle: string;
+    switchCameraBtn: string;
+    captureBtn: string;
+    retakeBtn: string;
+    usePhotoBtn: string;
+    savingPhotoBtn: string;
+    deviceCameraFallbackBtn: string;
+    cameraPhotoPermissionError: string;
   };
   dashboard: {
     dailySalesTitle: string;
@@ -271,15 +279,18 @@ export interface TranslationDict {
     placeholderAddress: string;
     fieldStore: string;
     placeholderSearchStore: string;
+    selectStorePlaceholder: string;
     noStoreOption: string;
     fieldGroups: string;
     placeholderSearchGroup: string;
+    selectGroupPlaceholder: string;
     noGroupOption: string;
     fieldSaleStaff: string;
     autoFilledSaleHint: string;
     placeholderSearchStaff: string;
     noStaffOption: string;
     fieldPaymentStatus: string;
+    selectPaymentStatusPlaceholder: string;
     statusPaidOpt: string;
     statusUnpaidOpt: string;
     fieldDueDate: string;
@@ -335,6 +346,7 @@ export interface TranslationDict {
     allStores: string;
     allGroups: string;
     allWarehouses: string;
+    allStatuses: string;
     clearFilters: string;
     searchOrdersPlaceholder: string;
     noMatchingOrders: string;
@@ -456,6 +468,18 @@ export interface TranslationDict {
     adjustStockBtn: string;
     stockUpdatedMsg: string;
     showMoreProductsBtn: string;
+    capturePhotoBtn: string;
+    photoSavedMsg: string;
+    photoUploadError: string;
+    searchPlaceholder: string;
+    scanQrBarcodeBtn: string;
+    scanFoundMsg: string;
+    scanNotFoundAddMsg: string;
+    scanNotFoundReadOnlyMsg: string;
+    noSearchResults: string;
+    clearSearchBtn: string;
+    addMatchingProductBtn: string;
+    searchCountLabel: string;
   };
   trackStaff: {
     title: string;
@@ -816,13 +840,22 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       zoomTitle: 'ចុចដើម្បីពង្រីករូបភាព (Zoom In / Out)',
       zoomOut: 'បង្រួម',
       zoomIn: 'ពង្រីក',
-      scannerTitle: 'ស្កេនលេខបារកូដ (Camera Barcode)',
-      noCameraError: 'ឧបករណ៍នេះមិនមានកាមេរ៉ាផ្ទាល់ទេ សូមបញ្ចូលលេខបារកូដខាងក្រោម។',
-      cameraAccessError: 'មិនអាចបើកកាមេរ៉ាបានទេ (សូមអនុញ្ញាតសិទ្ធិកាមេរ៉ា ឬបញ្ចូលលេខបារកូដខាងក្រោម)។',
-      scannerPlaceholder: 'បញ្ចូល ឬស្កេនលេខបារកូដ...',
+      scannerTitle: 'ស្កេន QR / បារកូដ (Camera)',
+      noCameraError: 'ឧបករណ៍នេះមិនមានកាមេរ៉ាផ្ទាល់ទេ សូមបញ្ចូលលេខ QR ឬបារកូដខាងក្រោម។',
+      cameraAccessError: 'មិនអាចបើកកាមេរ៉ាបានទេ (សូមអនុញ្ញាតសិទ្ធិកាមេរ៉ា ឬបញ្ចូលលេខកូដខាងក្រោម)។',
+      scannerPlaceholder: 'បញ្ចូល ឬស្កេន QR / បារកូដ...',
       useBarcode: 'យកលេខនេះ',
       errorBoundaryTitle: 'មានបញ្ហាបច្ចេកទេសក្នុងការបង្ហាញផ្ទាំង',
       reloadApp: 'ផ្ទុកកម្មវិធីឡើងវិញ (Reload)',
+      cameraPhotoTitle: 'ថតរូបទំនិញ (Camera)',
+      switchCameraBtn: 'ប្ដូរកាមេរ៉ា',
+      captureBtn: 'ថតរូប',
+      retakeBtn: 'ថតម្ដងទៀត',
+      usePhotoBtn: 'រក្សាទុករូបភាព',
+      savingPhotoBtn: 'កំពុងបង្ហោះ & រក្សាទុក...',
+      deviceCameraFallbackBtn: 'បើកកាមេរ៉ាទូរស័ព្ទ / ជ្រើសរូប',
+      cameraPhotoPermissionError:
+        'មិនអាចបើកកាមេរ៉ាផ្ទាល់បានទេ (សូមអនុញ្ញាតសិទ្ធិកាមេរ៉ា ឬចុចប៊ូតុងខាងក្រោមដើម្បីបើកកាមេរ៉ាទូរស័ព្ទ)។',
     },
     dashboard: {
       dailySalesTitle: 'ទិន្នន័យលក់ប្រចាំថ្ងៃ',
@@ -968,7 +1001,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       openCartCheckout: 'បើកកន្ត្រក / គិតលុយ →',
       cartModalAria: 'កន្ត្រកទំនិញ និងការបញ្ជាទិញ',
       cartStepItemsTitle: 'កន្ត្រកទំនិញ',
-      cartStepFormTitle: 'បំពេញព័ត៌មានបញ្ជាទិញ (POS Form Cart)',
+      cartStepFormTitle: 'បំពេញព័ត៌មានបញ្ជាទិញ',
       totalAmountLabel: 'សរុបទឹកប្រាក់៖',
       discountLabel: 'បញ្ចុះ',
       tabItems: '១. កន្ត្រកទំនិញ',
@@ -1004,34 +1037,37 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       originalPriceLabel: 'តម្លៃដើម',
       resetOriginalPrice: 'តម្លៃដើម',
       fieldDate: 'កាលបរិច្ឆេទ (Date)',
-      fieldCustomerName: 'ឈ្មោះអតិថិជន (Customer Name)',
+      fieldCustomerName: 'ឈ្មោះអតិថិជន',
       placeholderCustomerName: 'បញ្ចូលឈ្មោះអតិថិជន...',
-      fieldPhone: 'លេខទូរស័ព្ទ (Phone Number)',
+      fieldPhone: 'លេខទូរស័ព្ទ',
       placeholderPhone: 'បញ្ចូលលេខទូរស័ព្ទអតិថិជន...',
-      fieldAddress: 'អាសយដ្ឋាន (Address)',
+      fieldAddress: 'អាសយដ្ឋាន',
       placeholderAddress: 'ទីតាំងដឹកជញ្ជូន...',
-      fieldStore: 'ឈ្មោះហាង (Store)',
+      fieldStore: 'ឈ្មោះហាង',
       placeholderSearchStore: 'ស្វែងរកឈ្មោះហាង...',
+      selectStorePlaceholder: '-- ជ្រើសរើសឈ្មោះហាង* --',
       noStoreOption: '-- មិនទាន់មានឈ្មោះហាង --',
       fieldGroups: 'ឈ្មោះ Groups',
       placeholderSearchGroup: 'ស្វែងរក Groups...',
+      selectGroupPlaceholder: '-- ជ្រើសរើសឈ្មោះ Groups --',
       noGroupOption: '-- មិនទាន់មាន Group --',
-      fieldSaleStaff: 'ឈ្មោះបុគ្គលិកលក់ (Sale / Staff)',
+      fieldSaleStaff: 'ឈ្មោះបុគ្គលិកលក់',
       autoFilledSaleHint: 'បំពេញដោយស្វ័យប្រវត្តិតាមឈ្មោះ Sale ដែលបានចូលប្រើប្រាស់',
       placeholderSearchStaff: 'ស្វែងរកបុគ្គលិក / Sale...',
       noStaffOption: '-- មិនទាន់មានបុគ្គលិក --',
-      fieldPaymentStatus: 'ស្ថានភាពទូទាត់ (Payment Status)',
-      statusPaidOpt: 'ទូទាត់រួច (Paid)',
-      statusUnpaidOpt: 'មិនទាន់ទូទាត់ (Unpaid)',
-      fieldDueDate: 'កាលបរិច្ឆេទណាត់ទូទាត់ (Due Date)',
-      fieldNotes: 'កំណត់ចំណាំ (Notes)',
+      fieldPaymentStatus: 'ស្ថានភាពទូទាត់',
+      selectPaymentStatusPlaceholder: 'ជ្រើសរើសការទូទាត់',
+      statusPaidOpt: 'ទូទាត់រួច',
+      statusUnpaidOpt: 'មិនទាន់ទូទាត់',
+      fieldDueDate: 'កាលបរិច្ឆេទណាត់ទូទាត់',
+      fieldNotes: 'កំណត់ចំណាំ',
       placeholderNotes: 'កំណត់ចំណាំបន្ថែមលើការបញ្ជាទិញ...',
-      manualPriceDiscountTitle: 'កែតម្លៃដោយដៃ និងបញ្ចុះតម្លៃ (Manual Price & Discount)',
+      manualPriceDiscountTitle: 'កែតម្លៃដោយដៃ',
       itemsUnitsSummary: '{items} មុខ · {units} ឯកតា',
       manualPriceItemLabel: '១. កែតម្លៃឯកតាទំនិញដោយដៃ',
       perUnitSuffix: '/ 1 ឯកតា',
       newEditedPricePrefix: '→ កែថ្មី៖',
-      orderDiscountLabel: '២. បញ្ចុះតម្លៃលើវិក្កយបត្រ (Discount)៖',
+      orderDiscountLabel: '២. បញ្ចុះតម្លៃលើវិក្កយបត្រ៖',
       discountAmountBtn: 'បញ្ចុះជាទឹកប្រាក់',
       discountPercentBtn: 'បញ្ចុះជាភាគរយ (%)',
       placeholderDiscountPercent: 'បញ្ចូលភាគរយបញ្ចុះ (0 - 100%)...',
@@ -1040,7 +1076,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       discountAmountCapHint: 'ចំនួនទឹកប្រាក់បញ្ចុះតម្លៃមិនអាចលើសពីតម្លៃទំនិញសរុបបានទេ។',
       subtotalSummary: 'តម្លៃទំនិញសរុប (Subtotal)៖',
       discountSummary: 'បញ្ចុះតម្លៃ (Discount',
-      netTotalSummary: 'ទឹកប្រាក់ត្រូវទូទាត់សរុប (Net Total)៖',
+      netTotalSummary: 'ទឹកប្រាក់ត្រូវទូទាត់សរុប៖',
       totalToPayLabel: 'តម្លៃសរុបត្រូវទូទាត់៖',
       nextStepBtn: 'បន្ទាប់ (បំពេញព័ត៌មាន) →',
       backStepBtn: '← ត្រឡប់',
@@ -1054,7 +1090,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: 'បានបន្ថែម "{name}" តាមបារកូដ ({code})!',
       barcodeFoundMsg: 'រកឃើញលេខបារកូដ {code} — កំពុងស្វែងរកក្នុងបញ្ជី។',
       showMoreProductsBtn: 'បង្ហាញទំនិញបន្ថែម ({remaining})',
-      requiredFormAlertTitle: 'មិនអនុញ្ញាតឱ្យបញ្ជាទិញជាដាច់ខាត៖ សូមបំពេញព័ត៌មានចាំបាច់ទាំង ៥ ខាងក្រោមជាមុនសិន!',
+      requiredFormAlertTitle: 'មិនអនុញ្ញាតឱ្យបញ្ជាទិញជាដាច់ខាត៖ សូមបំពេញព័ត៌មានចាំបាច់ទាំង ៦ ខាងក្រោមជាមុនសិន!',
       requiredMissingListPrefix: 'ខ្វះព័ត៌មានចាំបាច់៖',
       requiredFieldEmptyError: 'តម្រូវឱ្យបំពេញជាដាច់ខាត',
       requiredSettingsConfigHint: 'ប្រសិនបើមិនទាន់មាន ឈ្មោះហាង ឬ Groups សូមឱ្យ Admin បន្ថែមនៅក្នុងទំព័រ "ការកំណត់ (Settings)" ជាមុនសិន។',
@@ -1068,14 +1104,15 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       filtersBtn: 'តម្រង',
       printWidthLabel: 'ខ្នាតព្រីន៖',
       exportExcelBtn: 'Export Excel',
-      fromDate: 'ចាប់ពីថ្ងៃ/ខែ/ឆ្នាំ (From Date)',
-      toDate: 'រហូតដល់ថ្ងៃ/ខែ/ឆ្នាំ (To Date)',
-      fromTime: 'ចាប់ពីម៉ោង (From Time)',
-      toTime: 'រហូតដល់ម៉ោង (To Time)',
-      allStaff: 'គ្រប់បុគ្គលិកលក់ / Sale (All Staff)',
-      allStores: 'គ្រប់ហាង (All Stores)',
-      allGroups: 'គ្រប់ Groups (All Groups)',
-      allWarehouses: 'គ្រប់ឃ្លាំង (All Warehouses)',
+      fromDate: 'ចាប់ពីថ្ងៃ/ខែ/ឆ្នាំ',
+      toDate: 'រហូតដល់ថ្ងៃ/ខែ/ឆ្នាំ',
+      fromTime: 'ចាប់ពីម៉ោង',
+      toTime: 'រហូតដល់ម៉ោង',
+      allStaff: 'គ្រប់បុគ្គលិកលក់',
+      allStores: 'គ្រប់ហាង',
+      allGroups: 'គ្រប់',
+      allWarehouses: 'គ្រប់ឃ្លាំង',
+      allStatuses: 'គ្រប់ស្ថានភាពទូទាត់',
       clearFilters: 'សម្អាតការស្វែងរក',
       searchOrdersPlaceholder: 'ស្វែងរកតាមឈ្មោះអតិថិជន, លេខវិក្កយបត្រ ឬលេខទូរស័ព្ទ...',
       noMatchingOrders: 'មិនមានទិន្នន័យការបញ្ជាទិញតាមលក្ខខណ្ឌស្វែងរកទេ។',
@@ -1133,7 +1170,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deleteModalBodyPrefix: 'តើអ្នកពិតជាចង់លុបវិក្កយបត្ររបស់',
       deleteModalBodySuffix: 'មែនទេ? ចំនួនទំនិញទាំងអស់នឹងត្រូវបូកបញ្ចូលក្នុងស្តុកវិញដោយស្វ័យប្រវត្តិ។',
       confirmDeleteRestoreBtn: 'លុប និងបូកស្តុកវិញ',
-      deleteAllBtn: 'លុបទាំងអស់ (Delete All)',
+      deleteAllBtn: 'លុបទាំងអស់',
       deleteAllModalTitle: 'បញ្ជាក់ការលុបរបាយការណ៍ទាំងអស់',
       deleteAllModalBody: 'តើអ្នកពិតជាចង់លុបរបាយការណ៍ការបញ្ជាទិញចំនួន {count} មែនទេ? ចំណាំ៖ ការលុបទាំងអស់ (Delete All) នឹងមិនបូកចំនួនទំនិញចូលស្តុកវិញជាដាច់ខាត (មានតែការលុបធម្មតាម្តងមួយៗប៉ុណ្ណោះដែលបូកស្តុកវិញ)។',
       confirmDeleteAllNoRestoreBtn: 'លុបទាំងអស់ (មិនបូកស្តុកវិញ)',
@@ -1197,6 +1234,18 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       adjustStockBtn: 'បូក/ដកស្តុក',
       stockUpdatedMsg: 'បានកែសម្រួលស្តុក "{name}" ពី {old} ទៅ {next} រួចរាល់!',
       showMoreProductsBtn: 'បង្ហាញទំនិញបន្ថែម ({remaining})',
+      capturePhotoBtn: 'ថតរូប',
+      photoSavedMsg: 'បានថតរូប និងរក្សាទុករូបភាព "{name}" ក្នុងប្រព័ន្ធរួចរាល់!',
+      photoUploadError: 'បរាជ័យក្នុងការបង្ហោះរូបភាព (សូមពិនិត្យអ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត)។',
+      searchPlaceholder: 'ស្វែងរកតាមឈ្មោះទំនិញ ឬ QR / បារកូដ...',
+      scanQrBarcodeBtn: 'ស្កេន QR / បារកូដ',
+      scanFoundMsg: 'រកឃើញទំនិញ "{name}" (កូដ៖ {code})',
+      scanNotFoundAddMsg: 'មិនទាន់មានកូដ "{code}" ទេ — បានបើកផ្ទាំងបន្ថែមទំនិញថ្មីរួចរាល់!',
+      scanNotFoundReadOnlyMsg: 'មិនមានទំនិញដែលមានកូដ "{code}" នៅក្នុងបញ្ជីទេ។',
+      noSearchResults: 'មិនមានទំនិញត្រូវនឹងការស្វែងរក "{query}" ទេ។',
+      clearSearchBtn: 'សម្អាតការស្វែងរក',
+      addMatchingProductBtn: 'បន្ថែម "{query}" ជាទំនិញថ្មី',
+      searchCountLabel: 'បង្ហាញ {shown} / {total} មុខ',
     },
     trackStaff: {
       title: 'តាមដានការលក់របស់បុគ្គលិក',
@@ -1575,13 +1624,22 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       zoomTitle: 'Click to zoom image (Zoom In / Out)',
       zoomOut: 'Zoom Out',
       zoomIn: 'Zoom In',
-      scannerTitle: 'Scan Barcode (Camera Barcode)',
-      noCameraError: 'Camera is not available on this device. Please enter the barcode below.',
-      cameraAccessError: 'Unable to open camera (please allow camera permission or enter barcode manually).',
-      scannerPlaceholder: 'Enter or scan barcode...',
+      scannerTitle: 'Scan QR / Barcode (Camera)',
+      noCameraError: 'Camera is not available on this device. Please enter the QR or barcode below.',
+      cameraAccessError: 'Unable to open camera (please allow camera permission or enter code manually).',
+      scannerPlaceholder: 'Enter or scan QR / barcode...',
       useBarcode: 'Use Code',
       errorBoundaryTitle: 'Display error occurred',
       reloadApp: 'Reload App',
+      cameraPhotoTitle: 'Capture Product Photo',
+      switchCameraBtn: 'Flip Camera',
+      captureBtn: 'Take Photo',
+      retakeBtn: 'Retake',
+      usePhotoBtn: 'Save Photo',
+      savingPhotoBtn: 'Uploading & Saving...',
+      deviceCameraFallbackBtn: 'Use Device Camera / Choose File',
+      cameraPhotoPermissionError:
+        'Unable to open live camera (allow camera permission or use device camera below).',
     },
     dashboard: {
       dailySalesTitle: 'Daily Sales Summary',
@@ -1771,15 +1829,18 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       placeholderAddress: 'Delivery address...',
       fieldStore: 'Store',
       placeholderSearchStore: 'Search store...',
+      selectStorePlaceholder: '-- Select Store* --',
       noStoreOption: '-- No stores configured --',
       fieldGroups: 'Groups',
       placeholderSearchGroup: 'Search groups...',
+      selectGroupPlaceholder: '-- Select Group --',
       noGroupOption: '-- No groups configured --',
       fieldSaleStaff: 'Sales Staff (Sale / Staff)',
       autoFilledSaleHint: 'Auto-filled from your signed-in Sale account',
       placeholderSearchStaff: 'Search staff / Sale...',
       noStaffOption: '-- No staff configured --',
       fieldPaymentStatus: 'Payment Status',
+      selectPaymentStatusPlaceholder: '-- Select Payment Status --',
       statusPaidOpt: 'Paid',
       statusUnpaidOpt: 'Unpaid',
       fieldDueDate: 'Due Date',
@@ -1813,7 +1874,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: 'Added "{name}" via barcode ({code})!',
       barcodeFoundMsg: 'Detected barcode {code} — filtering product list.',
       showMoreProductsBtn: 'Show More Products ({remaining})',
-      requiredFormAlertTitle: 'Checkout blocked: All 5 required order fields must be filled in before ordering!',
+      requiredFormAlertTitle: 'Checkout blocked: All 6 required order fields must be filled in before ordering!',
       requiredMissingListPrefix: 'Missing required:',
       requiredFieldEmptyError: 'This field is required',
       requiredSettingsConfigHint: 'If Store or Groups list is empty, ask Admin to configure them in Settings first.',
@@ -1835,6 +1896,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       allStores: 'All Stores',
       allGroups: 'All Groups',
       allWarehouses: 'All Warehouses',
+      allStatuses: 'All Statuses',
       clearFilters: 'Clear Filters',
       searchOrdersPlaceholder: 'Search by customer name, order number, or phone...',
       noMatchingOrders: 'No orders match the current filters.',
@@ -1956,6 +2018,18 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       adjustStockBtn: 'Stock +/-',
       stockUpdatedMsg: 'Updated "{name}" stock from {old} to {next}!',
       showMoreProductsBtn: 'Show More Products ({remaining})',
+      capturePhotoBtn: 'Camera',
+      photoSavedMsg: 'Captured and saved photo for "{name}" to product record!',
+      photoUploadError: 'Failed to upload photo URL (please check your internet connection and retry).',
+      searchPlaceholder: 'Search by product name or QR / barcode...',
+      scanQrBarcodeBtn: 'Scan QR / Barcode',
+      scanFoundMsg: 'Found product "{name}" (Code: {code})',
+      scanNotFoundAddMsg: 'Code "{code}" not found — opened Add Product form with this code!',
+      scanNotFoundReadOnlyMsg: 'No product found matching code "{code}".',
+      noSearchResults: 'No products match "{query}".',
+      clearSearchBtn: 'Clear Search',
+      addMatchingProductBtn: 'Add "{query}" as New Product',
+      searchCountLabel: 'Showing {shown} of {total}',
     },
     trackStaff: {
       title: 'Track Staff Sales',
@@ -2332,13 +2406,22 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       zoomTitle: '클릭하여 이미지 확대/축소 (Zoom In / Out)',
       zoomOut: '축소',
       zoomIn: '확대',
-      scannerTitle: '바코드 스캔 (카메라)',
-      noCameraError: '이 기기에서 카메라를 사용할 수 없습니다. 아래에 바코드를 직접 입력하세요.',
-      cameraAccessError: '카메라를 열 수 없습니다. 카메라 권한을 허용하거나 아래에 바코드를 입력하세요.',
-      scannerPlaceholder: '바코드 번호 입력 또는 스캔...',
+      scannerTitle: 'QR / 바코드 스캔 (카메라)',
+      noCameraError: '이 기기에서 카메라를 사용할 수 없습니다. 아래에 QR/바코드를 직접 입력하세요.',
+      cameraAccessError: '카메라를 열 수 없습니다. 카메라 권한을 허용하거나 아래에 코드를 입력하세요.',
+      scannerPlaceholder: 'QR / 바코드 번호 입력 또는 스캔...',
       useBarcode: '코드 적용',
       errorBoundaryTitle: '화면 표시 중 오류가 발생했습니다',
       reloadApp: '앱 새로고침 (Reload)',
+      cameraPhotoTitle: '상품 사진 촬영 (카메라)',
+      switchCameraBtn: '카메라 전환',
+      captureBtn: '사진 찍기',
+      retakeBtn: '다시 찍기',
+      usePhotoBtn: '사진 저장',
+      savingPhotoBtn: '업로드 및 저장 중...',
+      deviceCameraFallbackBtn: '기기 카메라 / 파일 선택',
+      cameraPhotoPermissionError:
+        '실시간 카메라를 열 수 없습니다 (카메라 권한을 허용하거나 아래 기기 카메라를 사용하세요).',
     },
     dashboard: {
       dailySalesTitle: '일일 매출 현황',
@@ -2528,15 +2611,18 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       placeholderAddress: '배송지 주소...',
       fieldStore: '매장명 (Store)',
       placeholderSearchStore: '매장 검색...',
+      selectStorePlaceholder: '-- 매장 선택* --',
       noStoreOption: '-- 등록된 매장 없음 --',
       fieldGroups: '그룹 (Groups)',
       placeholderSearchGroup: '그룹 검색...',
+      selectGroupPlaceholder: '-- 그룹 선택 --',
       noGroupOption: '-- 등록된 그룹 없음 --',
       fieldSaleStaff: '담당 직원 (Sale / Staff)',
       autoFilledSaleHint: '로그인한 Sale 계정 이름으로 자동 입력됩니다',
       placeholderSearchStaff: '직원 / Sale 검색...',
       noStaffOption: '-- 등록된 직원 없음 --',
       fieldPaymentStatus: '결제 상태 (Payment Status)',
+      selectPaymentStatusPlaceholder: '-- 결제 상태 선택 --',
       statusPaidOpt: '결제완료 (Paid)',
       statusUnpaidOpt: '미결제 (Unpaid)',
       fieldDueDate: '결제 예정일 (Due Date)',
@@ -2570,7 +2656,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       barcodeAddedMsg: '바코드({code})로 "{name}" 상품이 추가되었습니다!',
       barcodeFoundMsg: '바코드 {code} 인식됨 — 목록에서 검색 중입니다.',
       showMoreProductsBtn: '상품 더 보기 ({remaining})',
-      requiredFormAlertTitle: '주문 불가: 아래 필수 입력 항목 5가지를 모두 입력해야 주문할 수 있습니다!',
+      requiredFormAlertTitle: '주문 불가: 아래 필수 입력 항목 6가지를 모두 입력해야 주문할 수 있습니다!',
       requiredMissingListPrefix: '미입력 필수 항목:',
       requiredFieldEmptyError: '필수 입력 항목입니다',
       requiredSettingsConfigHint: '매장 또는 그룹 목록이 비어 있다면 먼저 설정(Settings)에서 추가해 주세요.',
@@ -2592,6 +2678,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       allStores: '전체 매장',
       allGroups: '전체 그룹',
       allWarehouses: '전체 창고',
+      allStatuses: '전체 결제 상태',
       clearFilters: '필터 초기화',
       searchOrdersPlaceholder: '고객명, 주문번호, 전화번호 검색...',
       noMatchingOrders: '검색 조건에 해당하는 주문이 없습니다.',
@@ -2713,6 +2800,18 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       adjustStockBtn: '재고 +/-',
       stockUpdatedMsg: '"{name}" 재고가 {old}개에서 {next}개로 변경되었습니다!',
       showMoreProductsBtn: '상품 더 보기 ({remaining})',
+      capturePhotoBtn: '카메라',
+      photoSavedMsg: '"{name}" 상품 사진을 촬영하여 저장했습니다!',
+      photoUploadError: '사진 URL 업로드에 실패했습니다 (인터넷 연결을 확인 후 다시 시도해 주세요).',
+      searchPlaceholder: '상품명 또는 QR / 바코드 검색...',
+      scanQrBarcodeBtn: 'QR / 바코드 스캔',
+      scanFoundMsg: '"{name}" 상품을 찾았습니다 (코드: {code})',
+      scanNotFoundAddMsg: '코드 "{code}"가 없어 새 상품 등록 창을 열었습니다!',
+      scanNotFoundReadOnlyMsg: '코드 "{code}"와 일치하는 상품이 없습니다.',
+      noSearchResults: '"{query}"와 일치하는 상품이 없습니다.',
+      clearSearchBtn: '검색 초기화',
+      addMatchingProductBtn: '"{query}" 새 상품으로 추가',
+      searchCountLabel: '{total}개 중 {shown}개 표시',
     },
     trackStaff: {
       title: '직원별 판매 추적 (Track Staff)',

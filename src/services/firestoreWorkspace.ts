@@ -1474,6 +1474,28 @@ export async function saveProductFs(
   }
 }
 
+export async function updateProductImageFs(
+  uid: string,
+  productId: string,
+  imageUrl: string
+): Promise<void> {
+  const cleanId = String(productId || '').trim();
+  const cleanUrl = String(imageUrl || '').trim().slice(0, 2000);
+  if (!cleanId) throw new Error('Product ID is required.');
+  if (!cleanUrl) throw new Error('Product image URL is required.');
+
+  const prodPath = `workspaces/${uid}/products/${cleanId}`;
+  try {
+    await updateDoc(doc(db, 'workspaces', uid, 'products', cleanId), {
+      imageUrl: cleanUrl,
+      updatedAt: new Date().toISOString(),
+      serverUpdatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, prodPath);
+  }
+}
+
 export async function deleteProductFs(uid: string, productId: string): Promise<void> {
   const path = `workspaces/${uid}/products/${productId}`;
   try {

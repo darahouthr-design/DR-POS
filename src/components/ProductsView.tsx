@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, ArrowUp, Camera, CheckCircle2, ChevronDown, GripVertical, PackagePlus, Plus, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Camera, CheckCircle2, ChevronDown, GripVertical, PackagePlus, Plus, QrCode, Search, Upload, X } from 'lucide-react';
 import { Icon3D } from './Icon3D';
-import { BarcodeScannerModal, Button, Field, ProductImage, Surface, inputClass } from './ui';
+import { BarcodeScannerModal, Button, Field, ProductCameraModal, ProductImage, Surface, inputClass } from './ui';
 import {
   formatMoney,
   getCurrencyMeta,
   inputAmountToUsd,
-  uploadImageToCloudinary,
+  uploadProductPhotoUrl,
   usdToInputAmount,
 } from '../utils/helpers';
 import { useI18n } from '../utils/i18nContext';
@@ -20,6 +20,7 @@ interface ProductsViewProps {
   hideWarehouse: boolean;
   readOnly?: boolean;
   onSaveProduct: (payload: Partial<Product>) => Promise<boolean>;
+  onUpdateProductImage?: (productId: string, imageUrl: string) => Promise<boolean>;
   onDeleteProduct: (id: string) => Promise<boolean>;
   onReorderProducts: (orderedIds: string[]) => Promise<void>;
   onZoomImage: (url: string, title: string) => void;
@@ -47,6 +48,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   hideWarehouse,
   readOnly = false,
   onSaveProduct,
+  onUpdateProductImage,
   onDeleteProduct,
   onReorderProducts,
   onZoomImage,
@@ -66,7 +68,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerMode, setScannerMode] = useState<'toolbar' | 'form' | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearch = useDeferredValue(searchQuery);
+  const [photoCameraTarget, setPhotoCameraTarget] = useState<
+    { mode: 'form' } | { mode: 'item'; product: Product } | null
+  >(null);
+  const [cameraSaving, setCameraSaving] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const [uploadFeedback, setUploadFeedback] = useState('');
   const [feedback, setFeedback] = useState('');
 
@@ -86,13 +95,29 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [visibleProdCount, setVisibleProdCount] = useState(PRODUCTS_DOM_STEP);
   const longPressTimerRef = useRef<number | null>(null);
 
+  const trimmedSearch = deferredSearch.trim().toLowerCase();
+  const isFiltering = trimmedSearch.length > 0;
+
+  const filteredProducts = useMemo(() => {
+    if (!trimmedSearch) return localOrder;
+    return localOrder.filter(
+      (p) =>
+        p.name.toLowerCase().includes(trimmedSearch) ||
+        (p.barcode || '').toLowerCase().includes(trimmedSearch)
+    );
+  }, [localOrder, trimmedSearch]);
+
   const visibleProductsList = useMemo(
-    () => (activeReorderId ? localOrder : localOrder.slice(0, visibleProdCount)),
-    [activeReorderId, localOrder, visibleProdCount]
+    () =>
+      activeReorderId || isFiltering
+        ? filteredProducts
+        : filteredProducts.slice(0, visibleProdCount),
+    [activeReorderId, isFiltering, filteredProducts, visibleProdCount]
   );
-  const remainingProdCount = activeReorderId
-    ? 0
-    : Math.max(0, localOrder.length - visibleProdCount);
+  const remainingProdCount =
+    activeReorderId || isFiltering
+      ? 0
+      : Math.max(0, filteredProducts.length - visibleProdCount);
 
   const currencyMeta = getCurrencyMeta(currency);
   const prevCurrencyRef = useRef<CurrencyCode>(currency);
@@ -106,20 +131,21 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
       setFormOpen(false);
       setQuickStockId(null);
       setActiveReorderId(null);
-      setScannerOpen(false);
+      setPhotoCameraTarget(null);
+      setScannerMode((prev) => (prev === 'form' ? null : prev));
     }
   }, [readOnly]);
 
   useEffect(() => {
     if (!formOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !scannerOpen) {
+      if (e.key === 'Escape' && !scannerMode && !photoCameraTarget) {
         setFormOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [formOpen, scannerOpen]);
+  }, [formOpen, scannerMode, photoCameraTarget]);
 
   useEffect(() => {
     const prevCurrency = prevCurrencyRef.current;
@@ -160,11 +186,48 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setUploadFeedback('');
   };
 
-  const openAddModal = () => {
+  const openAddModal = (prefill?: { name?: string; barcode?: string }) => {
     if (readOnly) return;
     resetForm();
+    if (prefill?.name) setName(prefill.name);
+    if (prefill?.barcode) setBarcode(prefill.barcode.slice(0, 120));
     setFeedback('');
     setFormOpen(true);
+  };
+
+  const handleQrBarcodeDetected = (rawCode: string) => {
+    const code = rawCode.trim();
+    if (!code) return;
+
+    if (scannerMode === 'form') {
+      setBarcode(code.slice(0, 120));
+      return;
+    }
+
+    const norm = code.toLowerCase();
+    const matched =
+      products.find((p) => (p.barcode || '').trim().toLowerCase() === norm) ||
+      products.find((p) => p.name.trim().toLowerCase() === norm) ||
+      products.find((p) => (p.barcode || '').toLowerCase().includes(norm));
+
+    if (matched) {
+      setActiveReorderId(null);
+      setSearchQuery(matched.barcode?.trim() || matched.name);
+      setFeedback(
+        t.products.scanFoundMsg.replace('{name}', matched.name).replace('{code}', code)
+      );
+      return;
+    }
+
+    if (!readOnly) {
+      resetForm();
+      setBarcode(code.slice(0, 120));
+      setFormOpen(true);
+      setFeedback(t.products.scanNotFoundAddMsg.replace('{code}', code));
+    } else {
+      setSearchQuery(code);
+      setFeedback(t.products.scanNotFoundReadOnlyMsg.replace('{code}', code));
+    }
   };
 
   const closeFormModal = () => {
@@ -244,17 +307,76 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     setUploading(true);
     setUploadFeedback('');
     try {
-      const url = await uploadImageToCloudinary(file);
+      const url = await uploadProductPhotoUrl(file);
       setImageUrl(url);
       setUploadFeedback(t.products.uploadSuccess);
     } catch {
-      setUploadFeedback(t.products.uploadFailed);
+      setUploadFeedback(t.products.photoUploadError);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const openItemCamera = (prod: Product) => {
+    if (readOnly) return;
+    setCameraError('');
+    setPhotoCameraTarget({ mode: 'item', product: prod });
+  };
+
+  const openFormCamera = () => {
+    if (readOnly) return;
+    setCameraError('');
+    setPhotoCameraTarget({ mode: 'form' });
+  };
+
+  const handleConfirmCapturedPhoto = async (file: File) => {
+    if (!photoCameraTarget || cameraSaving) return;
+    setCameraSaving(true);
+    setCameraError('');
+    try {
+      const uploadedUrl = await uploadProductPhotoUrl(file);
+      if (photoCameraTarget.mode === 'form') {
+        setImageUrl(uploadedUrl);
+        setUploadFeedback(t.products.uploadSuccess);
+        setPhotoCameraTarget(null);
+        return;
+      }
+
+      const targetProd = photoCameraTarget.product;
+      const saved = onUpdateProductImage
+        ? await onUpdateProductImage(targetProd.id, uploadedUrl)
+        : await onSaveProduct({
+            id: targetProd.id,
+            name: targetProd.name,
+            imageUrl: uploadedUrl,
+            costPrice: targetProd.costPrice,
+            sellingPrice: targetProd.sellingPrice,
+            promotion: targetProd.promotion || 0,
+            stock: targetProd.stock,
+            barcode: targetProd.barcode,
+            category: targetProd.category,
+            warehouse: targetProd.warehouse,
+          });
+
+      if (!saved) {
+        setCameraError(t.products.photoUploadError);
+        return;
+      }
+
+      if (editingId === targetProd.id) {
+        setImageUrl(uploadedUrl);
+      }
+      setFeedback(t.products.photoSavedMsg.replace('{name}', targetProd.name));
+      setPhotoCameraTarget(null);
+    } catch {
+      setCameraError(t.products.photoUploadError);
+    } finally {
+      setCameraSaving(false);
     }
   };
 
@@ -344,26 +466,67 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
             </div>
           </div>
 
-          {!readOnly && (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto shrink-0">
-              {activeReorderId && (
-                <Button
-                  tone="quiet"
-                  onClick={() => setActiveReorderId(null)}
-                  className="w-full sm:w-auto min-h-11 sm:min-h-10 text-xs whitespace-nowrap"
-                >
-                  {t.products.doneReorderBtn}
-                </Button>
-              )}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto shrink-0">
+            <Button
+              tone="quiet"
+              onClick={() => setScannerMode('toolbar')}
+              className="w-full sm:w-auto whitespace-nowrap"
+              title={t.ui.scannerTitle}
+            >
+              <QrCode className="h-4 w-4 text-primary shrink-0" />
+              <span>{t.products.scanQrBarcodeBtn}</span>
+            </Button>
+            {!readOnly && activeReorderId && (
+              <Button
+                tone="quiet"
+                onClick={() => setActiveReorderId(null)}
+                className="w-full sm:w-auto min-h-11 sm:min-h-10 text-xs whitespace-nowrap"
+              >
+                {t.products.doneReorderBtn}
+              </Button>
+            )}
+            {!readOnly && (
               <Button
                 tone="primary"
-                onClick={openAddModal}
+                onClick={() => openAddModal()}
                 className="w-full sm:w-auto whitespace-nowrap"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span>{t.products.addNewBtn}</span>
               </Button>
-            </div>
+            )}
+          </div>
+        </div>
+
+        {/* Search by Product Name / Barcode + Live Result Counter */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t.products.searchPlaceholder}
+              aria-label={t.products.searchPlaceholder}
+              className={`${inputClass} pl-10 ${searchQuery ? 'pr-10' : ''}`}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label={t.products.clearSearchBtn}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground hover:bg-background cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {localOrder.length > 0 && (
+            <span className="text-xs font-medium text-muted tabular-nums shrink-0 sm:px-1">
+              {t.products.searchCountLabel
+                .replace('{shown}', String(filteredProducts.length))
+                .replace('{total}', String(localOrder.length))}
+            </span>
           )}
         </div>
 
@@ -396,32 +559,62 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                   : t.products.emptyEditable}
               </p>
               {!readOnly && (
-                <Button tone="primary" onClick={openAddModal} className="whitespace-nowrap">
+                <Button tone="primary" onClick={() => openAddModal()} className="whitespace-nowrap">
                   <Plus className="h-4 w-4 shrink-0" />
                   <span>{t.products.addNewBtn}</span>
                 </Button>
               )}
             </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="py-10 text-center space-y-3">
+              <p className="text-sm text-muted">
+                {t.products.noSearchResults.replace('{query}', searchQuery.trim())}
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  tone="quiet"
+                  onClick={() => setSearchQuery('')}
+                  className="whitespace-nowrap"
+                >
+                  <X className="h-4 w-4 shrink-0" />
+                  <span>{t.products.clearSearchBtn}</span>
+                </Button>
+                {!readOnly && (
+                  <Button
+                    tone="primary"
+                    onClick={() => openAddModal({ name: searchQuery.trim() })}
+                    className="whitespace-nowrap"
+                  >
+                    <Plus className="h-4 w-4 shrink-0" />
+                    <span>
+                      {t.products.addMatchingProductBtn.replace('{query}', searchQuery.trim())}
+                    </span>
+                  </Button>
+                )}
+              </div>
+            </div>
           ) : null}
-          {visibleProductsList.map((prod, idx) => {
-            const isReordering = !readOnly && activeReorderId === prod.id;
+          {visibleProductsList.map((prod) => {
+            const orderIdx = localOrder.findIndex((item) => item.id === prod.id);
+            const idx = orderIdx >= 0 ? orderIdx : 0;
+            const isReordering = !readOnly && !isFiltering && activeReorderId === prod.id;
             const effective = Math.max(0, prod.sellingPrice - (prod.promotion || 0));
 
             return (
               <motion.div
                 key={prod.id}
-                layout={localOrder.length <= 30}
-                draggable={!readOnly && Boolean(activeReorderId)}
+                layout={localOrder.length <= 30 && !isFiltering}
+                draggable={!readOnly && !isFiltering && Boolean(activeReorderId)}
                 onDragStart={(e) => {
-                  if (readOnly) return;
+                  if (readOnly || isFiltering) return;
                   (e as unknown as React.DragEvent).dataTransfer?.setData('text/plain', prod.id);
                 }}
                 onDragOver={(e) => {
-                  if (readOnly) return;
+                  if (readOnly || isFiltering) return;
                   e.preventDefault();
                 }}
                 onDrop={(e) => {
-                  if (readOnly) return;
+                  if (readOnly || isFiltering) return;
                   e.preventDefault();
                   const dragId =
                     (e as unknown as React.DragEvent).dataTransfer?.getData('text/plain') ||
@@ -431,7 +624,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                   }
                 }}
                 onPointerDown={() => {
-                  if (!readOnly) handlePointerDownCard(prod.id);
+                  if (!readOnly && !isFiltering) handlePointerDownCard(prod.id);
                 }}
                 onPointerUp={clearLongPressTimer}
                 onPointerLeave={clearLongPressTimer}
@@ -491,11 +684,17 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                   </div>
 
                   {!readOnly && (
-                    <div className="grid grid-cols-2 sm:flex sm:flex-wrap xl:flex-nowrap items-center gap-2 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-border/40">
+                    <div
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        clearLongPressTimer();
+                      }}
+                      className="grid grid-cols-2 sm:flex sm:flex-wrap xl:flex-nowrap items-center gap-2 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-border/40"
+                    >
                       <Button
                         tone="quiet"
                         onClick={() => moveItemByIndex(idx, -1)}
-                        disabled={idx === 0}
+                        disabled={idx === 0 || isFiltering}
                         className="min-h-11 sm:min-h-9 px-2.5 text-xs whitespace-nowrap"
                         title={t.products.moveUp}
                         aria-label={t.products.moveUp}
@@ -505,7 +704,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       <Button
                         tone="quiet"
                         onClick={() => moveItemByIndex(idx, 1)}
-                        disabled={idx === localOrder.length - 1}
+                        disabled={idx === localOrder.length - 1 || isFiltering}
                         className="min-h-11 sm:min-h-9 px-2.5 text-xs whitespace-nowrap"
                         title={t.products.moveDown}
                         aria-label={t.products.moveDown}
@@ -513,9 +712,18 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                         <ArrowDown className="h-4 w-4 shrink-0" /> <span className="sm:hidden">{t.products.moveDown}</span>
                       </Button>
                       <Button
+                        tone="quiet"
+                        onClick={() => openItemCamera(prod)}
+                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
+                        title={t.ui.cameraPhotoTitle}
+                      >
+                        <Camera className="h-4 w-4 text-primary shrink-0" />
+                        <span>{t.products.capturePhotoBtn}</span>
+                      </Button>
+                      <Button
                         tone={quickStockId === prod.id ? 'primary' : 'quiet'}
                         onClick={() => toggleQuickStock(prod)}
-                        className="min-h-11 sm:min-h-9 px-3 text-xs col-span-2 sm:col-span-1 whitespace-nowrap"
+                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
                       >
                         <PackagePlus className={`h-4 w-4 shrink-0 ${quickStockId === prod.id ? '' : 'text-primary'}`} />
                         <span>{t.products.adjustStockBtn}</span>
@@ -806,11 +1014,11 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                         />
                         <Button
                           tone="quiet"
-                          onClick={() => setScannerOpen(true)}
+                          onClick={() => setScannerMode('form')}
                           title={t.products.scanCameraTitle}
                           className="px-3 shrink-0"
                         >
-                          <Camera className="h-4 w-4 text-primary" />
+                          <QrCode className="h-4 w-4 text-primary" />
                         </Button>
                       </div>
                     </Field>
@@ -867,6 +1075,16 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                             className="hidden"
                           />
                         </label>
+                        <Button
+                          tone="quiet"
+                          onClick={openFormCamera}
+                          disabled={uploading || saving}
+                          title={t.ui.cameraPhotoTitle}
+                          className="min-h-11 px-3 shrink-0 text-xs whitespace-nowrap"
+                        >
+                          <Camera className="h-4 w-4 text-primary shrink-0" />
+                          <span>{t.products.capturePhotoBtn}</span>
+                        </Button>
                         {imageUrl && (
                           <ProductImage
                             src={imageUrl}
@@ -883,7 +1101,10 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     <p
                       role="status"
                       className={`text-xs font-medium ${
-                        uploadFeedback === t.products.uploadFailed ? 'text-danger' : 'text-primary'
+                        uploadFeedback === t.products.uploadFailed ||
+                        uploadFeedback === t.products.photoUploadError
+                          ? 'text-danger'
+                          : 'text-primary'
                       }`}
                     >
                       {uploadFeedback}
@@ -921,11 +1142,29 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
         )}
       </AnimatePresence>
 
+      <BarcodeScannerModal
+        open={Boolean(scannerMode)}
+        onClose={() => setScannerMode(null)}
+        onDetected={handleQrBarcodeDetected}
+      />
+
       {!readOnly && (
-        <BarcodeScannerModal
-          open={scannerOpen}
-          onClose={() => setScannerOpen(false)}
-          onDetected={(code) => setBarcode(code)}
+        <ProductCameraModal
+          open={Boolean(photoCameraTarget)}
+          productName={
+            photoCameraTarget?.mode === 'item'
+              ? photoCameraTarget.product.name
+              : name.trim() || (editingId ? t.products.editTitle : t.products.addTitle)
+          }
+          saving={cameraSaving}
+          errorMessage={cameraError}
+          onClose={() => {
+            if (!cameraSaving) {
+              setPhotoCameraTarget(null);
+              setCameraError('');
+            }
+          }}
+          onConfirmPhoto={handleConfirmCapturedPhoto}
         />
       )}
     </div>

@@ -37,6 +37,7 @@ import {
   subscribeToSalePresence,
   subscribeToWorkspace,
   updateOrderFs,
+  updateProductImageFs,
   updateSettingsFs,
   updateWorkspaceLicenseFs,
   upsertSalePresenceFs,
@@ -281,6 +282,31 @@ export function App() {
   const stockPurgeLastRunRef = useRef(0);
   const activityPurgeInFlightRef = useRef(false);
   const activityPurgeLastRunRef = useRef(0);
+  const mobileNavRef = useRef<HTMLElement | null>(null);
+  const mobileNavObserverRef = useRef<ResizeObserver | null>(null);
+
+  const setMobileNavEl = useCallback((el: HTMLElement | null) => {
+    mobileNavRef.current = el;
+    if (mobileNavObserverRef.current) {
+      mobileNavObserverRef.current.disconnect();
+      mobileNavObserverRef.current = null;
+    }
+    const syncNavHeight = () => {
+      const node = mobileNavRef.current;
+      const h = node ? Math.ceil(node.getBoundingClientRect().height) : 0;
+      if (h > 0) {
+        document.documentElement.style.setProperty('--mobile-nav-height', `${h}px`);
+      } else {
+        document.documentElement.style.removeProperty('--mobile-nav-height');
+      }
+    };
+    syncNavHeight();
+    if (el && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(syncNavHeight);
+      ro.observe(el);
+      mobileNavObserverRef.current = ro;
+    }
+  }, []);
 
   useEffect(() => {
     activeRoleRef.current = roleState;
@@ -1866,7 +1892,11 @@ export function App() {
           <main
             key={effectiveAdminEmail}
             className={`flex-1 p-3 sm:p-6 ${
-              isSaleRole ? (isDesktop ? 'pb-24 lg:pb-6' : 'pb-24') : 'pb-24 md:pb-6'
+              isSaleRole
+                ? isDesktop
+                  ? 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] lg:pb-6'
+                  : 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))]'
+                : 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:pb-6'
             }`}
           >
             <Suspense
@@ -2073,6 +2103,12 @@ export function App() {
                       scopedSettings,
                       activeAdminEmail
                     )
+                  );
+                }}
+                onUpdateProductImage={async (productId, imageUrl) => {
+                  if (isSaleRole || isExpired) return false;
+                  return runFsMutation(() =>
+                    updateProductImageFs(firebaseUser.uid, productId, imageUrl)
                   );
                 }}
                 onDeleteProduct={async (id) => {
@@ -2375,6 +2411,7 @@ export function App() {
 
         {/* Mobile & Tablet Bottom Thumb-Zone Navigation Bar (Sale gets strictly 6 pages on Mobile & Tablet) */}
         <nav
+          ref={setMobileNavEl}
           aria-label="Mobile Quick Navigation"
           className={`${
             isSaleRole ? (isDesktop ? 'lg:hidden' : '') : 'md:hidden'

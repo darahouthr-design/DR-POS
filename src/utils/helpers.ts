@@ -3,7 +3,7 @@ import imgSpeaker from '../assets/images/pos_smart_speaker_1794472862106.jpg';
 import imgTumbler from '../assets/images/pos_ceramic_tumbler_1794472862558.jpg';
 import imgKeypad from '../assets/images/pos_mechanical_keypad_1794472863532.jpg';
 import type { CurrencyCode, LanguageCode, Order } from '../types';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
 
 const ASSET_MAP: Record<string, string> = {
   'asset:headset': imgHeadset,
@@ -187,6 +187,102 @@ export async function uploadImageToCloudinary(file: File): Promise<string> {
   return compressImageLocally(file);
 }
 
+/**
+ * Compresses large camera/gallery photos to max 1080px JPEG before uploading to Cloudinary
+ * and strictly returns an HTTPS URL (<= 2000 chars) suitable for Firestore product documents.
+ */
+export async function uploadProductPhotoUrl(file: File): Promise<string> {
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'bn5s5spm';
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'PConly';
+
+  const preparedFile = await preparePhotoFileForUpload(file, 1080, 0.85);
+  const formData = new FormData();
+  formData.append('file', preparedFile);
+  formData.append('upload_preset', uploadPreset);
+
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error('CLOUD_UPLOAD_FAILED');
+  }
+
+  const data = (await response.json()) as { secure_url?: unknown; url?: unknown };
+  const rawUrl =
+    typeof data?.secure_url === 'string'
+      ? data.secure_url
+      : typeof data?.url === 'string'
+      ? data.url
+      : '';
+
+  if (!rawUrl || !rawUrl.startsWith('http') || rawUrl.length > 2000) {
+    throw new Error('INVALID_IMAGE_URL');
+  }
+
+  return rawUrl;
+}
+
+function preparePhotoFileForUpload(
+  file: File,
+  maxSide: number,
+  quality: number
+): Promise<File> {
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let w = img.naturalWidth || img.width;
+      let h = img.naturalHeight || img.height;
+      if (!w || !h) {
+        resolve(file);
+        return;
+      }
+      if (w <= maxSide && h <= maxSide && file.size <= 450 * 1024 && file.type === 'image/jpeg') {
+        resolve(file);
+        return;
+      }
+      if (w > maxSide || h > maxSide) {
+        if (w > h) {
+          h = Math.max(1, Math.round((h * maxSide) / w));
+          w = maxSide;
+        } else {
+          w = Math.max(1, Math.round((w * maxSide) / h));
+          h = maxSide;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file);
+            return;
+          }
+          const baseName = (file.name || 'product-photo').replace(/\.[^.]+$/, '');
+          resolve(new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' }));
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.src = objectUrl;
+  });
+}
+
 function compressImageLocally(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -297,33 +393,187 @@ export function playNewOrderNotification(
 }
 
 export function exportOrdersToExcel(orders: Order[], currency: CurrencyCode): void {
-  const rows = orders.map((o) => ({
-    'Order No': o.orderNumber,
-    'កាលបរិច្ឆេទ (Date)': o.date,
-    'ម៉ោង (Time)': o.time,
-    'អតិថិជន (Customer)': o.customerName,
-    'លេខទូរស័ព្ទ (Phone)': o.customerPhone,
-    'អាសយដ្ឋាន (Address)': o.customerAddress,
-    'ហាង (Store)': o.storeName,
-    'ក្រុម (Group)': o.groupName,
-    'បុគ្គលិកលក់ (Staff)': o.staffName,
-    'ឃ្លាំង (Warehouse)': o.warehouse,
-    'ទំនិញ (Items)': o.items.map((i) => `${i.productName} x${i.quantity}`).join(', '),
-    'ស្ថានភាពទូទាត់ (Payment)': o.paymentStatus === 'paid' ? 'ទូទាត់រួច' : 'មិនទាន់ទូទាត់',
-    'ថ្ងៃណាត់ទូទាត់ (Due Date)': o.dueDate || '-',
-    'តម្លៃមុនបញ្ចុះ (Subtotal)': formatMoney(
-      o.subtotalAmount ?? o.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0),
-      currency
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+  } as const;
+
+  const summaryHeaderStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: '002060' } },
+    font: { sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder,
+  };
+
+  const summaryNameStyle = {
+    font: { sz: 11, color: { rgb: '000000' } },
+    alignment: { horizontal: 'left', vertical: 'center' },
+    border: thinBorder,
+  };
+
+  const summaryQtyStyle = {
+    font: { sz: 11, color: { rgb: '000000' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder,
+    numFmt: '#,##0',
+  };
+
+  const summaryTotalLabelStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: 'DCEEF8' } },
+    font: { sz: 11, bold: true, color: { rgb: '000000' } },
+    alignment: { horizontal: 'left', vertical: 'center' },
+    border: thinBorder,
+  };
+
+  const summaryTotalQtyStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: 'DCEEF8' } },
+    font: { sz: 11, bold: true, color: { rgb: '000000' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder,
+    numFmt: '#,##0',
+  };
+
+  // Aggregate sold quantity per product across the exported/filtered orders
+  const productTotalsMap = new Map<string, { name: string; quantity: number }>();
+  for (const o of orders) {
+    for (const it of o.items || []) {
+      const displayName = String(it.productName || '').trim() || '-';
+      const key = displayName.toLowerCase();
+      const qty = Math.max(0, Number(it.quantity) || 0);
+      if (qty <= 0) continue;
+      const existing = productTotalsMap.get(key);
+      if (existing) {
+        existing.quantity += qty;
+      } else {
+        productTotalsMap.set(key, { name: displayName, quantity: qty });
+      }
+    }
+  }
+  const productTotals = Array.from(productTotalsMap.values()).sort(
+    (a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name)
+  );
+  const grandTotalUnits = productTotals.reduce((sum, p) => sum + p.quantity, 0);
+
+  const summaryTableRows = [
+    [
+      { v: 'ទំនិញលក់បាន', t: 's', s: summaryHeaderStyle },
+      { v: 'សរុបចំនួន', t: 's', s: summaryHeaderStyle },
+    ],
+    ...productTotals.map((item) => [
+      { v: item.name, t: 's', s: summaryNameStyle },
+      { v: item.quantity, t: 'n', s: summaryQtyStyle },
+    ]),
+    [
+      { v: 'ទំនិញសរុប', t: 's', s: summaryTotalLabelStyle },
+      { v: grandTotalUnits, t: 'n', s: summaryTotalQtyStyle },
+    ],
+  ];
+
+  // Sheet 1: Full Orders list + Per-Product Summary Table below
+  const orderHeaders = [
+    'Order No',
+    'កាលបរិច្ឆេទ (Date)',
+    'ម៉ោង (Time)',
+    'អតិថិជន (Customer)',
+    'លេខទូរស័ព្ទ (Phone)',
+    'អាសយដ្ឋាន (Address)',
+    'ហាង (Store)',
+    'ក្រុម (Group)',
+    'បុគ្គលិកលក់ (Staff)',
+    'ឃ្លាំង (Warehouse)',
+    'ទំនិញ (Items)',
+    'ស្ថានភាពទូទាត់ (Payment)',
+    'ថ្ងៃណាត់ទូទាត់ (Due Date)',
+    'តម្លៃមុនបញ្ចុះ (Subtotal)',
+    'បញ្ចុះតម្លៃ (Discount)',
+    'តម្លៃសរុប (Total)',
+    'កំណត់ចំណាំ (Note)',
+  ];
+
+  const orderHeaderStyle = {
+    fill: { patternType: 'solid', fgColor: { rgb: '0F5132' } },
+    font: { sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder,
+  };
+
+  const orderCellStyle = {
+    font: { sz: 10.5, color: { rgb: '000000' } },
+    alignment: { vertical: 'center' },
+    border: thinBorder,
+  };
+
+  const ordersAoa = [
+    orderHeaders.map((h) => ({ v: h, t: 's', s: orderHeaderStyle })),
+    ...orders.map((o) =>
+      [
+        o.orderNumber,
+        o.date,
+        o.time,
+        o.customerName,
+        o.customerPhone,
+        o.customerAddress,
+        o.storeName,
+        o.groupName,
+        o.staffName,
+        o.warehouse,
+        o.items.map((i) => `${i.productName} x${i.quantity}`).join(', '),
+        o.paymentStatus === 'paid' ? 'ទូទាត់រួច' : 'មិនទាន់ទូទាត់',
+        o.dueDate || '-',
+        formatMoney(
+          o.subtotalAmount ?? o.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0),
+          currency
+        ),
+        (o.discountAmount || 0) > 0 ? `-${formatMoney(o.discountAmount || 0, currency)}` : '-',
+        formatMoney(o.totalAmount, currency),
+        o.note || '',
+      ].map((val) => ({ v: val, t: 's', s: orderCellStyle }))
     ),
-    'បញ្ចុះតម្លៃ (Discount)':
-      (o.discountAmount || 0) > 0 ? `-${formatMoney(o.discountAmount || 0, currency)}` : '-',
-    'តម្លៃសរុប (Total)': formatMoney(o.totalAmount, currency),
-    'កំណត់ចំណាំ (Note)': o.note || '',
+    [],
+    [],
+    ...summaryTableRows,
+  ];
+
+  const ordersSheet = XLSX.utils.aoa_to_sheet(ordersAoa);
+  const longestProductName = productTotals.reduce(
+    (max, item) => Math.max(max, item.name.length),
+    16
+  );
+  ordersSheet['!cols'] = [
+    { wch: Math.max(24, Math.min(44, longestProductName + 6)) }, // Order No / Product Name
+    { wch: 16 }, // Date / Total Qty
+    { wch: 11 }, // Time
+    { wch: 22 }, // Customer
+    { wch: 16 }, // Phone
+    { wch: 28 }, // Address
+    { wch: 20 }, // Store
+    { wch: 20 }, // Group
+    { wch: 18 }, // Staff
+    { wch: 18 }, // Warehouse
+    { wch: 38 }, // Items
+    { wch: 16 }, // Payment
+    { wch: 16 }, // Due Date
+    { wch: 18 }, // Subtotal
+    { wch: 16 }, // Discount
+    { wch: 18 }, // Total
+    { wch: 24 }, // Note
+  ];
+
+  // Sheet 2: Standalone Per-Product Total Summary sheet
+  const productSummarySheet = XLSX.utils.aoa_to_sheet(summaryTableRows);
+  productSummarySheet['!cols'] = [
+    { wch: Math.max(30, Math.min(48, longestProductName + 8)) },
+    { wch: 18 },
+  ];
+  productSummarySheet['!rows'] = summaryTableRows.map((_, idx) => ({
+    hpt: idx === 0 || idx === summaryTableRows.length - 1 ? 24 : 21,
   }));
 
-  const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'DR-POS Orders');
+  XLSX.utils.book_append_sheet(workbook, ordersSheet, 'DR-POS Orders');
+  XLSX.utils.book_append_sheet(workbook, productSummarySheet, 'សរុបតាមផលិតផល');
   XLSX.writeFile(workbook, `DR-POS_Orders_${todayLocalISO()}.xlsx`);
 }
 

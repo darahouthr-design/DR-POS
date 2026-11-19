@@ -91,15 +91,15 @@ export const PosView: React.FC<PosViewProps> = ({
   const [customerAddress, setCustomerAddress] = useState('');
 
   const [storeSearch, setStoreSearch] = useState('');
-  const [storeName, setStoreName] = useState(settings.stores[0] || '');
+  const [storeName, setStoreName] = useState('');
 
   const [groupSearch, setGroupSearch] = useState('');
-  const [groupName, setGroupName] = useState(settings.groups[0] || '');
+  const [groupName, setGroupName] = useState('');
 
   const [staffSearch, setStaffSearch] = useState('');
   const [staffName, setStaffName] = useState(lockedSaleName || staff[0]?.name || '');
 
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid'>('paid');
+  const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'unpaid'>('');
   const [note, setNote] = useState('');
   const [dueDate, setDueDate] = useState('');
 
@@ -118,6 +118,7 @@ export const PosView: React.FC<PosViewProps> = ({
   const customerAddressInputRef = useRef<HTMLInputElement | null>(null);
   const storeSelectRef = useRef<HTMLSelectElement | null>(null);
   const groupSelectRef = useRef<HTMLSelectElement | null>(null);
+  const paymentStatusSelectRef = useRef<HTMLSelectElement | null>(null);
   const [statusFeedback, setStatusFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -498,15 +499,16 @@ export const PosView: React.FC<PosViewProps> = ({
   );
 
   // Keep selected Store / Group / Staff in sync with workspace data & search filter
+  // Store and Group must start unselected ("Select Store*" / "Select Group") so staff explicitly pick them
   useEffect(() => {
-    if (filteredStores.length > 0 && !filteredStores.includes(storeName)) {
-      setStoreName(filteredStores[0]);
+    if (storeName && !filteredStores.includes(storeName)) {
+      setStoreName('');
     }
   }, [filteredStores, storeName]);
 
   useEffect(() => {
-    if (filteredGroups.length > 0 && !filteredGroups.includes(groupName)) {
-      setGroupName(filteredGroups[0]);
+    if (groupName && !filteredGroups.includes(groupName)) {
+      setGroupName('');
     }
   }, [filteredGroups, groupName]);
 
@@ -525,7 +527,13 @@ export const PosView: React.FC<PosViewProps> = ({
 
   const missingRequiredFields = useMemo(() => {
     const missing: Array<{
-      key: 'customerName' | 'customerPhone' | 'customerAddress' | 'storeName' | 'groupName';
+      key:
+        | 'customerName'
+        | 'customerPhone'
+        | 'customerAddress'
+        | 'storeName'
+        | 'groupName'
+        | 'paymentStatus';
       label: string;
     }> = [];
     if (!customerName.trim()) {
@@ -543,6 +551,9 @@ export const PosView: React.FC<PosViewProps> = ({
     if (!effectiveGroupName) {
       missing.push({ key: 'groupName', label: t.pos.fieldGroups });
     }
+    if (!paymentStatus) {
+      missing.push({ key: 'paymentStatus', label: t.pos.fieldPaymentStatus });
+    }
     return missing;
   }, [
     customerName,
@@ -550,11 +561,13 @@ export const PosView: React.FC<PosViewProps> = ({
     customerAddress,
     effectiveStoreName,
     effectiveGroupName,
+    paymentStatus,
     t.pos.fieldCustomerName,
     t.pos.fieldPhone,
     t.pos.fieldAddress,
     t.pos.fieldStore,
     t.pos.fieldGroups,
+    t.pos.fieldPaymentStatus,
   ]);
 
   const missingFieldKeys = useMemo(
@@ -793,7 +806,7 @@ export const PosView: React.FC<PosViewProps> = ({
       return;
     }
     setFormValidationAttempted(true);
-    if (missingRequiredFields.length > 0) {
+    if (missingRequiredFields.length > 0 || (paymentStatus !== 'paid' && paymentStatus !== 'unpaid')) {
       const firstMissingKey = missingRequiredFields[0]?.key;
       const targetEl =
         firstMissingKey === 'customerName'
@@ -804,7 +817,9 @@ export const PosView: React.FC<PosViewProps> = ({
           ? customerAddressInputRef.current
           : firstMissingKey === 'storeName'
           ? storeSelectRef.current
-          : groupSelectRef.current;
+          : firstMissingKey === 'groupName'
+          ? groupSelectRef.current
+          : paymentStatusSelectRef.current;
       window.requestAnimationFrame(() => {
         targetEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         targetEl?.focus();
@@ -841,9 +856,13 @@ export const PosView: React.FC<PosViewProps> = ({
       setCustomerName('');
       setCustomerPhone('');
       setCustomerAddress('');
+      setStoreSearch('');
+      setStoreName('');
+      setGroupSearch('');
+      setGroupName('');
       setNote('');
       setDueDate('');
-      setPaymentStatus('paid');
+      setPaymentStatus('');
       setStatusFeedback({
         type: 'success',
         message: t.pos.orderSavedSuccess,
@@ -1238,7 +1257,13 @@ export const PosView: React.FC<PosViewProps> = ({
 
       {/* Mobile Floating Quick Checkout Bar when Cart has items */}
       {cart.length > 0 && !cartDrawerOpen && (
-        <div className="md:hidden fixed bottom-[4.15rem] inset-x-3 z-20">
+        <div
+          style={{
+            bottom:
+              'calc(var(--mobile-nav-height, calc(3.625rem + max(0.625rem, env(safe-area-inset-bottom, 0px)))) + 0.625rem)',
+          }}
+          className="md:hidden fixed inset-x-3 z-30"
+        >
           <Button
             tone="primary"
             onClick={() => {
@@ -1673,40 +1698,42 @@ export const PosView: React.FC<PosViewProps> = ({
                       )}
 
                       <div className="rounded-card border border-primary/20 bg-surface-elevated/90 p-3.5 sm:p-4 shadow-xs grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
-                        <Field label={t.pos.fieldDate}>
-                          <input
-                            type="date"
-                            required
-                            value={date}
-                            onChange={(e) => setDate(e.target.value)}
-                            className={inputClass}
-                          />
-                        </Field>
-
-                        <Field label={t.pos.fieldCustomerName} required>
-                          <input
-                            ref={customerNameInputRef}
-                            type="text"
-                            required
-                            aria-required="true"
-                            aria-invalid={formValidationAttempted && missingFieldKeys.has('customerName')}
-                            value={customerName}
-                            onChange={(e) => setCustomerName(e.target.value)}
-                            placeholder={t.pos.placeholderCustomerName}
-                            className={`${inputClass} ${
-                              formValidationAttempted && missingFieldKeys.has('customerName')
-                                ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
-                                : ''
-                            }`}
-                          />
-                          {formValidationAttempted && missingFieldKeys.has('customerName') && (
-                            <span className="block text-[11px] font-semibold text-danger">
-                              {t.pos.requiredFieldEmptyError}
-                            </span>
-                          )}
-                        </Field>
-
                         <div className="sm:col-span-2">
+                          <Field label={t.pos.fieldDate}>
+                            <input
+                              type="date"
+                              required
+                              value={date}
+                              onChange={(e) => setDate(e.target.value)}
+                              className={inputClass}
+                            />
+                          </Field>
+                        </div>
+
+                        <div className="sm:col-span-2 grid grid-cols-2 gap-2.5 sm:gap-4">
+                          <Field label={t.pos.fieldCustomerName} required>
+                            <input
+                              ref={customerNameInputRef}
+                              type="text"
+                              required
+                              aria-required="true"
+                              aria-invalid={formValidationAttempted && missingFieldKeys.has('customerName')}
+                              value={customerName}
+                              onChange={(e) => setCustomerName(e.target.value)}
+                              placeholder={t.pos.placeholderCustomerName}
+                              className={`${inputClass} ${
+                                formValidationAttempted && missingFieldKeys.has('customerName')
+                                  ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                  : ''
+                              }`}
+                            />
+                            {formValidationAttempted && missingFieldKeys.has('customerName') && (
+                              <span className="block text-[11px] font-semibold text-danger">
+                                {t.pos.requiredFieldEmptyError}
+                              </span>
+                            )}
+                          </Field>
+
                           <Field label={t.pos.fieldPhone} required>
                             <div className="relative">
                               <input
@@ -1744,7 +1771,7 @@ export const PosView: React.FC<PosViewProps> = ({
                             <motion.div
                               initial={{ opacity: 0, y: -4 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className="mt-2.5 rounded-control border border-danger bg-danger/10 p-3 sm:p-3.5 space-y-2 shadow-xs"
+                              className="col-span-2 rounded-control border border-danger bg-danger/10 p-3 sm:p-3.5 space-y-2 shadow-xs"
                             >
                               <div className="flex items-start gap-2 text-danger font-bold text-xs sm:text-sm leading-relaxed">
                                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -1823,6 +1850,8 @@ export const PosView: React.FC<PosViewProps> = ({
                             value={effectiveStoreName}
                             onChange={(e) => setStoreName(e.target.value)}
                             className={`${inputClass} ${
+                              !effectiveStoreName ? 'text-muted' : ''
+                            } ${
                               formValidationAttempted && missingFieldKeys.has('storeName')
                                 ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
                                 : ''
@@ -1831,11 +1860,14 @@ export const PosView: React.FC<PosViewProps> = ({
                             {filteredStores.length === 0 ? (
                               <option value="">{t.pos.noStoreOption}</option>
                             ) : (
-                              filteredStores.map((s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ))
+                              <>
+                                <option value="">{t.pos.selectStorePlaceholder}</option>
+                                {filteredStores.map((s) => (
+                                  <option key={s} value={s} className="text-foreground">
+                                    {s}
+                                  </option>
+                                ))}
+                              </>
                             )}
                           </select>
                           {formValidationAttempted && missingFieldKeys.has('storeName') && (
@@ -1873,6 +1905,8 @@ export const PosView: React.FC<PosViewProps> = ({
                             value={effectiveGroupName}
                             onChange={(e) => setGroupName(e.target.value)}
                             className={`${inputClass} ${
+                              !effectiveGroupName ? 'text-muted' : ''
+                            } ${
                               formValidationAttempted && missingFieldKeys.has('groupName')
                                 ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
                                 : ''
@@ -1881,11 +1915,14 @@ export const PosView: React.FC<PosViewProps> = ({
                             {filteredGroups.length === 0 ? (
                               <option value="">{t.pos.noGroupOption}</option>
                             ) : (
-                              filteredGroups.map((g) => (
-                                <option key={g} value={g}>
-                                  {g}
-                                </option>
-                              ))
+                              <>
+                                <option value="">{t.pos.selectGroupPlaceholder}</option>
+                                {filteredGroups.map((g) => (
+                                  <option key={g} value={g} className="text-foreground">
+                                    {g}
+                                  </option>
+                                ))}
+                              </>
                             )}
                           </select>
                           {formValidationAttempted && missingFieldKeys.has('groupName') && (
@@ -1942,16 +1979,40 @@ export const PosView: React.FC<PosViewProps> = ({
                       </div>
 
                       <div className="rounded-card border border-border/75 bg-surface-elevated/85 p-3.5 sm:p-4 shadow-xs space-y-3.5">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
-                          <Field label={t.pos.fieldPaymentStatus}>
+                        <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                          <Field label={t.pos.fieldPaymentStatus} required>
                             <select
+                              ref={paymentStatusSelectRef}
+                              required
+                              aria-required="true"
+                              aria-invalid={
+                                formValidationAttempted && missingFieldKeys.has('paymentStatus')
+                              }
                               value={paymentStatus}
-                              onChange={(e) => setPaymentStatus(e.target.value as 'paid' | 'unpaid')}
-                              className={inputClass}
+                              onChange={(e) =>
+                                setPaymentStatus(e.target.value as '' | 'paid' | 'unpaid')
+                              }
+                              className={`${inputClass} ${
+                                !paymentStatus ? 'text-muted' : ''
+                              } ${
+                                formValidationAttempted && missingFieldKeys.has('paymentStatus')
+                                  ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                  : ''
+                              }`}
                             >
-                              <option value="paid">{t.pos.statusPaidOpt}</option>
-                              <option value="unpaid">{t.pos.statusUnpaidOpt}</option>
+                              <option value="">{t.pos.selectPaymentStatusPlaceholder}</option>
+                              <option value="paid" className="text-foreground">
+                                {t.pos.statusPaidOpt}
+                              </option>
+                              <option value="unpaid" className="text-foreground">
+                                {t.pos.statusUnpaidOpt}
+                              </option>
                             </select>
+                            {formValidationAttempted && missingFieldKeys.has('paymentStatus') && (
+                              <span className="block text-[11px] font-semibold text-danger">
+                                {t.pos.requiredFieldEmptyError}
+                              </span>
+                            )}
                           </Field>
 
                           <Field label={t.pos.fieldDueDate}>

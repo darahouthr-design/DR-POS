@@ -296,6 +296,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [storeFilter, setStoreFilter] = useState('ALL');
   const [groupFilter, setGroupFilter] = useState('ALL');
   const [warehouseFilter, setWarehouseFilter] = useState('ALL');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | 'paid' | 'unpaid'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [visibleDomCount, setVisibleDomCount] = useState(DOM_PAGE_STEP);
@@ -327,6 +328,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     storeFilter,
     groupFilter,
     warehouseFilter,
+    paymentStatusFilter,
     searchQuery,
   });
 
@@ -345,6 +347,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       storeFilter: stf,
       groupFilter: gf,
       warehouseFilter: wf,
+      paymentStatusFilter: psf,
       searchQuery: sq,
     } = deferredFilters;
     const q = sq.trim().toLowerCase();
@@ -359,6 +362,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       if (stf !== 'ALL' && o.storeName !== stf) return false;
       if (gf !== 'ALL' && o.groupName !== gf) return false;
       if (!hideWarehouse && wf !== 'ALL' && o.warehouse !== wf) return false;
+      if (psf !== 'ALL' && o.paymentStatus !== psf) return false;
       if (q) {
         const nameMatch = (o.customerName || '').toLowerCase().includes(q);
         const orderNoMatch = (o.orderNumber || '').toLowerCase().includes(q);
@@ -395,6 +399,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     deferredFilters.storeFilter,
     deferredFilters.groupFilter,
     deferredFilters.warehouseFilter,
+    deferredFilters.paymentStatusFilter,
     deferredFilters.searchQuery,
   ]);
 
@@ -604,6 +609,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     storeFilter !== 'ALL' ? storeFilter : '',
     groupFilter !== 'ALL' ? groupFilter : '',
     !hideWarehouse && warehouseFilter !== 'ALL' ? warehouseFilter : '',
+    paymentStatusFilter !== 'ALL' ? paymentStatusFilter : '',
   ].filter(Boolean).length;
 
   return (
@@ -696,30 +702,45 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
           </div>
         </div>
 
-        {/* Invoice Search Bar (Customer Name, Order Number, or Phone) */}
-        <div className="relative">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
-          />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t.orders.searchOrdersPlaceholder}
-            aria-label={t.orders.searchOrdersPlaceholder}
-            className={`${inputClass} min-h-10 pl-9 ${searchQuery ? 'pr-9' : 'pr-3'}`}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label={t.orders.clearFilters}
-              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground cursor-pointer"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+        {/* Invoice Search Bar & Quick Payment Status Filter */}
+        <div className="grid grid-cols-2 sm:flex sm:flex-row sm:items-center gap-2 sm:gap-2.5">
+          <div className="relative min-w-0 sm:flex-1">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
+            />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t.orders.searchOrdersPlaceholder}
+              aria-label={t.orders.searchOrdersPlaceholder}
+              className={`${inputClass} min-h-10 pl-9 ${searchQuery ? 'pr-9' : 'pr-3'} min-w-0`}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label={t.orders.clearFilters}
+                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={paymentStatusFilter}
+            onChange={(e) =>
+              setPaymentStatusFilter(e.target.value as 'ALL' | 'paid' | 'unpaid')
+            }
+            aria-label={t.orders.allStatuses}
+            className={`${inputClass} min-h-10 min-w-0 w-full sm:w-52 sm:shrink-0`}
+          >
+            <option value="ALL">{t.orders.allStatuses}</option>
+            <option value="paid">{t.common.paid}</option>
+            <option value="unpaid">{t.common.unpaid}</option>
+          </select>
         </div>
 
         {statusMessage && (
@@ -760,6 +781,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 setStoreFilter('ALL');
                 setGroupFilter('ALL');
                 setWarehouseFilter('ALL');
+                setPaymentStatusFilter('ALL');
               }}
               className="min-h-10 px-4 text-xs"
             >
@@ -2011,13 +2033,13 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5">
                     <Field label={t.orders.fromDate}>
                       <input
                         type="date"
                         value={dateFrom}
                         onChange={(e) => setDateFrom(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       />
                     </Field>
                     <Field label={t.orders.toDate}>
@@ -2025,7 +2047,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         type="date"
                         value={dateTo}
                         onChange={(e) => setDateTo(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       />
                     </Field>
                     <Field label={t.orders.fromTime}>
@@ -2033,7 +2055,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         type="time"
                         value={timeFrom}
                         onChange={(e) => setTimeFrom(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       />
                     </Field>
                     <Field label={t.orders.toTime}>
@@ -2041,21 +2063,21 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         type="time"
                         value={timeTo}
                         onChange={(e) => setTimeTo(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       />
                     </Field>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1 border-t border-border/50">
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5 pt-3 border-t border-border/50">
                     {lockedSaleName ? (
-                      <div className="flex items-center rounded-control border border-primary/40 bg-primary/8 px-3 py-2 text-xs font-semibold text-primary">
+                      <div className="flex items-center min-w-0 rounded-control border border-primary/40 bg-primary/8 px-3 py-2 text-xs font-semibold text-primary truncate">
                         Sale: {lockedSaleName}
                       </div>
                     ) : (
                       <select
                         value={staffFilter}
                         onChange={(e) => setStaffFilter(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       >
                         <option value="ALL">{t.orders.allStaff}</option>
                         {Array.from(
@@ -2074,7 +2096,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <select
                       value={storeFilter}
                       onChange={(e) => setStoreFilter(e.target.value)}
-                      className={inputClass}
+                      className={`${inputClass} min-w-0`}
                     >
                       <option value="ALL">{t.orders.allStores}</option>
                       {settings.stores.map((st) => (
@@ -2087,7 +2109,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <select
                       value={groupFilter}
                       onChange={(e) => setGroupFilter(e.target.value)}
-                      className={inputClass}
+                      className={`${inputClass} min-w-0`}
                     >
                       <option value="ALL">{t.orders.allGroups}</option>
                       {settings.groups.map((gr) => (
@@ -2101,7 +2123,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       <select
                         value={warehouseFilter}
                         onChange={(e) => setWarehouseFilter(e.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} min-w-0`}
                       >
                         <option value="ALL">{t.orders.allWarehouses}</option>
                         {settings.warehouses.map((w) => (
@@ -2111,6 +2133,19 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         ))}
                       </select>
                     )}
+
+                    <select
+                      value={paymentStatusFilter}
+                      onChange={(e) =>
+                        setPaymentStatusFilter(e.target.value as 'ALL' | 'paid' | 'unpaid')
+                      }
+                      aria-label={t.orders.allStatuses}
+                      className={`${inputClass} min-w-0 ${!hideWarehouse ? 'col-span-2' : ''}`}
+                    >
+                      <option value="ALL">{t.orders.allStatuses}</option>
+                      <option value="paid">{t.common.paid}</option>
+                      <option value="unpaid">{t.common.unpaid}</option>
+                    </select>
                   </div>
                 </div>
 
@@ -2126,6 +2161,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       setStoreFilter('ALL');
                       setGroupFilter('ALL');
                       setWarehouseFilter('ALL');
+                      setPaymentStatusFilter('ALL');
                     }}
                     disabled={activeFilterCount === 0}
                     className="w-full sm:w-auto"
