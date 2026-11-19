@@ -46,7 +46,7 @@ export const Field: React.FC<{
   children: React.ReactNode;
   className?: string;
 }> = ({ label, hint, required = false, children, className = '' }) => (
-  <label className={`block min-w-0 space-y-1.5 ${className}`}>
+  <label className={`flex flex-col gap-1.5 min-w-0 ${className}`}>
     <span className="block text-[13px] sm:text-sm font-medium text-foreground leading-relaxed">
       {label}
       {required && (

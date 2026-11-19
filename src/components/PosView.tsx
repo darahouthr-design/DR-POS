@@ -1705,7 +1705,7 @@ export const PosView: React.FC<PosViewProps> = ({
                               required
                               value={date}
                               onChange={(e) => setDate(e.target.value)}
-                              className={inputClass}
+                              className={`${inputClass} h-11`}
                             />
                           </Field>
                         </div>
@@ -1981,33 +1981,39 @@ export const PosView: React.FC<PosViewProps> = ({
                       <div className="min-w-0 overflow-hidden rounded-card border border-border/75 bg-surface-elevated/85 p-3.5 sm:p-4 shadow-xs space-y-3.5">
                         <div className="min-w-0 grid grid-cols-2 gap-2.5 sm:gap-4">
                           <Field label={t.pos.fieldPaymentStatus} required>
-                            <select
-                              ref={paymentStatusSelectRef}
-                              required
-                              aria-required="true"
-                              aria-invalid={
-                                formValidationAttempted && missingFieldKeys.has('paymentStatus')
-                              }
-                              value={paymentStatus}
-                              onChange={(e) =>
-                                setPaymentStatus(e.target.value as '' | 'paid' | 'unpaid')
-                              }
-                              className={`${inputClass} ${
-                                !paymentStatus ? 'text-muted' : ''
-                              } ${
-                                formValidationAttempted && missingFieldKeys.has('paymentStatus')
-                                  ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
-                                  : ''
-                              }`}
-                            >
-                              <option value="">{t.pos.selectPaymentStatusPlaceholder}</option>
-                              <option value="paid" className="text-foreground">
-                                {t.pos.statusPaidOpt}
-                              </option>
-                              <option value="unpaid" className="text-foreground">
-                                {t.pos.statusUnpaidOpt}
-                              </option>
-                            </select>
+                            <div className="relative w-full min-w-0">
+                              <select
+                                ref={paymentStatusSelectRef}
+                                required
+                                aria-required="true"
+                                aria-invalid={
+                                  formValidationAttempted && missingFieldKeys.has('paymentStatus')
+                                }
+                                value={paymentStatus}
+                                onChange={(e) =>
+                                  setPaymentStatus(e.target.value as '' | 'paid' | 'unpaid')
+                                }
+                                className={`${inputClass} h-11 appearance-none pr-8 sm:pr-9 ${
+                                  !paymentStatus ? 'text-muted' : ''
+                                } ${
+                                  formValidationAttempted && missingFieldKeys.has('paymentStatus')
+                                    ? 'border-danger bg-danger/5 focus:border-danger focus:outline-danger/30'
+                                    : ''
+                                }`}
+                              >
+                                <option value="">{t.pos.selectPaymentStatusPlaceholder}</option>
+                                <option value="paid" className="text-foreground">
+                                  {t.pos.statusPaidOpt}
+                                </option>
+                                <option value="unpaid" className="text-foreground">
+                                  {t.pos.statusUnpaidOpt}
+                                </option>
+                              </select>
+                              <ChevronDown
+                                aria-hidden="true"
+                                className="pointer-events-none absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
+                              />
+                            </div>
                             {formValidationAttempted && missingFieldKeys.has('paymentStatus') && (
                               <span className="block text-[11px] font-semibold text-danger">
                                 {t.pos.requiredFieldEmptyError}
@@ -2020,7 +2026,7 @@ export const PosView: React.FC<PosViewProps> = ({
                               type="date"
                               value={dueDate}
                               onChange={(e) => setDueDate(e.target.value)}
-                              className={inputClass}
+                              className={`${inputClass} h-11`}
                             />
                           </Field>
                         </div>
