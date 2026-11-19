@@ -1994,9 +1994,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <h3 className="text-sm sm:text-base font-semibold text-foreground">
             {t.settings.accountSessionTitle}
           </h3>
-          <p className="text-xs text-muted leading-relaxed">
-            {t.settings.accountSessionSubtitle}
-          </p>
+          {t.settings.accountSessionSubtitle && (
+            <p className="text-xs text-muted leading-relaxed">
+              {t.settings.accountSessionSubtitle}
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-1 sm:flex sm:items-center gap-2.5 shrink-0">
           <Button tone="quiet" onClick={onLogout} className="w-full sm:w-auto whitespace-nowrap">
