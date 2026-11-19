@@ -1697,8 +1697,8 @@ export const PosView: React.FC<PosViewProps> = ({
                         </div>
                       )}
 
-                      <div className="rounded-card border border-primary/20 bg-surface-elevated/90 p-3.5 sm:p-4 shadow-xs grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
-                        <div className="sm:col-span-2">
+                      <div className="min-w-0 overflow-hidden rounded-card border border-primary/20 bg-surface-elevated/90 p-3.5 sm:p-4 shadow-xs grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
+                        <div className="min-w-0 sm:col-span-2">
                           <Field label={t.pos.fieldDate}>
                             <input
                               type="date"
@@ -1710,7 +1710,7 @@ export const PosView: React.FC<PosViewProps> = ({
                           </Field>
                         </div>
 
-                        <div className="sm:col-span-2 grid grid-cols-2 gap-2.5 sm:gap-4">
+                        <div className="min-w-0 sm:col-span-2 grid grid-cols-2 gap-2.5 sm:gap-4">
                           <Field label={t.pos.fieldCustomerName} required>
                             <input
                               ref={customerNameInputRef}
@@ -1794,7 +1794,7 @@ export const PosView: React.FC<PosViewProps> = ({
                           )}
                         </div>
 
-                        <div className="sm:col-span-2">
+                        <div className="min-w-0 sm:col-span-2">
                           <Field label={t.pos.fieldAddress} required>
                             <input
                               ref={customerAddressInputRef}
@@ -1978,8 +1978,8 @@ export const PosView: React.FC<PosViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="rounded-card border border-border/75 bg-surface-elevated/85 p-3.5 sm:p-4 shadow-xs space-y-3.5">
-                        <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
+                      <div className="min-w-0 overflow-hidden rounded-card border border-border/75 bg-surface-elevated/85 p-3.5 sm:p-4 shadow-xs space-y-3.5">
+                        <div className="min-w-0 grid grid-cols-2 gap-2.5 sm:gap-4">
                           <Field label={t.pos.fieldPaymentStatus} required>
                             <select
                               ref={paymentStatusSelectRef}
