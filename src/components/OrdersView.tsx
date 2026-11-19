@@ -1,4 +1,4 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Bluetooth, Check, CheckCircle2, ChevronDown, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
 import { Icon3D } from './Icon3D';
@@ -49,34 +49,51 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const triggerId = useId();
+  const listboxId = useId();
 
-  const options: Array<{
-    value: PaymentStatusFilterValue;
-    label: string;
-    dotClass: string;
-    activeTextClass: string;
-  }> = [
-    {
-      value: 'ALL',
-      label: allLabel,
-      dotClass: 'bg-muted/60',
-      activeTextClass: 'text-foreground',
-    },
-    {
-      value: 'paid',
-      label: paidLabel,
-      dotClass: 'bg-primary',
-      activeTextClass: 'text-primary',
-    },
-    {
-      value: 'unpaid',
-      label: unpaidLabel,
-      dotClass: 'bg-danger',
-      activeTextClass: 'text-danger',
-    },
-  ];
+  const options = useMemo<
+    Array<{
+      value: PaymentStatusFilterValue;
+      label: string;
+      dotClass: string;
+      activeTextClass: string;
+    }>
+  >(
+    () => [
+      {
+        value: 'ALL',
+        label: allLabel,
+        dotClass: 'bg-muted/60',
+        activeTextClass: 'text-foreground',
+      },
+      {
+        value: 'paid',
+        label: paidLabel,
+        dotClass: 'bg-primary',
+        activeTextClass: 'text-primary',
+      },
+      {
+        value: 'unpaid',
+        label: unpaidLabel,
+        dotClass: 'bg-danger',
+        activeTextClass: 'text-danger',
+      },
+    ],
+    [allLabel, paidLabel, unpaidLabel]
+  );
 
-  const selectedOption = options.find((opt) => opt.value === value) || options[0];
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((opt) => opt.value === value)
+  );
+  const [focusedIndex, setFocusedIndex] = useState(selectedIndex);
+  const selectedOption = options[selectedIndex] || options[0];
+
+  useEffect(() => {
+    setFocusedIndex(selectedIndex);
+  }, [selectedIndex, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -89,6 +106,7 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
       if (e.key === 'Escape') {
         e.stopPropagation();
         setOpen(false);
+        triggerRef.current?.focus();
       }
     };
     document.addEventListener('pointerdown', handlePointerDown);
@@ -99,14 +117,52 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
     };
   }, [open]);
 
+  const handleTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        setFocusedIndex(selectedIndex);
+        return;
+      }
+      setFocusedIndex((prev) =>
+        e.key === 'ArrowDown'
+          ? (prev + 1) % options.length
+          : (prev - 1 + options.length) % options.length
+      );
+    } else if (e.key === 'Home' && open) {
+      e.preventDefault();
+      setFocusedIndex(0);
+    } else if (e.key === 'End' && open) {
+      e.preventDefault();
+      setFocusedIndex(options.length - 1);
+    } else if ((e.key === 'Enter' || e.key === ' ') && open) {
+      e.preventDefault();
+      const chosen = options[focusedIndex];
+      if (chosen) {
+        onChange(chosen.value);
+      }
+      setOpen(false);
+    } else if (e.key === 'Tab' && open) {
+      setOpen(false);
+    }
+  };
+
   return (
     <div ref={containerRef} className={`relative min-w-0 ${className}`}>
       <button
+        ref={triggerRef}
+        id={triggerId}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={allLabel}
+        aria-controls={listboxId}
+        aria-activedescendant={
+          open ? `${listboxId}-opt-${options[focusedIndex]?.value ?? value}` : undefined
+        }
+        aria-label={`${allLabel}: ${selectedOption.label}`}
         onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={handleTriggerKeyDown}
         className={`${inputClass} flex items-center justify-between gap-2 text-left cursor-pointer ${
           open ? 'border-primary outline-2 outline-offset-0 outline-primary/30' : ''
         }`}
@@ -131,8 +187,9 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
       <AnimatePresence>
         {open && (
           <motion.div
+            id={listboxId}
             role="listbox"
-            aria-label={allLabel}
+            aria-labelledby={triggerId}
             initial={{
               opacity: 0,
               y: menuPlacement === 'top' ? 6 : -6,
@@ -151,21 +208,27 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
                 : 'top-full mt-1.5 origin-top'
             } rounded-control border border-border bg-surface-elevated p-1 shadow-float space-y-0.5`}
           >
-            {options.map((opt) => {
+            {options.map((opt, idx) => {
               const selected = opt.value === value;
+              const isFocused = idx === focusedIndex;
               return (
                 <button
                   key={opt.value}
+                  id={`${listboxId}-opt-${opt.value}`}
                   type="button"
                   role="option"
                   aria-selected={selected}
+                  onMouseEnter={() => setFocusedIndex(idx)}
                   onClick={() => {
                     onChange(opt.value);
                     setOpen(false);
+                    triggerRef.current?.focus();
                   }}
                   className={`w-full min-h-10 flex items-center justify-between gap-2 rounded-control px-2.5 py-2 text-xs sm:text-sm font-medium text-left cursor-pointer transition-colors ${
                     selected
                       ? 'bg-primary/12 text-primary font-semibold'
+                      : isFocused
+                      ? 'bg-background text-foreground'
                       : 'text-foreground hover:bg-background'
                   }`}
                 >
