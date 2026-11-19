@@ -1,6 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Bluetooth, CheckCircle2, ChevronDown, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
+import { Bluetooth, Check, CheckCircle2, ChevronDown, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import {
@@ -25,6 +25,169 @@ import type {
 } from '../types';
 
 const DOM_PAGE_STEP = 40;
+
+type PaymentStatusFilterValue = 'ALL' | 'paid' | 'unpaid';
+
+interface OrderStatusDropdownProps {
+  value: PaymentStatusFilterValue;
+  onChange: (value: PaymentStatusFilterValue) => void;
+  allLabel: string;
+  paidLabel: string;
+  unpaidLabel: string;
+  menuPlacement?: 'bottom' | 'top';
+  className?: string;
+}
+
+const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
+  value,
+  onChange,
+  allLabel,
+  paidLabel,
+  unpaidLabel,
+  menuPlacement = 'bottom',
+  className = '',
+}) => {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const options: Array<{
+    value: PaymentStatusFilterValue;
+    label: string;
+    dotClass: string;
+    activeTextClass: string;
+  }> = [
+    {
+      value: 'ALL',
+      label: allLabel,
+      dotClass: 'bg-muted/60',
+      activeTextClass: 'text-foreground',
+    },
+    {
+      value: 'paid',
+      label: paidLabel,
+      dotClass: 'bg-primary',
+      activeTextClass: 'text-primary',
+    },
+    {
+      value: 'unpaid',
+      label: unpaidLabel,
+      dotClass: 'bg-danger',
+      activeTextClass: 'text-danger',
+    },
+  ];
+
+  const selectedOption = options.find((opt) => opt.value === value) || options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className={`relative min-w-0 ${className}`}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={allLabel}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`${inputClass} flex items-center justify-between gap-2 text-left cursor-pointer ${
+          open ? 'border-primary outline-2 outline-offset-0 outline-primary/30' : ''
+        }`}
+      >
+        <span className="flex items-center gap-2 min-w-0">
+          <span
+            aria-hidden="true"
+            className={`h-2 w-2 rounded-full shrink-0 ${selectedOption.dotClass}`}
+          />
+          <span className={`truncate font-medium ${selectedOption.activeTextClass}`}>
+            {selectedOption.label}
+          </span>
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={`h-4 w-4 text-muted shrink-0 transition-transform duration-150 ${
+            open ? 'rotate-180 text-primary' : ''
+          }`}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="listbox"
+            aria-label={allLabel}
+            initial={{
+              opacity: 0,
+              y: menuPlacement === 'top' ? 6 : -6,
+              scale: 0.98,
+            }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{
+              opacity: 0,
+              y: menuPlacement === 'top' ? 4 : -4,
+              scale: 0.98,
+            }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className={`absolute left-0 right-0 z-30 ${
+              menuPlacement === 'top'
+                ? 'bottom-full mb-1.5 origin-bottom'
+                : 'top-full mt-1.5 origin-top'
+            } rounded-control border border-border bg-surface-elevated p-1 shadow-float space-y-0.5`}
+          >
+            {options.map((opt) => {
+              const selected = opt.value === value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className={`w-full min-h-10 flex items-center justify-between gap-2 rounded-control px-2.5 py-2 text-xs sm:text-sm font-medium text-left cursor-pointer transition-colors ${
+                    selected
+                      ? 'bg-primary/12 text-primary font-semibold'
+                      : 'text-foreground hover:bg-background'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span
+                      aria-hidden="true"
+                      className={`h-2 w-2 rounded-full shrink-0 ${opt.dotClass}`}
+                    />
+                    <span className="truncate">{opt.label}</span>
+                  </span>
+                  {selected && (
+                    <Check aria-hidden="true" className="h-4 w-4 text-primary shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
 
 interface OrderCardProps {
   order: Order;
@@ -615,7 +778,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Header Card with Filter Trigger, Search Bar, Print Controls & Export Excel */}
-      <Surface className="p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+      <Surface className="relative z-20 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border/50 pb-3.5 sm:pb-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -729,18 +892,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             )}
           </div>
 
-          <select
+          <OrderStatusDropdown
             value={paymentStatusFilter}
-            onChange={(e) =>
-              setPaymentStatusFilter(e.target.value as 'ALL' | 'paid' | 'unpaid')
-            }
-            aria-label={t.orders.allStatuses}
-            className={`${inputClass} min-h-10 min-w-0 w-full sm:w-52 sm:shrink-0`}
-          >
-            <option value="ALL">{t.orders.allStatuses}</option>
-            <option value="paid">{t.common.paid}</option>
-            <option value="unpaid">{t.common.unpaid}</option>
-          </select>
+            onChange={setPaymentStatusFilter}
+            allLabel={t.orders.allStatuses}
+            paidLabel={t.common.paid}
+            unpaidLabel={t.common.unpaid}
+            menuPlacement="bottom"
+            className="w-full sm:w-52 sm:shrink-0"
+          />
         </div>
 
         {statusMessage && (
@@ -2134,18 +2294,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       </select>
                     )}
 
-                    <select
+                    <OrderStatusDropdown
                       value={paymentStatusFilter}
-                      onChange={(e) =>
-                        setPaymentStatusFilter(e.target.value as 'ALL' | 'paid' | 'unpaid')
-                      }
-                      aria-label={t.orders.allStatuses}
-                      className={`${inputClass} min-w-0 ${!hideWarehouse ? 'col-span-2' : ''}`}
-                    >
-                      <option value="ALL">{t.orders.allStatuses}</option>
-                      <option value="paid">{t.common.paid}</option>
-                      <option value="unpaid">{t.common.unpaid}</option>
-                    </select>
+                      onChange={setPaymentStatusFilter}
+                      allLabel={t.orders.allStatuses}
+                      paidLabel={t.common.paid}
+                      unpaidLabel={t.common.unpaid}
+                      menuPlacement="top"
+                      className={`w-full ${!hideWarehouse ? 'col-span-2' : ''}`}
+                    />
                   </div>
                 </div>
 
