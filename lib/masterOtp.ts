@@ -163,9 +163,9 @@ export function isEmailDeliveryConfigured(): boolean {
 }
 
 async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
-  const subject = 'DR-POS: លេខកូដ OTP បង្កើតគណនី Admin មេថ្មី';
+  const subject = 'DR-POS: លេខកូដ OTP បង្កើតគណនី Master Admin ថ្មី';
   const textBody = [
-    `DR-POS - ការផ្ទៀងផ្ទាត់បង្កើតគណនី Admin មេថ្មី`,
+    `DR-POS - ការផ្ទៀងផ្ទាត់បង្កើតគណនី Master Admin ថ្មី`,
     ``,
     `លេខកូដ OTP ៦ ខ្ទង់របស់អ្នកគឺ: ${otpCode}`,
     `អ៊ីមែល: ${toEmail}`,
@@ -178,7 +178,7 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; color: #111827;">
       <h2 style="margin: 0 0 8px; font-size: 18px; color: #0f766e;">DR-POS · ផ្ទៀងផ្ទាត់ OTP</h2>
       <p style="margin: 0 0 16px; font-size: 14px; color: #4b5563;">
-        សូមប្រើលេខកូដ OTP ៦ ខ្ទង់ខាងក្រោម ដើម្បីបញ្ជាក់ការបង្កើតគណនី <strong>Admin មេថ្មី</strong> សម្រាប់ <strong>${toEmail}</strong>៖
+        សូមប្រើលេខកូដ OTP ៦ ខ្ទង់ខាងក្រោម ដើម្បីបញ្ជាក់ការបង្កើតគណនី <strong>Master Admin ថ្មី</strong> សម្រាប់ <strong>${toEmail}</strong>៖
       </p>
       <div style="margin: 20px 0; padding: 16px; text-align: center; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px;">
         <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #0f766e; font-family: monospace;">${otpCode}</span>
@@ -254,7 +254,7 @@ export async function runRequestMasterOtp(
       status: 403,
       body: {
         error:
-          'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Admin មេ បានទេ!',
+          'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
       },
     };
   }
@@ -264,7 +264,7 @@ export async function runRequestMasterOtp(
       status: 409,
       body: {
         error:
-          'គណនី Gmail នេះបានចុះឈ្មោះជា «Admin មេ» រួចហើយ! សូមប្រើផ្ទាំង Sign In ដើម្បីចូលប្រើប្រាស់។',
+          'គណនី Gmail នេះបានចុះឈ្មោះជា «Master Admin» រួចហើយ! សូមប្រើផ្ទាំង Sign In ដើម្បីចូលប្រើប្រាស់។',
       },
     };
   }
@@ -385,7 +385,7 @@ export async function runDeveloperIssueMasterOtp(
   if (!isValidEmailFormat(email)) {
     return {
       status: 400,
-      body: { error: 'សូមបញ្ចូល Gmail របស់ «Admin មេថ្មី» អោយបានត្រឹមត្រូវ។' },
+      body: { error: 'សូមបញ្ចូល Gmail របស់ «Master Admin ថ្មី» អោយបានត្រឹមត្រូវ។' },
     };
   }
 
@@ -397,7 +397,7 @@ export async function runDeveloperIssueMasterOtp(
       status: 403,
       body: {
         error:
-          'Gmail នេះជា Admin រង (Admin 2, 3...) នៅក្នុង Setting មិនអាចបង្កើតគណនី Admin មេ បានទេ។',
+          'Gmail នេះជា Admin រង (Admin 2, 3...) នៅក្នុង Setting មិនអាចបង្កើតគណនី Master Admin បានទេ។',
       },
     };
   }
@@ -406,7 +406,7 @@ export async function runDeveloperIssueMasterOtp(
     return {
       status: 409,
       body: {
-        error: 'Gmail នេះបានចុះឈ្មោះជា Admin មេ រួចរាល់ហើយ! មិនចាំបាច់បង្កើត OTP ថ្មីទេ។',
+        error: 'Gmail នេះបានចុះឈ្មោះជា Master Admin រួចរាល់ហើយ! មិនចាំបាច់បង្កើត OTP ថ្មីទេ។',
       },
     };
   }
@@ -497,7 +497,7 @@ export async function runVerifyMasterOtp(
       status: 403,
       body: {
         error:
-          'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Admin មេ បានទេ!',
+          'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
       },
     };
   }

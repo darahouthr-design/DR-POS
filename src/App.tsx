@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowLeftRight,
   Bell,
   Menu,
@@ -106,6 +107,7 @@ const SettingsView = React.lazy(() =>
   import('./components/SettingsAndAboutViews').then((m) => ({ default: m.SettingsView }))
 );
 import { Button, ImageZoomModal, Surface } from './components/ui';
+import { SaleMobileHome } from './components/SaleMobileHome';
 import { useIsDesktopDevice } from './utils/device';
 import {
   formatMoney,
@@ -287,6 +289,7 @@ export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [problemCustomers, setProblemCustomers] = useState<ProblemCustomer[]>([]);
   const [activePage, setActivePage] = useState<PageId>('dashboard');
+  const [saleMobileView, setSaleMobileView] = useState<'home' | 'page'>('home');
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -372,6 +375,54 @@ export function App() {
   useEffect(() => {
     latestWorkspaceRef.current = workspace;
   }, [workspace]);
+
+  const isSaleMobileMode = roleState.role === 'sale' && !isDesktop;
+
+  useEffect(() => {
+    if (roleState.role === 'sale') {
+      setSaleMobileView('home');
+    }
+  }, [roleState.role, roleState.saleName, firebaseUser?.uid]);
+
+  useEffect(() => {
+    if (!isSaleMobileMode) return;
+    document.documentElement.style.removeProperty('--mobile-nav-height');
+  }, [isSaleMobileMode]);
+
+  useEffect(() => {
+    if (!isSaleMobileMode || saleMobileView !== 'page') return;
+    const onPopState = () => {
+      setSaleMobileView('home');
+      setBellOpen(false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [isSaleMobileMode, saleMobileView]);
+
+  const navigatePage = useCallback(
+    (page: PageId) => {
+      setActivePage(page);
+      setBellOpen(false);
+      if (roleState.role === 'sale' && !isDesktop) {
+        if (saleMobileView !== 'page') {
+          try {
+            window.history.pushState({ drposSaleMobilePage: page }, '');
+          } catch {
+            // Ignore history state restrictions inside sandboxed iframes
+          }
+        }
+        setSaleMobileView('page');
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    },
+    [roleState.role, isDesktop, saleMobileView]
+  );
+
+  const handleSaleMobileBackToHome = useCallback(() => {
+    setSaleMobileView('home');
+    setBellOpen(false);
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
 
   const verifyNetworkConnectivity = useCallback(async () => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -1541,7 +1592,7 @@ export function App() {
     : [
         {
           id: 'adm-master',
-          name: workspace.settings.personalName || session.displayName || 'Admin មេ',
+          name: workspace.settings.personalName || session.displayName || 'Master Admin',
           email: masterEmailLower,
           isMaster: true,
           createdAt: session.createdAt,
@@ -1563,6 +1614,299 @@ export function App() {
     setMobileMenuOpen(false);
     setZoomState({ url: null, title: '' });
   };
+
+  const activeSaleAvatarUrl = (() => {
+    if (!isSaleRole || !session.saleName) return '';
+    if (typeof matchedSaleProfile?.avatarUrl === 'string') {
+      return matchedSaleProfile.avatarUrl.trim();
+    }
+    const targetKey = normalizeSaleKey(session.saleName);
+    const matchingStaff = workspace.staff.find(
+      (st) => normalizeSaleKey(st.name) === targetKey && Boolean(st.photoUrl?.trim())
+    );
+    return (matchingStaff?.photoUrl || '').trim();
+  })();
+
+  const networkSignalButtonNode = (
+    <motion.button
+      type="button"
+      role="status"
+      aria-live="polite"
+      onClick={() => void verifyNetworkConnectivity()}
+      whileHover={{ scale: 1.07 }}
+      whileTap={{ scale: 0.9 }}
+      title={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
+      aria-label={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
+      className={`relative inline-flex h-11 w-11 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-transparent shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+        isNetworkOnline
+          ? 'text-success hover:bg-success/10'
+          : 'text-danger hover:bg-danger/10'
+      }`}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        className="h-6 w-6"
+      >
+        {/* Signal Tower Mast & Base */}
+        <path d="M12 9.5v11.5M8.5 21l3.5-10 3.5 10M9.7 17.2h4.6" />
+        {isNetworkOnline ? (
+          <>
+            {/* Center Beacon */}
+            <motion.circle
+              cx="12"
+              cy="7.5"
+              r="1.6"
+              fill="currentColor"
+              stroke="none"
+              animate={{ scale: [1, 1.25, 1], opacity: [0.85, 1, 0.85] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            {/* Inner Signal Waves */}
+            <motion.path
+              d="M8.7 11a4.7 4.7 0 0 1 0-6.8"
+              animate={{ opacity: [0.35, 1, 0.35] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.path
+              d="M15.3 4.2a4.7 4.7 0 0 1 0 6.8"
+              animate={{ opacity: [0.35, 1, 0.35] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            {/* Outer Signal Waves */}
+            <motion.path
+              d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6"
+              animate={{ opacity: [0.18, 0.95, 0.18] }}
+              transition={{
+                duration: 1.8,
+                delay: 0.35,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+            <motion.path
+              d="M18.2 1.8a8.2 8.2 0 0 1 0 11.6"
+              animate={{ opacity: [0.18, 0.95, 0.18] }}
+              transition={{
+                duration: 1.8,
+                delay: 0.35,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <circle cx="12" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
+            <path d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6M18.2 1.8a8.2 8.2 0 0 1 0 11.6" opacity="0.35" />
+            <path d="M4 4l16 16" strokeWidth="2.1" />
+          </>
+        )}
+      </svg>
+    </motion.button>
+  );
+
+  const bellPopoverNode = (
+    <AnimatePresence>
+      {bellOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => setBellOpen(false)}
+            aria-hidden="true"
+          />
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 z-50"
+          >
+            <Surface className="p-4 shadow-float space-y-4 max-h-[75dvh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                <span className="text-sm font-semibold">{t.header.notifications}</span>
+                <button
+                  type="button"
+                  onClick={() => setBellOpen(false)}
+                  className="min-h-10 px-2.5 text-xs font-medium text-muted hover:text-foreground cursor-pointer"
+                >
+                  {t.common.close}
+                </button>
+              </div>
+
+              {/* 1. Daily Sales Reports (Strict today-only reset each day) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigatePage('orders')}
+                    className="text-xs font-semibold text-primary hover:underline cursor-pointer text-left"
+                  >
+                    {t.header.recentSales} ({todayOrdersForBell.length})
+                  </button>
+                  <span className="text-[11px] text-muted tabular-nums shrink-0">
+                    {todayDateKey}
+                  </span>
+                </div>
+                {todayOrdersForBell.length === 0 ? (
+                  <p className="text-xs text-muted">{t.header.noTodaySales}</p>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto space-y-0.5 pr-1">
+                    {todayOrdersForBell.map((o) => (
+                      <div
+                        key={o.id}
+                        className="flex justify-between gap-2 text-xs py-1.5 border-b border-border/30"
+                      >
+                        <span className="truncate">
+                          {o.customerName} ({o.staffName}){o.time ? ` · ${o.time}` : ''}
+                        </span>
+                        <strong className="tabular-nums shrink-0">
+                          {formatMoney(o.totalAmount, currency)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Low Stock <= 10 */}
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => navigatePage('products')}
+                  className="text-xs font-semibold text-danger hover:underline cursor-pointer"
+                >
+                  {t.header.lowStockAlert} ({lowStockItems.length})
+                </button>
+                {lowStockItems.length === 0 ? (
+                  <p className="text-xs text-muted">{t.header.noLowStock}</p>
+                ) : (
+                  lowStockItems.slice(0, 5).map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex justify-between text-xs py-1.5 border-b border-border/30"
+                    >
+                      <span className="truncate pr-2">{p.name}</span>
+                      <strong className="text-danger tabular-nums shrink-0">
+                        {t.common.remaining} {p.stock}
+                      </strong>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* 3. Due Payment Customers */}
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => navigatePage('due-payments')}
+                  className="text-xs font-semibold text-accent hover:underline cursor-pointer"
+                >
+                  {t.header.dueCustomerReport} ({duePaymentItems.length})
+                </button>
+                {duePaymentItems.length === 0 ? (
+                  <p className="text-xs text-muted">{t.header.noDueCustomers}</p>
+                ) : (
+                  duePaymentItems.slice(0, 4).map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex justify-between text-xs py-1.5 border-b border-border/30"
+                    >
+                      <span className="truncate pr-2">
+                        {d.customerName} ({d.dueDate || t.common.unscheduled})
+                      </span>
+                      <strong className="tabular-nums shrink-0">
+                        {formatMoney(d.totalAmount, currency)}
+                      </strong>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Surface>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+
+  const alertBannersNode = (
+    <>
+      {/* License Expiration Alert Banner (All Devices: Desktop, Phone, Tablet) */}
+      {isExpired && (
+        <div
+          role="alert"
+          className="mx-3 sm:mx-6 mt-3 sm:mt-4 rounded-card border border-danger/55 bg-danger/12 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+        >
+          <div className="flex items-start gap-2.5 min-w-0">
+            <AlertTriangle className="h-5 w-5 text-danger shrink-0 mt-0.5" />
+            <div className="text-xs sm:text-sm text-foreground leading-relaxed">
+              <strong className="text-danger">{t.header.expiredTitle}</strong>{' '}
+              <span>{t.header.expiredBody}</span>
+            </div>
+          </div>
+          <a
+            href={telegramUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-control bg-primary px-3.5 py-2 text-xs sm:text-sm font-semibold text-primary-foreground shadow-xs hover:brightness-105 shrink-0"
+          >
+            <Send className="h-4 w-4 shrink-0" />
+            <span>{t.header.contactDevTelegram}</span>
+          </a>
+        </div>
+      )}
+
+      {/* Error Banner */}
+      {apiError && (
+        <div
+          role="alert"
+          className="mx-3 sm:mx-6 mt-3 sm:mt-4 flex items-center justify-between gap-2 rounded-control border border-danger/40 bg-danger/10 px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm text-danger"
+        >
+          <span>{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError('')}
+            className="min-h-9 px-2 text-xs font-semibold cursor-pointer shrink-0"
+          >
+            {t.common.close}
+          </button>
+        </div>
+      )}
+    </>
+  );
+
+  if (isSaleMobileMode && saleMobileView === 'home') {
+    return (
+      <LanguageProvider language={effectiveLanguage}>
+        <MotionConfig reducedMotion="user">
+          <SaleMobileHome
+            saleName={session.saleName || session.displayName}
+            avatarUrl={activeSaleAvatarUrl}
+            totalBellAlerts={totalBellAlerts}
+            bellOpen={bellOpen}
+            onToggleBell={() => setBellOpen((v) => !v)}
+            onSelectPage={navigatePage}
+            networkSignalButton={networkSignalButtonNode}
+            bellPopover={bellPopoverNode}
+            banners={
+              (isExpired || apiError) ? (
+                <div className="w-full max-w-xl mx-auto px-1">{alertBannersNode}</div>
+              ) : null
+            }
+          />
+          <ImageZoomModal
+            imageUrl={zoomState.url}
+            title={zoomState.title}
+            onClose={() => setZoomState({ url: null, title: '' })}
+          />
+        </MotionConfig>
+      </LanguageProvider>
+    );
+  }
 
   return (
     <LanguageProvider language={effectiveLanguage}>
@@ -1756,23 +2100,35 @@ export function App() {
           {/* Workspace Header (Clean single-row bar: App Profile on left, quick actions on right) */}
           <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/95 backdrop-blur-md px-3.5 md:px-6 h-14 md:h-auto md:py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setActivePage(
-                    isSaleRole || blockedPages.includes('about') ? 'dashboard' : 'about'
-                  )
-                }
-                title="DR-POS App Profile"
-                aria-label="DR-POS App Profile"
-                className="h-10 w-10 shrink-0 rounded-xl bg-white p-0.5 border border-border/80 shadow-xs overflow-hidden flex items-center justify-center cursor-pointer hover:border-primary/60 transition-colors"
-              >
-                <img
-                  src={APP_LOGO_URL}
-                  alt="DR-POS"
-                  className="h-full w-full object-contain"
-                />
-              </button>
+              {isSaleMobileMode ? (
+                <button
+                  type="button"
+                  onClick={handleSaleMobileBackToHome}
+                  title={t.common.back}
+                  aria-label={t.common.back}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border/80 bg-background text-foreground shadow-xs hover:bg-surface active:scale-95 transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActivePage(
+                      isSaleRole || blockedPages.includes('about') ? 'dashboard' : 'about'
+                    )
+                  }
+                  title="DR-POS App Profile"
+                  aria-label="DR-POS App Profile"
+                  className="h-10 w-10 shrink-0 rounded-xl bg-white p-0.5 border border-border/80 shadow-xs overflow-hidden flex items-center justify-center cursor-pointer hover:border-primary/60 transition-colors"
+                >
+                  <img
+                    src={APP_LOGO_URL}
+                    alt="DR-POS"
+                    className="h-full w-full object-contain"
+                  />
+                </button>
+              )}
               <div className={isSaleRole ? 'min-w-0 flex-1' : 'hidden md:block min-w-0 flex-1'}>
                 <h1 className="text-sm sm:text-base md:text-lg font-semibold text-foreground truncate leading-tight">
                   {t.nav[activePage]}
@@ -1789,87 +2145,7 @@ export function App() {
 
             <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
               {/* Accurate Online / Offline Signal Tower Indicator */}
-              <motion.button
-                type="button"
-                role="status"
-                aria-live="polite"
-                onClick={() => void verifyNetworkConnectivity()}
-                whileHover={{ scale: 1.07 }}
-                whileTap={{ scale: 0.9 }}
-                title={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
-                aria-label={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
-                className={`relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-transparent shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
-                  isNetworkOnline
-                    ? 'text-success hover:bg-success/10'
-                    : 'text-danger hover:bg-danger/10'
-                }`}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.9"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                  className="h-6 w-6"
-                >
-                  {/* Signal Tower Mast & Base */}
-                  <path d="M12 9.5v11.5M8.5 21l3.5-10 3.5 10M9.7 17.2h4.6" />
-                  {isNetworkOnline ? (
-                    <>
-                      {/* Center Beacon */}
-                      <motion.circle
-                        cx="12"
-                        cy="7.5"
-                        r="1.6"
-                        fill="currentColor"
-                        stroke="none"
-                        animate={{ scale: [1, 1.25, 1], opacity: [0.85, 1, 0.85] }}
-                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                      {/* Inner Signal Waves */}
-                      <motion.path
-                        d="M8.7 11a4.7 4.7 0 0 1 0-6.8"
-                        animate={{ opacity: [0.35, 1, 0.35] }}
-                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                      <motion.path
-                        d="M15.3 4.2a4.7 4.7 0 0 1 0 6.8"
-                        animate={{ opacity: [0.35, 1, 0.35] }}
-                        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                      {/* Outer Signal Waves */}
-                      <motion.path
-                        d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6"
-                        animate={{ opacity: [0.18, 0.95, 0.18] }}
-                        transition={{
-                          duration: 1.8,
-                          delay: 0.35,
-                          repeat: Infinity,
-                          ease: 'easeInOut',
-                        }}
-                      />
-                      <motion.path
-                        d="M18.2 1.8a8.2 8.2 0 0 1 0 11.6"
-                        animate={{ opacity: [0.18, 0.95, 0.18] }}
-                        transition={{
-                          duration: 1.8,
-                          delay: 0.35,
-                          repeat: Infinity,
-                          ease: 'easeInOut',
-                        }}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <circle cx="12" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
-                      <path d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6M18.2 1.8a8.2 8.2 0 0 1 0 11.6" opacity="0.35" />
-                      <path d="M4 4l16 16" strokeWidth="2.1" />
-                    </>
-                  )}
-                </svg>
-              </motion.button>
+              {networkSignalButtonNode}
 
               {/* Bell Notification Icon */}
               <div className="relative shrink-0">
@@ -1907,185 +2183,20 @@ export function App() {
                   )}
                 </motion.button>
 
-                <AnimatePresence>
-                  {bellOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-40 bg-transparent"
-                        onClick={() => setBellOpen(false)}
-                        aria-hidden="true"
-                      />
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 6 }}
-                        className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 z-50"
-                      >
-                        <Surface className="p-4 shadow-float space-y-4 max-h-[75dvh] overflow-y-auto">
-                          <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
-                            <span className="text-sm font-semibold">{t.header.notifications}</span>
-                            <button
-                              type="button"
-                              onClick={() => setBellOpen(false)}
-                              className="min-h-10 px-2.5 text-xs font-medium text-muted hover:text-foreground cursor-pointer"
-                            >
-                              {t.common.close}
-                            </button>
-                          </div>
-
-                        {/* 1. Daily Sales Reports (Strict today-only reset each day) */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActivePage('orders');
-                                setBellOpen(false);
-                              }}
-                              className="text-xs font-semibold text-primary hover:underline cursor-pointer text-left"
-                            >
-                              {t.header.recentSales} ({todayOrdersForBell.length})
-                            </button>
-                            <span className="text-[11px] text-muted tabular-nums shrink-0">
-                              {todayDateKey}
-                            </span>
-                          </div>
-                          {todayOrdersForBell.length === 0 ? (
-                            <p className="text-xs text-muted">{t.header.noTodaySales}</p>
-                          ) : (
-                            <div className="max-h-52 overflow-y-auto space-y-0.5 pr-1">
-                              {todayOrdersForBell.map((o) => (
-                                <div
-                                  key={o.id}
-                                  className="flex justify-between gap-2 text-xs py-1.5 border-b border-border/30"
-                                >
-                                  <span className="truncate">
-                                    {o.customerName} ({o.staffName}){o.time ? ` · ${o.time}` : ''}
-                                  </span>
-                                  <strong className="tabular-nums shrink-0">
-                                    {formatMoney(o.totalAmount, currency)}
-                                  </strong>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 2. Low Stock <= 10 */}
-                        <div className="space-y-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActivePage('products');
-                              setBellOpen(false);
-                            }}
-                            className="text-xs font-semibold text-danger hover:underline cursor-pointer"
-                          >
-                            {t.header.lowStockAlert} ({lowStockItems.length})
-                          </button>
-                          {lowStockItems.length === 0 ? (
-                            <p className="text-xs text-muted">{t.header.noLowStock}</p>
-                          ) : (
-                            lowStockItems.slice(0, 5).map((p) => (
-                              <div
-                                key={p.id}
-                                className="flex justify-between text-xs py-1.5 border-b border-border/30"
-                              >
-                                <span className="truncate pr-2">{p.name}</span>
-                                <strong className="text-danger tabular-nums shrink-0">
-                                  {t.common.remaining} {p.stock}
-                                </strong>
-                              </div>
-                            ))
-                          )}
-                        </div>
-
-                        {/* 3. Due Payment Customers */}
-                        <div className="space-y-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActivePage('due-payments');
-                              setBellOpen(false);
-                            }}
-                            className="text-xs font-semibold text-accent hover:underline cursor-pointer"
-                          >
-                            {t.header.dueCustomerReport} ({duePaymentItems.length})
-                          </button>
-                          {duePaymentItems.length === 0 ? (
-                            <p className="text-xs text-muted">{t.header.noDueCustomers}</p>
-                          ) : (
-                            duePaymentItems.slice(0, 4).map((d) => (
-                              <div
-                                key={d.id}
-                                className="flex justify-between text-xs py-1.5 border-b border-border/30"
-                              >
-                                <span className="truncate pr-2">
-                                  {d.customerName} ({d.dueDate || t.common.unscheduled})
-                                </span>
-                                <strong className="tabular-nums shrink-0">
-                                  {formatMoney(d.totalAmount, currency)}
-                                </strong>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </Surface>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                {bellPopoverNode}
               </div>
             </div>
           </header>
 
-          {/* License Expiration Alert Banner (All Devices: Desktop, Phone, Tablet) */}
-          {isExpired && (
-            <div
-              role="alert"
-              className="mx-3 sm:mx-6 mt-3 sm:mt-4 rounded-card border border-danger/55 bg-danger/12 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
-            >
-              <div className="flex items-start gap-2.5 min-w-0">
-                <AlertTriangle className="h-5 w-5 text-danger shrink-0 mt-0.5" />
-                <div className="text-xs sm:text-sm text-foreground leading-relaxed">
-                  <strong className="text-danger">{t.header.expiredTitle}</strong>{' '}
-                  <span>{t.header.expiredBody}</span>
-                </div>
-              </div>
-              <a
-                href={telegramUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-control bg-primary px-3.5 py-2 text-xs sm:text-sm font-semibold text-primary-foreground shadow-xs hover:brightness-105 shrink-0"
-              >
-                <Send className="h-4 w-4 shrink-0" />
-                <span>{t.header.contactDevTelegram}</span>
-              </a>
-            </div>
-          )}
-
-          {/* Error Banner */}
-          {apiError && (
-            <div
-              role="alert"
-              className="mx-3 sm:mx-6 mt-3 sm:mt-4 flex items-center justify-between gap-2 rounded-control border border-danger/40 bg-danger/10 px-3.5 sm:px-4 py-2.5 text-xs sm:text-sm text-danger"
-            >
-              <span>{apiError}</span>
-              <button
-                type="button"
-                onClick={() => setApiError('')}
-                className="min-h-9 px-2 text-xs font-semibold cursor-pointer shrink-0"
-              >
-                {t.common.close}
-              </button>
-            </div>
-          )}
+          {alertBannersNode}
 
           {/* Main Active Module Content */}
           <main
             key={effectiveAdminEmail}
             className={`flex-1 p-3 sm:p-6 ${
-              isSaleRole
+              isSaleMobileMode
+                ? 'pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]'
+                : isSaleRole
                 ? isDesktop
                   ? 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] lg:pb-6'
                   : 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))]'
@@ -2117,7 +2228,7 @@ export function App() {
                   isMasterAdmin ? () => runActivityLogAutoPurge(true) : undefined
                 }
                 autoClearedActivityCount={isMasterAdmin ? autoClearedActivityCount : null}
-                onNavigate={setActivePage}
+                onNavigate={navigatePage}
               />
             )}
 
@@ -2427,6 +2538,29 @@ export function App() {
                 isExpired={isExpired}
                 isDesktop={isDesktop}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
+                onUpdateSaleAvatar={async (saleId: string, nextAvatarUrl: string) => {
+                  if (!isMasterAdmin) return false;
+                  const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
+                  const safeUrl = String(nextAvatarUrl || '').trim().slice(0, 2000);
+                  const updatedSaleProfiles = (baseSettings.saleProfiles || []).map((sp) =>
+                    sp.id === saleId ? { ...sp, avatarUrl: safeUrl } : sp
+                  );
+                  const ok = await runFsMutation(() =>
+                    updateSettingsFs(firebaseUser.uid, baseSettings, {
+                      saleProfiles: updatedSaleProfiles,
+                    })
+                  );
+                  if (ok && latestWorkspaceRef.current) {
+                    latestWorkspaceRef.current = {
+                      ...latestWorkspaceRef.current,
+                      settings: {
+                        ...latestWorkspaceRef.current.settings,
+                        saleProfiles: updatedSaleProfiles,
+                      },
+                    };
+                  }
+                  return ok;
+                }}
                 onSaveSettings={async (patch: Partial<WorkspaceSettings>) => {
                   if (isSaleRole) return false;
                   const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
@@ -2636,7 +2770,8 @@ export function App() {
           </main>
         </div>
 
-        {/* Mobile & Tablet Bottom Thumb-Zone Navigation Bar (Sale gets strictly 6 pages on Mobile & Tablet) */}
+        {/* Mobile & Tablet Bottom Thumb-Zone Navigation Bar (Hidden for Mobile Sale which uses the 2x3 Home Launcher + Back button) */}
+        {!isSaleMobileMode && (
         <nav
           ref={setMobileNavEl}
           aria-label="Mobile Quick Navigation"
@@ -2711,6 +2846,7 @@ export function App() {
             )}
           </div>
         </nav>
+        )}
 
         {/* Full-Screen Zoom In / Out Product Image Lightbox */}
         <ImageZoomModal

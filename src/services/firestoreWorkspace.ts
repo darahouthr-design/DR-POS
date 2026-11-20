@@ -321,7 +321,7 @@ export async function seedWorkspaceIfNeeded(
   initialSettings.adminProfiles = [
     {
       id: `adm-${uid.slice(0, 8)}`,
-      name: displayName || email.split('@')[0] || 'Admin មេ',
+      name: displayName || email.split('@')[0] || 'Master Admin',
       email,
       isMaster: true,
       createdAt: now.toISOString(),

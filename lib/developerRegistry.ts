@@ -728,7 +728,7 @@ export async function runRegisterMaster(
           status: 403,
           body: {
             error:
-              'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Admin មេ បានទៀតទេ!',
+              'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Master Admin បានទៀតទេ!',
           },
         },
       };
@@ -1043,7 +1043,7 @@ export async function runUpdateMasterAdminExpire(
   if (!email || !email.includes('@')) {
     return {
       status: 400,
-      body: { error: 'សូមបញ្ចូល Gmail របស់ Admin មេ អោយបានត្រឹមត្រូវ។' },
+      body: { error: 'សូមបញ្ចូល Gmail របស់ Master Admin អោយបានត្រឹមត្រូវ។' },
     };
   }
 
@@ -1055,7 +1055,7 @@ export async function runUpdateMasterAdminExpire(
           result: {
             status: 400,
             body: {
-              error: 'Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Admin មេ ទេ។',
+              error: 'Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។',
             },
           },
         };
@@ -1064,7 +1064,7 @@ export async function runUpdateMasterAdminExpire(
       const now = new Date();
       const existing = state.masterAdmins[email];
       const displayName = String(
-        payload?.displayName || existing?.displayName || email.split('@')[0] || 'Admin មេ'
+        payload?.displayName || existing?.displayName || email.split('@')[0] || 'Master Admin'
       ).trim();
 
       const mode = String(payload?.mode || 'add') as

@@ -1468,53 +1468,6 @@ export const PosView: React.FC<PosViewProps> = ({
                     </div>
                   )}
 
-                  {/* Instant Phone Warning Banner on Top of POS Form Cart */}
-                  {(phoneAlerts.problemMatch || phoneAlerts.unpaidOrders.length > 0) && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      role="alert"
-                      className="rounded-control border border-danger bg-danger/10 p-3.5 text-sm text-danger space-y-2 shadow-xs"
-                    >
-                      <div className="flex items-start gap-2 font-bold text-xs sm:text-sm leading-relaxed">
-                        <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 shrink-0 text-danger mt-0.5" />
-                        <span>
-                          {phoneAlerts.problemMatch
-                            ? t.pos.problemPhoneWarning
-                            : t.pos.unpaidPhoneWarning}
-                        </span>
-                      </div>
-
-                      {phoneAlerts.problemMatch && (
-                        <div className="rounded-control bg-danger/10 p-2.5 text-xs text-foreground space-y-1 leading-relaxed">
-                          <p>
-                            {t.pos.customerLabel} <strong className="text-danger">{phoneAlerts.problemMatch.name}</strong> ({phoneAlerts.problemMatch.phone})
-                          </p>
-                          {phoneAlerts.problemMatch.note && (
-                            <p className="text-xs text-muted break-words">
-                              {t.pos.recordNoteLabel} <span className="text-danger font-medium">{phoneAlerts.problemMatch.note}</span>
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {phoneAlerts.unpaidOrders.length > 0 && (
-                        <p className="text-xs font-semibold text-danger leading-relaxed">
-                          {t.pos.unpaidInvoiceCountPrefix}{' '}
-                          <strong className="underline">{phoneAlerts.unpaidOrders.length}</strong> {t.pos.unpaidInvoiceTotalLabel}{' '}
-                          <strong className="underline tabular-nums">
-                            {formatMoney(
-                              phoneAlerts.unpaidOrders.reduce((s, o) => s + o.totalAmount, 0),
-                              currency
-                            )}
-                          </strong>
-                        </p>
-                      )}
-
-                      {renderMatchedOrdersCard(phoneAlerts.matchedOrders, phoneAlerts.problemMatch)}
-                    </motion.div>
-                  )}
-
                   {checkoutStep === 'items' ? (
                     <div className="space-y-3">
                       {cart.length === 0 ? (
@@ -1771,6 +1724,7 @@ export const PosView: React.FC<PosViewProps> = ({
                             <motion.div
                               initial={{ opacity: 0, y: -4 }}
                               animate={{ opacity: 1, y: 0 }}
+                              role="alert"
                               className="col-span-2 rounded-control border border-danger bg-danger/10 p-3 sm:p-3.5 space-y-2 shadow-xs"
                             >
                               <div className="flex items-start gap-2 text-danger font-bold text-xs sm:text-sm leading-relaxed">
@@ -1786,6 +1740,19 @@ export const PosView: React.FC<PosViewProps> = ({
                                 <p className="text-xs text-foreground break-words leading-relaxed">
                                   • {t.pos.customerLabel} <strong className="text-danger">{phoneAlerts.problemMatch.name}</strong> ({phoneAlerts.problemMatch.phone})
                                   {phoneAlerts.problemMatch.note ? ` — ${t.pos.recordNoteLabel} ${phoneAlerts.problemMatch.note}` : ''}
+                                </p>
+                              )}
+
+                              {phoneAlerts.unpaidOrders.length > 0 && (
+                                <p className="text-xs font-semibold text-danger leading-relaxed">
+                                  {t.pos.unpaidInvoiceCountPrefix}{' '}
+                                  <strong className="underline">{phoneAlerts.unpaidOrders.length}</strong> {t.pos.unpaidInvoiceTotalLabel}{' '}
+                                  <strong className="underline tabular-nums">
+                                    {formatMoney(
+                                      phoneAlerts.unpaidOrders.reduce((s, o) => s + o.totalAmount, 0),
+                                      currency
+                                    )}
+                                  </strong>
                                 </p>
                               )}
 

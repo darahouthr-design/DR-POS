@@ -17,7 +17,6 @@ import {
 } from 'firebase/auth';
 import {
   doc,
-  enableIndexedDbPersistence,
   getDocFromServer,
   getFirestore,
   type Firestore,
@@ -28,26 +27,9 @@ const app = initializeApp(firebaseConfig);
 
 export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-export const firestorePersistenceReady: Promise<void> =
-  typeof window !== 'undefined'
-    ? enableIndexedDbPersistence(db).catch((err: { code?: string }) => {
-        if (err?.code === 'failed-precondition') {
-          // Multiple tabs open; offline persistence can only be enabled in one tab at a time.
-          console.warn(
-            'Firestore IndexedDB persistence unavailable (multiple tabs open):',
-            err
-          );
-        } else if (err?.code === 'unimplemented') {
-          // Browser environment does not support all required IndexedDB features.
-          console.warn(
-            'Firestore IndexedDB persistence is not supported in this browser:',
-            err
-          );
-        } else {
-          console.warn('Failed to enable Firestore IndexedDB persistence:', err);
-        }
-      })
-    : Promise.resolve();
+// Default in-memory Firestore local cache avoids IndexedDB primary-lease clock-skew
+// errors ("Detected an update time that is in the future") and multi-tab lock conflicts.
+export const firestorePersistenceReady: Promise<void> = Promise.resolve();
 export const auth = getAuth(app);
 
 setPersistence(auth, browserLocalPersistence).catch((err) => {

@@ -377,7 +377,7 @@ export async function registerMasterAdminLicense(payload: {
     const vault = await fetchClientVault();
     if (vault.subAdminEmails[cleanEmail]) {
       throw new Error(
-        'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Admin មេ បានទៀតទេ!'
+        'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Master Admin បានទៀតទេ!'
       );
     }
     if (!vault.masterAdmins[cleanEmail]) {
@@ -797,13 +797,13 @@ export async function updateMasterAdminExpireApi(
   const email = payload.email.trim().toLowerCase();
   const vault = await fetchClientVault();
   if (vault.subAdminEmails[email]) {
-    throw new Error('Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Admin មេ ទេ។');
+    throw new Error('Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។');
   }
 
   const now = new Date();
   const existing = vault.masterAdmins[email];
   const displayName =
-    String(payload.displayName || existing?.displayName || email.split('@')[0] || 'Admin មេ').trim();
+    String(payload.displayName || existing?.displayName || email.split('@')[0] || 'Master Admin').trim();
 
   let nextExpireAt = existing?.expireAt || addMonthsOrYearsIso(now, 'months', 1);
   let nextPlanType: 'trial' | 'paid' = existing?.planType || 'trial';
@@ -1094,14 +1094,14 @@ export async function requestMasterAdminOtpApi(email: string): Promise<RequestMa
         return {
           ok: false,
           error:
-            'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Admin មេ បានទេ!',
+            'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
         };
       }
       if (gate.isRegisteredMaster) {
         return {
           ok: false,
           error:
-            'គណនី Gmail នេះបានចុះឈ្មោះជា «Admin មេ» រួចហើយ! សូមប្រើផ្ទាំង Sign In ដើម្បីចូលប្រើប្រាស់។',
+            'គណនី Gmail នេះបានចុះឈ្មោះជា «Master Admin» រួចហើយ! សូមប្រើផ្ទាំង Sign In ដើម្បីចូលប្រើប្រាស់។',
         };
       }
       return {

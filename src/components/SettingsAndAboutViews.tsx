@@ -20,7 +20,9 @@ import {
   SlidersHorizontal,
   Volume2,
   VolumeX,
+  Camera,
   ChevronRight,
+  Loader2,
   X,
 } from 'lucide-react';
 import {
@@ -31,7 +33,12 @@ import {
 import { CambodiaFlagAnimated, DrPosLogo, Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import posVersionManifest from '../posVersion.json';
-import { cleanSaleNameDisplay, normalizeSaleKey, uploadImageToCloudinary } from '../utils/helpers';
+import {
+  cleanSaleNameDisplay,
+  normalizeSaleKey,
+  uploadImageToCloudinary,
+  uploadProductPhotoUrl,
+} from '../utils/helpers';
 import { useI18n } from '../utils/i18nContext';
 import type {
   AdminProfile,
@@ -71,6 +78,7 @@ interface SettingsViewProps {
   isExpired?: boolean;
   isDesktop: boolean;
   onSaveSettings: (next: Partial<WorkspaceSettings>) => Promise<boolean | void> | void;
+  onUpdateSaleAvatar?: (saleId: string, avatarUrl: string) => Promise<boolean>;
   onSaveSalePreferences?: (next: Partial<SaleUserPreferences>) => Promise<boolean | void> | void;
   onSaveStaff: (payload: Partial<StaffMember>) => Promise<boolean>;
   onDeleteStaff: (id: string) => Promise<boolean>;
@@ -90,6 +98,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isExpired = false,
   isDesktop,
   onSaveSettings,
+  onUpdateSaleAvatar,
   onSaveSalePreferences,
   onSaveStaff,
   onDeleteStaff,
@@ -129,6 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Sale Profiles Management
   const [newSaleName, setNewSaleName] = useState('');
   const [newSalePhone, setNewSalePhone] = useState('');
+  const [uploadingSaleAvatarId, setUploadingSaleAvatarId] = useState<string | null>(null);
   const [saleFeedback, setSaleFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
@@ -369,7 +379,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const addSaleProfile = async (nameInput: string, phoneInput = ''): Promise<boolean> => {
+  const addSaleProfile = async (
+    nameInput: string,
+    phoneInput = '',
+    avatarUrlInput?: string
+  ): Promise<boolean> => {
     if (isExpired) return false;
     setSaleFeedback(null);
     const cleanName = cleanSaleNameDisplay(nameInput);
@@ -388,11 +402,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return false;
     }
     const ownerAdminEmail = (session.operatorEmail || session.email).trim().toLowerCase();
+    const cleanAvatar = String(avatarUrlInput || '').trim().slice(0, 2000);
     const nextSale: SaleProfile = {
       id: `sale-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       name: cleanName,
       active: true,
       phone: phoneInput.trim(),
+      ...(cleanAvatar ? { avatarUrl: cleanAvatar } : {}),
       ownerAdminEmail,
       createdAt: new Date().toISOString(),
     };
@@ -410,7 +426,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         position: t.staffInfo.defaultPosition,
         phone: phoneInput.trim(),
         address: '',
-        photoUrl: '',
+        photoUrl: cleanAvatar,
       });
     }
     setSaleFeedback({
@@ -442,11 +458,69 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       ];
 
   const activeOperatorClean = (session.operatorEmail || session.email).trim().toLowerCase();
+  const isMasterAdmin = isAdminRole && activeOperatorClean === masterEmailClean;
   const activeAdminEntry =
     adminProfilesList.find((a) => a.email.trim().toLowerCase() === activeOperatorClean) ||
     adminProfilesList[0];
   const licenseInfo = getLicenseRemainingSummary(license);
   const telegramUrl = license?.telegramUrl || DEFAULT_TELEGRAM_URL;
+
+  const otherAdminSaleProfiles = isMasterAdmin
+    ? (allSaleProfiles || []).filter(
+        (sp) => (sp.ownerAdminEmail || masterEmailClean).trim().toLowerCase() !== masterEmailClean
+      )
+    : [];
+
+  const handleMasterUploadSaleAvatar = async (sp: SaleProfile, file: File) => {
+    if (!isMasterAdmin || isExpired || !onUpdateSaleAvatar) return;
+    setSaleFeedback(null);
+    setUploadingSaleAvatarId(sp.id);
+    try {
+      const uploadedUrl = await uploadProductPhotoUrl(file);
+      const ok = await onUpdateSaleAvatar(sp.id, uploadedUrl);
+      if (ok) {
+        setSaleFeedback({
+          type: 'success',
+          message: `បានកំណត់រូបភាព Profile របស់ ${sp.name} រួចរាល់!`,
+        });
+      } else {
+        setSaleFeedback({
+          type: 'error',
+          message: 'មិនអាចរក្សាទុករូបភាព Sale ទៅកាន់ Cloud Firestore បានទេ។',
+        });
+      }
+    } catch {
+      setSaleFeedback({
+        type: 'error',
+        message: 'មិនអាចផ្ទុកឡើងរូបភាពបានទេ! សូមពិនិត្យអ៊ីនធឺណិត រួចព្យាយាមម្ដងទៀត។',
+      });
+    } finally {
+      setUploadingSaleAvatarId(null);
+    }
+  };
+
+  const handleMasterClearSaleAvatar = async (sp: SaleProfile) => {
+    if (!isMasterAdmin || isExpired || !onUpdateSaleAvatar) return;
+    setSaleFeedback(null);
+    setUploadingSaleAvatarId(sp.id);
+    try {
+      const ok = await onUpdateSaleAvatar(sp.id, '');
+      if (ok) {
+        setSaleFeedback({
+          type: 'success',
+          message: `បានលុបរូបភាព Profile របស់ ${sp.name} ចេញហើយ។`,
+        });
+      }
+    } finally {
+      setUploadingSaleAvatarId(null);
+    }
+  };
+
+  const resolveSalePreviewAvatar = (sp: SaleProfile): string => {
+    if (typeof sp.avatarUrl === 'string') return sp.avatarUrl.trim();
+    const match = staff.find((st) => normalizeSaleKey(st.name) === normalizeSaleKey(sp.name));
+    return (match?.photoUrl || '').trim();
+  };
 
   const unlinkedStaffForSale = staff.filter(
     (st) => !saleProfilesList.some((sp) => sp.name.trim().toLowerCase() === st.name.trim().toLowerCase())
@@ -1240,7 +1314,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                                 key={st.id}
                                 type="button"
                                 disabled={isExpired}
-                                onClick={() => addSaleProfile(st.name, st.phone)}
+                                onClick={() => addSaleProfile(st.name, st.phone, st.photoUrl)}
                                 className="inline-flex min-h-10 sm:min-h-9 items-center gap-1.5 rounded-control border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-primary hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <Plus className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -1268,58 +1342,229 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             {t.settings.noSaleProfiles}
                           </p>
                         ) : (
-                          saleProfilesList.map((sp) => (
-                            <div
-                              key={sp.id}
-                              className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs sm:text-sm"
-                            >
-                              <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                                <span className="font-semibold text-foreground">{sp.name}</span>
-                                {sp.phone && (
-                                  <span className="text-xs text-muted tabular-nums">({sp.phone})</span>
-                                )}
-                                <span aria-hidden="true" className="text-muted">·</span>
-                                <span
-                                  className={`text-xs font-semibold ${
-                                    sp.active ? 'text-primary' : 'text-danger'
-                                  }`}
-                                >
-                                  {sp.active ? t.settings.saleAllowed : t.settings.saleDisabled}
-                                </span>
+                          saleProfilesList.map((sp) => {
+                            const previewUrl = resolveSalePreviewAvatar(sp);
+                            const isBusyAvatar = uploadingSaleAvatarId === sp.id;
+                            return (
+                              <div
+                                key={sp.id}
+                                className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs sm:text-sm"
+                              >
+                                <div className="min-w-0 flex items-center gap-3">
+                                  {/* Sale Profile Avatar Preview */}
+                                  <button
+                                    type="button"
+                                    disabled={!previewUrl}
+                                    onClick={() => previewUrl && onZoomImage(previewUrl, sp.name)}
+                                    className={`h-11 w-11 shrink-0 rounded-full p-[2px] ${
+                                      previewUrl
+                                        ? 'bg-gradient-to-tr from-[#22c8e5] via-[#2ed7cb] to-[#49e3c4] cursor-pointer'
+                                        : 'bg-border/70 cursor-default'
+                                    }`}
+                                    aria-label={sp.name}
+                                  >
+                                    <div className="h-full w-full rounded-full bg-surface overflow-hidden flex items-center justify-center text-xs font-bold text-muted">
+                                      {previewUrl ? (
+                                        <img
+                                          src={previewUrl}
+                                          alt={sp.name}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        sp.name.slice(0, 2).toUpperCase()
+                                      )}
+                                    </div>
+                                  </button>
+
+                                  <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                    <span className="font-semibold text-foreground">{sp.name}</span>
+                                    {sp.phone && (
+                                      <span className="text-xs text-muted tabular-nums">({sp.phone})</span>
+                                    )}
+                                    <span aria-hidden="true" className="text-muted">·</span>
+                                    <span
+                                      className={`text-xs font-semibold ${
+                                        sp.active ? 'text-primary' : 'text-danger'
+                                      }`}
+                                    >
+                                      {sp.active ? t.settings.saleAllowed : t.settings.saleDisabled}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                  {isMasterAdmin && onUpdateSaleAvatar && (
+                                    <div className="inline-flex items-center gap-1">
+                                      <label
+                                        className={`inline-flex min-h-10 sm:min-h-9 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-xs font-medium text-foreground hover:border-primary hover:text-primary transition-colors ${
+                                          isExpired || isBusyAvatar
+                                            ? 'opacity-50 pointer-events-none'
+                                            : 'cursor-pointer'
+                                        }`}
+                                      >
+                                        {isBusyAvatar ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                                        ) : (
+                                          <Camera className="h-3.5 w-3.5 text-primary shrink-0" />
+                                        )}
+                                        <span className="whitespace-nowrap">
+                                          {previewUrl ? 'ប្ដូររូប' : 'ដាក់រូប'}
+                                        </span>
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          disabled={isExpired || isBusyAvatar}
+                                          onChange={(e) => {
+                                            const f = e.target.files?.[0];
+                                            e.target.value = '';
+                                            if (f) void handleMasterUploadSaleAvatar(sp, f);
+                                          }}
+                                          className="hidden"
+                                        />
+                                      </label>
+                                      {previewUrl && (
+                                        <button
+                                          type="button"
+                                          disabled={isExpired || isBusyAvatar}
+                                          onClick={() => void handleMasterClearSaleAvatar(sp)}
+                                          title="លុបរូបភាព Profile"
+                                          aria-label={`លុបរូបភាព ${sp.name}`}
+                                          className="inline-flex min-h-10 min-w-9 sm:min-h-9 sm:min-w-8 items-center justify-center rounded-control border border-border/80 bg-surface text-muted hover:text-danger hover:border-danger/50 cursor-pointer disabled:opacity-50"
+                                        >
+                                          <X className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                  <Button
+                                    tone={sp.active ? 'quiet' : 'primary'}
+                                    disabled={isExpired}
+                                    onClick={() =>
+                                      onSaveSettings({
+                                        saleProfiles: saleProfilesList.map((x) =>
+                                          x.id === sp.id ? { ...x, active: !x.active } : x
+                                        ),
+                                      })
+                                    }
+                                    className="flex-1 sm:flex-initial min-h-10 sm:min-h-9 px-3 text-xs whitespace-nowrap"
+                                  >
+                                    {sp.active ? t.settings.disableSaleAccess : t.settings.enableSaleAccess}
+                                  </Button>
+                                  <button
+                                    type="button"
+                                    disabled={isExpired}
+                                    onClick={() =>
+                                      onSaveSettings({
+                                        saleProfiles: saleProfilesList.filter((x) => x.id !== sp.id),
+                                      })
+                                    }
+                                    className="inline-flex min-h-10 min-w-10 sm:min-h-9 sm:min-w-9 items-center justify-center rounded-control text-danger hover:bg-danger/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                                    aria-label={`${t.common.delete} ${sp.name}`}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <Button
-                                  tone={sp.active ? 'quiet' : 'primary'}
-                                  disabled={isExpired}
-                                  onClick={() =>
-                                    onSaveSettings({
-                                      saleProfiles: saleProfilesList.map((x) =>
-                                        x.id === sp.id ? { ...x, active: !x.active } : x
-                                      ),
-                                    })
-                                  }
-                                  className="flex-1 sm:flex-initial min-h-10 sm:min-h-9 px-3 text-xs whitespace-nowrap"
-                                >
-                                  {sp.active ? t.settings.disableSaleAccess : t.settings.enableSaleAccess}
-                                </Button>
-                                <button
-                                  type="button"
-                                  disabled={isExpired}
-                                  onClick={() =>
-                                    onSaveSettings({
-                                      saleProfiles: saleProfilesList.filter((x) => x.id !== sp.id),
-                                    })
-                                  }
-                                  className="inline-flex min-h-10 min-w-10 sm:min-h-9 sm:min-w-9 items-center justify-center rounded-control text-danger hover:bg-danger/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                                  aria-label={`${t.common.delete} ${sp.name}`}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
+
+                      {/* Master Admin can also set/change profile photos for Sub-Admin Sales */}
+                      {isMasterAdmin && onUpdateSaleAvatar && otherAdminSaleProfiles.length > 0 && (
+                        <div className="space-y-2 border-t border-border/50 pt-4">
+                          <span className="block text-xs font-semibold text-muted">
+                            កំណត់រូបភាព Sale របស់ Sub-Admin ({otherAdminSaleProfiles.length})
+                          </span>
+                          <div className="divide-y divide-border/50 rounded-control border border-border/70 bg-background/45 px-3.5 sm:px-4">
+                            {otherAdminSaleProfiles.map((sp) => {
+                              const previewUrl = resolveSalePreviewAvatar(sp);
+                              const isBusyAvatar = uploadingSaleAvatarId === sp.id;
+                              return (
+                                <div
+                                  key={sp.id}
+                                  className="py-2.5 flex items-center justify-between gap-2.5 text-xs sm:text-sm"
+                                >
+                                  <div className="min-w-0 flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      disabled={!previewUrl}
+                                      onClick={() => previewUrl && onZoomImage(previewUrl, sp.name)}
+                                      className={`h-10 w-10 shrink-0 rounded-full p-[2px] ${
+                                        previewUrl
+                                          ? 'bg-gradient-to-tr from-[#22c8e5] via-[#2ed7cb] to-[#49e3c4] cursor-pointer'
+                                          : 'bg-border/70 cursor-default'
+                                      }`}
+                                      aria-label={sp.name}
+                                    >
+                                      <div className="h-full w-full rounded-full bg-surface overflow-hidden flex items-center justify-center text-xs font-bold text-muted">
+                                        {previewUrl ? (
+                                          <img
+                                            src={previewUrl}
+                                            alt={sp.name}
+                                            className="h-full w-full object-cover"
+                                          />
+                                        ) : (
+                                          sp.name.slice(0, 2).toUpperCase()
+                                        )}
+                                      </div>
+                                    </button>
+                                    <div className="min-w-0">
+                                      <p className="font-semibold text-foreground truncate">{sp.name}</p>
+                                      {sp.ownerAdminEmail && (
+                                        <p className="text-[11px] text-muted truncate">
+                                          {sp.ownerAdminEmail}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="inline-flex items-center gap-1 shrink-0">
+                                    <label
+                                      className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border bg-surface px-2.5 text-xs font-medium text-foreground hover:border-primary hover:text-primary transition-colors ${
+                                        isExpired || isBusyAvatar
+                                          ? 'opacity-50 pointer-events-none'
+                                          : 'cursor-pointer'
+                                      }`}
+                                    >
+                                      {isBusyAvatar ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                                      ) : (
+                                        <Camera className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      )}
+                                      <span className="whitespace-nowrap">
+                                        {previewUrl ? 'ប្ដូររូប' : 'ដាក់រូប'}
+                                      </span>
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        disabled={isExpired || isBusyAvatar}
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0];
+                                          e.target.value = '';
+                                          if (f) void handleMasterUploadSaleAvatar(sp, f);
+                                        }}
+                                        className="hidden"
+                                      />
+                                    </label>
+                                    {previewUrl && (
+                                      <button
+                                        type="button"
+                                        disabled={isExpired || isBusyAvatar}
+                                        onClick={() => void handleMasterClearSaleAvatar(sp)}
+                                        title="លុបរូបភាព Profile"
+                                        aria-label={`លុបរូបភាព ${sp.name}`}
+                                        className="inline-flex min-h-9 min-w-8 items-center justify-center rounded-control border border-border/80 bg-surface text-muted hover:text-danger hover:border-danger/50 cursor-pointer disabled:opacity-50"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
 

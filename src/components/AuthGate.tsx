@@ -70,10 +70,10 @@ export interface StoredRolePref {
 }
 
 export const DUPLICATE_GMAIL_KHMER_ERROR =
-  '⚠️ គណនី Gmail នេះមានក្នុងប្រព័ន្ធរួចរាល់ហើយ! Gmail មួយមិនអាចបង្កើតគណនី «Admin មេ» ពីរដងបានជាដាច់ខាត។ សូមជ្រើសរើសផ្ទាំង «ចូលគណនី (Sign In)» ដើម្បីចូលប្រើប្រាស់។';
+  '⚠️ គណនី Gmail នេះមានក្នុងប្រព័ន្ធរួចរាល់ហើយ! Gmail មួយមិនអាចបង្កើតគណនី «Master Admin» ពីរដងបានជាដាច់ខាត។ សូមជ្រើសរើសផ្ទាំង «ចូលគណនី (Sign In)» ដើម្បីចូលប្រើប្រាស់។';
 
 export const SUB_ADMIN_EXTERNAL_BLOCK_ERROR =
-  '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings ដូចនេះមិនអាចយកមកបង្កើត Admin មេ ឬ Sign In នៅផ្នែកខាងក្រៅបានជាដាច់ខាត! សូមប្រើ Gmail របស់ «Admin មេ» ដំបូងដើម្បីចូលប្រើ រួចប្ដូរគណនី (Switch Account) នៅខាងក្នុងប្រព័ន្ធវិញ។';
+  '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings ដូចនេះមិនអាចយកមកបង្កើត Master Admin ឬ Sign In នៅផ្នែកខាងក្រៅបានជាដាច់ខាត! សូមប្រើ Gmail របស់ «Master Admin» ដំបូងដើម្បីចូលប្រើ រួចប្ដូរគណនី (Switch Account) នៅខាងក្នុងប្រព័ន្ធវិញ។';
 
 export function saveOperatorEmailPref(uid: string, operatorEmail: string): void {
   try {
@@ -444,7 +444,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     }
     const cleanOtp = otpCodeInput.replace(/\D+/g, '').trim();
     if (!/^\d{6}$/.test(cleanOtp)) {
-      setOtpErrorMsg('សូមបញ្ចូលលេខកូដ OTP ៦ ខ្ទង់ជាមុនសិន មុនពេលបង្កើតគណនី Admin មេថ្មី។');
+      setOtpErrorMsg('សូមបញ្ចូលលេខកូដ OTP ៦ ខ្ទង់ជាមុនសិន មុនពេលបង្កើតគណនី Master Admin ថ្មី។');
       return false;
     }
     setOtpVerifyBusy(true);
@@ -492,7 +492,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setError('សូមបញ្ចូលអាសយដ្ឋាន Gmail របស់ Admin មេ អោយបានត្រឹមត្រូវ។');
+      setError('សូមបញ្ចូលអាសយដ្ឋាន Gmail របស់ Master Admin អោយបានត្រឹមត្រូវ។');
       return;
     }
     if (!password || password.length < 6) {
@@ -535,7 +535,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         (targetDb, uid, mail, name) => seedWorkspaceIfNeeded(uid, mail, name, targetDb)
       );
       setSuccessMsg(
-        `បានបង្កើតគណនី Admin មេ "${created.displayName}" (${created.email}) ដោយជោគជ័យ (សាកល្បងប្រើ Free ១ ខែ)!`
+        `បានបង្កើតគណនី Master Admin "${created.displayName}" (${created.email}) ដោយជោគជ័យ (សាកល្បងប្រើ Free ១ ខែ)!`
       );
       setDisplayName('');
       setEmail('');
@@ -856,7 +856,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     } catch (err) {
       setDevFeedback({
         type: 'error',
-        message: err instanceof Error ? err.message : 'មិនអាចធ្វើបច្ចុប្បន្នភាពបញ្ជី Admin មេ បានទេ។',
+        message: err instanceof Error ? err.message : 'មិនអាចធ្វើបច្ចុប្បន្នភាពបញ្ជី Master Admin បានទេ។',
       });
     } finally {
       setDevRefreshing(false);
@@ -915,7 +915,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     if (!targetEmail || !targetEmail.includes('@')) {
       setDevFeedback({
         type: 'error',
-        message: 'សូមជ្រើសរើស ឬបញ្ចូល Gmail របស់ Admin មេ ជាមុនសិន។',
+        message: 'សូមជ្រើសរើស ឬបញ្ចូល Gmail របស់ Master Admin ជាមុនសិន។',
       });
       return;
     }
@@ -964,7 +964,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
       setDevFeedback({
         type: 'error',
-        message: 'សូមបញ្ចូល Gmail របស់ «Admin មេថ្មី» អោយបានត្រឹមត្រូវ ជាមុនសិន។',
+        message: 'សូមបញ្ចូល Gmail របស់ «Master Admin ថ្មី» អោយបានត្រឹមត្រូវ ជាមុនសិន។',
       });
       return;
     }
@@ -1274,16 +1274,16 @@ export const AuthGate: React.FC<AuthGateProps> = ({
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-foreground leading-snug">
                   {activeMode === 'create-admin'
-                    ? '១. បង្កើតគណនី Admin មេ (សាកល្បង Free ១ ខែ)'
+                    ? '១. បង្កើតគណនី Master Admin (សាកល្បង Free ១ ខែ)'
                     : activeMode === 'admin-signin'
-                    ? 'ចូលគណនី Admin មេ (Sign In)'
+                    ? 'ចូលគណនី Master Admin (Sign In)'
                     : 'ចូលគណនី Sale (Sale Sign In)'}
                 </h2>
                 {activeMode !== 'create-admin' && (
                   <p className="text-xs text-muted mt-1 leading-relaxed">
                     {activeMode === 'admin-signin'
-                      ? 'ចូលប្រើដោយប្រើ Gmail របស់ «Admin មេ» ដើម្បីគ្រប់គ្រងទំនិញ កំណត់ឈ្មោះ Sale និងមើលរបាយការណ៍ Orders។'
-                      : 'បញ្ចូល Gmail របស់ Admin មេ, លេខសម្ងាត់ និងឈ្មោះ Sale ដែល Admin បានកំណត់ ដើម្បីចូលប្រើប្រាស់។'}
+                      ? 'ចូលប្រើដោយប្រើ Gmail របស់ «Master Admin» ដើម្បីគ្រប់គ្រងទំនិញ កំណត់ឈ្មោះ Sale និងមើលរបាយការណ៍ Orders។'
+                      : 'បញ្ចូល Gmail របស់ Master Admin, លេខសម្ងាត់ និងឈ្មោះ Sale ដែល Admin បានកំណត់ ដើម្បីចូលប្រើប្រាស់។'}
                   </p>
                 )}
               </div>
@@ -1862,8 +1862,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           <UserPlus className="h-4 w-4 text-primary shrink-0" />
                           <span>
                             {creatingAdditionalBusy
-                              ? 'កំពុងបង្កើតគណនី Admin មេ...'
-                              : '+ បង្កើត Admin មេថ្មីបន្ថែមទៀត (Gmail ផ្សេងទៀត)'}
+                              ? 'កំពុងបង្កើតគណនី Master Admin...'
+                              : '+ បង្កើត Master Admin ថ្មីបន្ថែមទៀត (Gmail ផ្សេងទៀត)'}
                           </span>
                         </Button>
                       )}
@@ -2126,7 +2126,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-foreground">
                             <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                            <span>បង្កើតលេខកូដ OTP ៦ ខ្ទង់ (សម្រាប់បង្កើតគណនី Admin មេថ្មី)</span>
+                            <span>បង្កើតលេខកូដ OTP ៦ ខ្ទង់ (សម្រាប់បង្កើតគណនី Master Admin ថ្មី)</span>
                           </div>
                           <span className="text-[11px] text-muted">សុពលភាព ១០ នាទី · ប្រើបាន ១ ដង</span>
                         </div>
@@ -2136,7 +2136,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                             required
                             value={devOtpEmail}
                             onChange={(e) => setDevOtpEmail(e.target.value)}
-                            placeholder="បញ្ចូល Gmail របស់ Admin មេថ្មី (ឧ. shop@gmail.com)"
+                            placeholder="បញ្ចូល Gmail របស់ Master Admin ថ្មី (ឧ. shop@gmail.com)"
                             className={`${inputClass} flex-1 text-xs sm:text-sm`}
                           />
                           <Button type="submit" tone="primary" disabled={devOtpBusy} className="shrink-0">
@@ -2187,7 +2187,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           {/* Search Box (By Master Admin Gmail or Name) */}
                           <div className="space-y-2">
                             <label className="block text-xs sm:text-sm font-semibold text-foreground">
-                              ស្វែងរកតាម Gmail &quot;Admin មេ&quot; ឬ តាមឈ្មោះ ({filteredClassifiedAdmins.length}/{devMasterAdmins.length})
+                              ស្វែងរកតាម Gmail &quot;Master Admin&quot; ឬ តាមឈ្មោះ ({filteredClassifiedAdmins.length}/{devMasterAdmins.length})
                             </label>
                             <div className="relative flex items-center">
                               <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted" />
@@ -2195,7 +2195,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 type="search"
                                 value={devSearch}
                                 onChange={(e) => setDevSearch(e.target.value)}
-                                placeholder="វាយ Gmail Admin មេ ឬ ឈ្មោះហាង ដើម្បីស្វែងរក..."
+                                placeholder="វាយ Gmail Master Admin ឬ ឈ្មោះហាង ដើម្បីស្វែងរក..."
                                 className={`${inputClass} pl-9 pr-9`}
                               />
                               {devSearch && (
@@ -2260,7 +2260,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               <section className="rounded-control border border-amber-500/35 bg-surface overflow-hidden">
                                 <div className="px-3.5 py-2.5 border-b border-border/50 bg-amber-500/8 flex items-center justify-between gap-2">
                                   <span className="text-xs font-bold text-amber-700 dark:text-amber-300">
-                                    ១. &quot;Admin មេ&quot; ដែលទើបបង្កើតថ្មី (Free ១ខែ)
+                                    ១. &quot;Master Admin&quot; ដែលទើបបង្កើតថ្មី (Free ១ខែ)
                                   </span>
                                   <span className="text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">
                                     {trialAdmins.length} គណនី
@@ -2269,8 +2269,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 {trialAdmins.length === 0 ? (
                                   <p className="p-3.5 text-center text-xs text-muted">
                                     {devSearch
-                                      ? 'រកមិនឃើញ Admin មេ ក្នុងផ្នែក Free ១ខែ ទេ។'
-                                      : 'មិនមានគណនី Admin មេ ក្នុងផ្នែក Free ១ខែ ទេ។'}
+                                      ? 'រកមិនឃើញ Master Admin ក្នុងផ្នែក Free ១ខែ ទេ។'
+                                      : 'មិនមានគណនី Master Admin ក្នុងផ្នែក Free ១ខែ ទេ។'}
                                   </p>
                                 ) : (
                                   <div className="divide-y divide-border/50">
@@ -2320,7 +2320,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               <section className="rounded-control border border-primary/35 bg-surface overflow-hidden">
                                 <div className="px-3.5 py-2.5 border-b border-border/50 bg-primary/8 flex items-center justify-between gap-2">
                                   <span className="text-xs font-bold text-primary">
-                                    ២. &quot;Admin មេ&quot; ដែលមិនទាន់អស់សុពលភាព (បន្តកាលបរិច្ឆេទហើយ)
+                                    ២. &quot;Master Admin&quot; ដែលមិនទាន់អស់សុពលភាព (បន្តកាលបរិច្ឆេទហើយ)
                                   </span>
                                   <span className="text-xs font-bold tabular-nums text-primary">
                                     {paidActiveAdmins.length} គណនី
@@ -2329,8 +2329,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 {paidActiveAdmins.length === 0 ? (
                                   <p className="p-3.5 text-center text-xs text-muted">
                                     {devSearch
-                                      ? 'រកមិនឃើញ Admin មេ ក្នុងផ្នែកមិនទាន់អស់សុពលភាព ទេ។'
-                                      : 'មិនមានគណនី Admin មេ ដែលបានបន្តសុពលភាពនៅឡើយទេ។'}
+                                      ? 'រកមិនឃើញ Master Admin ក្នុងផ្នែកមិនទាន់អស់សុពលភាព ទេ។'
+                                      : 'មិនមានគណនី Master Admin ដែលបានបន្តសុពលភាពនៅឡើយទេ។'}
                                   </p>
                                 ) : (
                                   <div className="divide-y divide-border/50">
@@ -2381,7 +2381,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 <div className="px-3.5 py-2.5 border-b border-danger/25 bg-danger/10 flex items-center justify-between gap-2">
                                   <span className="text-xs font-bold text-danger flex items-center gap-1.5">
                                     <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                    <span>៣. &quot;Admin មេ&quot; ដែលអស់សុពលភាពប្រើប្រាស់ (Expire)</span>
+                                    <span>៣. &quot;Master Admin&quot; ដែលអស់សុពលភាពប្រើប្រាស់ (Expire)</span>
                                   </span>
                                   <span className="text-xs font-bold tabular-nums text-danger">
                                     {expiredAdmins.length} គណនី
@@ -2390,8 +2390,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 {expiredAdmins.length === 0 ? (
                                   <p className="p-3.5 text-center text-xs text-muted">
                                     {devSearch
-                                      ? 'រកមិនឃើញ Admin មេ ដែលផុតកំណត់ (Expire) ត្រូវនឹងការស្វែងរកទេ។'
-                                      : 'មិនមានគណនី Admin មេ ណាមួយអស់សុពលភាព (Expire) ទេ។'}
+                                      ? 'រកមិនឃើញ Master Admin ដែលផុតកំណត់ (Expire) ត្រូវនឹងការស្វែងរកទេ។'
+                                      : 'មិនមានគណនី Master Admin ណាមួយអស់សុពលភាព (Expire) ទេ។'}
                                   </p>
                                 ) : (
                                   <div className="divide-y divide-border/50">
@@ -2493,7 +2493,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           </div>
 
                           <div className="grid grid-cols-1 gap-2.5">
-                            <Field label="Gmail របស់ «Admin មេ»">
+                            <Field label="Gmail របស់ «Master Admin»">
                               <input
                                 type="email"
                                 value={devSelectedEmail}
@@ -2502,12 +2502,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 className={inputClass}
                               />
                             </Field>
-                            <Field label="ឈ្មោះ Admin មេ">
+                            <Field label="ឈ្មោះ Master Admin">
                               <input
                                 type="text"
                                 value={devSelectedName}
                                 onChange={(e) => setDevSelectedName(e.target.value)}
-                                placeholder="ឈ្មោះហាង / Admin មេ"
+                                placeholder="ឈ្មោះហាង / Master Admin"
                                 className={inputClass}
                               />
                             </Field>

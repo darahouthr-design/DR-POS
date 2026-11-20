@@ -139,6 +139,7 @@ export interface SaleProfile {
   name: string;
   active: boolean;
   phone?: string;
+  avatarUrl?: string;
   ownerAdminEmail?: string;
   createdAt: string;
   preferences?: SaleUserPreferences;
