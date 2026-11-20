@@ -1,7 +1,7 @@
 {
-  "name": "DR-POS — Realtime Multi-Device POS System",
+  "name": "DR-POS System",
   "short_name": "DR-POS",
-  "description": "ប្រព័ន្ធគ្រប់គ្រងការលក់ និងស្តុកទំនិញ Realtime Multi-Device POS System",
+  "description": "ប្រព័ន្ធគ្រប់គ្រង POS System",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

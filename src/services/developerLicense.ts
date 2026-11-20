@@ -1201,7 +1201,7 @@ export async function verifyMasterAdminOtpApi(payload: {
         return {
           ok: false,
           error:
-            'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Admin មេ បានទេ!',
+            'គណនីនេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
         };
       }
       const emailHash = await clientEmailHash(cleanEmail);
@@ -1211,7 +1211,7 @@ export async function verifyMasterAdminOtpApi(payload: {
         return {
           ok: false,
           error:
-            'មិនទាន់មានលេខកូដ OTP សម្រាប់ Gmail នេះទេ ឬ OTP ផុតកំណត់ហើយ! សូមទទួលយកលេខកូដ OTP ពី Developer។',
+            'មិនទាន់មានលេខកូដ OTP សម្រាប់ Gmail នេះទេ ឬ OTP ផុតកំណត់ហើយ! សូមពិនិត្យឡើងវិញ។',
         };
       }
       if (challenge.usedAt) {
@@ -1295,7 +1295,7 @@ export async function issueDeveloperMasterOtpApi(
 ): Promise<DeveloperIssueOtpResponse> {
   const cleanEmail = payload.email.trim().toLowerCase();
   if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    throw new Error('សូមបញ្ចូល Gmail របស់ «Admin មេថ្មី» អោយបានត្រឹមត្រូវ។');
+    throw new Error('សូមបញ្ចូល Gmail របស់ «Master Admin ថ្មី» អោយបានត្រឹមត្រូវ។');
   }
 
   if (!devToken.startsWith(CLIENT_DEV_TOKEN_PREFIX)) {
@@ -1334,10 +1334,10 @@ export async function issueDeveloperMasterOtpApi(
   // Firestore-direct fallback when server API is unavailable or client-dev token is active
   const vault = await fetchClientVault(true);
   if (vault.subAdminEmails[cleanEmail]) {
-    throw new Error('Gmail នេះជា Admin រង (Admin 2, 3...) នៅក្នុង Setting មិនអាចបង្កើតគណនី Admin មេ បានទេ។');
+    throw new Error('Gmail នេះជា Admin រង (Admin 2, 3...) នៅក្នុង Setting មិនអាចបង្កើតគណនី Master Admin បានទេ។');
   }
   if (vault.masterAdmins[cleanEmail]) {
-    throw new Error('Gmail នេះបានចុះឈ្មោះជា Admin មេ រួចរាល់ហើយ! មិនចាំបាច់បង្កើត OTP ថ្មីទេ។');
+    throw new Error('Gmail នេះបានចុះឈ្មោះជា Master Admin រួចរាល់ហើយ! មិនចាំបាច់បង្កើត OTP ថ្មីទេ។');
   }
 
   const emailHash = await clientEmailHash(cleanEmail);

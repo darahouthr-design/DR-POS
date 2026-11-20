@@ -4,8 +4,8 @@ import path from 'path';
 import type { AdminProfile, WorkspaceLicense } from '../src/types.js';
 import { verifyFirebaseIdToken } from './mongoPartition.js';
 
-export const DEFAULT_DEVELOPER_KEY = '975596700/houtdara';
-export const DEFAULT_TELEGRAM_URL = 'https://t.me/houtdara';
+export const DEFAULT_DEVELOPER_KEY = '975596700@houtdara';
+export const DEFAULT_TELEGRAM_URL = 'https://t.me/Hout_Dara_HR';
 export const VAULT_DOC_ID = 'devvault_a882249ff19ca7af4920b868d2613325';
 
 export interface MasterAdminLicenseRecord {

@@ -1,6 +1,6 @@
 {
   "name": "DR-POS",
-  "description": "ប្រព័ន្ធគ្រប់គ្រងការលក់ និងស្តុកទំនិញ Realtime Multi-Device POS System (DR-POS) គាំទ្រច្រើនឧបករណ៍ក្នុងពេលតែមួយ ព្រមទាំងរបាយការណ៍លម្អិត និងការព្រីនវិក្កយបត្រ។",
+  "description": "ប្រព័ន្ធគ្រប់គ្រង POS System (DR-POS)",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": []
 }

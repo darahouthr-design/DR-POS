@@ -1,20 +1,8 @@
-import imgHeadset from '../assets/images/pos_wireless_headset_1794472861379.jpg';
-import imgSpeaker from '../assets/images/pos_smart_speaker_1794472862106.jpg';
-import imgTumbler from '../assets/images/pos_ceramic_tumbler_1794472862558.jpg';
-import imgKeypad from '../assets/images/pos_mechanical_keypad_1794472863532.jpg';
 import type { CurrencyCode, LanguageCode, Order } from '../types';
 import XLSX from 'xlsx-js-style';
 
-const ASSET_MAP: Record<string, string> = {
-  'asset:headset': imgHeadset,
-  'asset:speaker': imgSpeaker,
-  'asset:tumbler': imgTumbler,
-  'asset:keypad': imgKeypad,
-};
-
 export function resolveImageUrl(rawUrl?: string): string {
-  if (!rawUrl) return '';
-  if (ASSET_MAP[rawUrl]) return ASSET_MAP[rawUrl];
+  if (!rawUrl || rawUrl.startsWith('asset:')) return '';
   return rawUrl;
 }
 

@@ -91,18 +91,41 @@ function resolveAndBumpPosVersion(rootDir: string): PosVersionManifest {
   return current;
 }
 
-export default defineConfig(() => {
-  const posMeta = resolveAndBumpPosVersion(__dirname);
+export default defineConfig(({ command }) => {
+  const isBuild = command === 'build';
+  const posMeta = isBuild ? resolveAndBumpPosVersion(__dirname) : null;
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      __POS_APP_VERSION__: JSON.stringify(`v${posMeta.version}`),
-      __POS_EDIT_COUNT__: JSON.stringify(posMeta.editCount),
-    },
+    ...(isBuild && posMeta
+      ? {
+          define: {
+            __POS_APP_VERSION__: JSON.stringify(`v${posMeta.version}`),
+            __POS_EDIT_COUNT__: JSON.stringify(posMeta.editCount),
+          },
+        }
+      : {}),
     resolve: {
+      dedupe: ['react', 'react-dom', 'motion'],
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+    },
+    optimizeDeps: {
+      entries: ['index.html', 'src/main.tsx', 'src/App.tsx', 'src/components/*.tsx'],
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'motion/react',
+        'lucide-react',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/firestore',
+        'xlsx-js-style',
+        '@zxing/library',
+      ],
     },
     build: {
       chunkSizeWarningLimit: 800,
