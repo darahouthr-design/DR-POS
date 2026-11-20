@@ -1788,24 +1788,6 @@ export function App() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-              {!isSaleRole && adminSwitchOptions.length > 1 && (
-                <div className="hidden lg:flex items-center gap-1.5 rounded-control border border-border bg-background/80 px-2.5 h-10">
-                  <ArrowLeftRight className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <select
-                    aria-label={t.header.switchAdminLabel}
-                    value={activeAdminEmail}
-                    onChange={(e) => handleQuickSwitchAdmin(e.target.value)}
-                    className="bg-transparent text-xs font-semibold text-foreground focus:outline-none cursor-pointer max-w-[155px]"
-                  >
-                    {adminSwitchOptions.map((adm) => (
-                      <option key={adm.id || adm.email} value={adm.email.toLowerCase()}>
-                        {adm.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               {/* Accurate Online / Offline Signal Tower Indicator */}
               <motion.button
                 type="button"
