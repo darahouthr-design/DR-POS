@@ -30,7 +30,10 @@ import {
   fetchSignInMethodsForEmail,
   sendEmailVerification,
   signInWithEmailAndPassword,
+  signOut,
+  updatePassword,
   updateProfile,
+  type UserCredential,
 } from 'firebase/auth';
 import { auth, createSecondaryAdminUser } from '../firebase';
 import { seedWorkspaceIfNeeded } from '../services/firestoreWorkspace';
@@ -41,9 +44,12 @@ import {
   getLicenseRemainingSummary,
   issueDeveloperMasterOtpApi,
   requestMasterAdminOtpApi,
+  resolveDeveloperPasswordLoginApi,
   subscribeToDeveloperVault,
+  syncMasterPasswordToVaultApi,
   updateDeveloperTelegramApi,
   updateMasterAdminExpireApi,
+  updateMasterAdminPasswordByDeveloperApi,
   verifyDeveloperKeyApi,
   verifyMasterAdminOtpApi,
   type MasterAdminLicenseRecord,
@@ -181,6 +187,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({
   const [devFeedback, setDevFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(
     null
   );
+  const [devShowAllPasswords, setDevShowAllPasswords] = useState(false);
+  const [devRevealedPasswords, setDevRevealedPasswords] = useState<Record<string, boolean>>({});
+  const [devCopiedPasswordEmail, setDevCopiedPasswordEmail] = useState('');
+  const [devNewPasswordInput, setDevNewPasswordInput] = useState('');
+  const [devShowNewPassword, setDevShowNewPassword] = useState(false);
+  const [devPasswordBusy, setDevPasswordBusy] = useState(false);
 
   // Master Admin Registration OTP State (6-digit)
   const [otpCodeInput, setOtpCodeInput] = useState('');
@@ -251,7 +263,23 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     const unsubVault = subscribeToDeveloperVault(
       (vault) => {
         if (cancelled || !vault.exists) return;
-        setDevMasterAdmins(vault.sortedMasterAdminsList);
+        setDevMasterAdmins((prev) => {
+          const pwByEmail = new Map<string, MasterAdminLicenseRecord>();
+          for (const rec of prev) {
+            pwByEmail.set(rec.email.trim().toLowerCase(), rec);
+          }
+          return vault.sortedMasterAdminsList.map((rec) => {
+            const old = pwByEmail.get(rec.email.trim().toLowerCase());
+            if (!old?.masterPassword) return rec;
+            return {
+              ...rec,
+              masterPassword: old.masterPassword,
+              passwordUpdatedAt: old.passwordUpdatedAt,
+              passwordUpdatedBy: old.passwordUpdatedBy,
+              passwordPendingSync: old.passwordPendingSync,
+            };
+          });
+        });
         const nextTg = vault.telegramUrl || DEFAULT_TELEGRAM_URL;
         if (nextTg !== lastSeenTelegram) {
           lastSeenTelegram = nextTg;
@@ -418,7 +446,14 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         cleanEmail,
         password,
         displayName,
-        (targetDb, uid, mail, name) => seedWorkspaceIfNeeded(uid, mail, name, targetDb)
+        (targetDb, uid, mail, name) => seedWorkspaceIfNeeded(uid, mail, name, targetDb),
+        async (idToken, _mail, name) => {
+          await syncMasterPasswordToVaultApi(idToken, {
+            password,
+            source: 'register',
+            displayName: name,
+          });
+        }
       );
       setSuccessMsg(
         `បានបង្កើតគណនី Master Admin "${created.displayName}" (${created.email}) ដោយជោគជ័យ (សាកល្បងប្រើ Free ១ ខែ)!`
@@ -591,6 +626,14 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         const cleanName = displayName.trim() || cleanEmail.split('@')[0] || 'Admin';
         await updateProfile(cred.user, { displayName: cleanName }).catch(() => {});
         sendEmailVerification(cred.user).catch(() => {});
+        const regIdToken = await cred.user.getIdToken().catch(() => '');
+        if (regIdToken) {
+          await syncMasterPasswordToVaultApi(regIdToken, {
+            password,
+            source: 'register',
+            displayName: cleanName,
+          }).catch(() => {});
+        }
 
         saveRolePref(cred.user.uid, adminRolePref);
         onSaveRolePref?.(cred.user.uid, adminRolePref);
@@ -606,6 +649,63 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       }
       return;
     }
+
+    const signInWithDevPasswordSync = async (
+      cleanEmailTarget: string,
+      enteredPassword: string
+    ): Promise<UserCredential> => {
+      try {
+        const cred = await signInWithEmailAndPassword(auth, cleanEmailTarget, enteredPassword);
+        const idToken = await cred.user.getIdToken().catch(() => '');
+        if (idToken) {
+          const syncRes = await syncMasterPasswordToVaultApi(idToken, {
+            password: enteredPassword,
+            source: 'login',
+            displayName: cred.user.displayName || undefined,
+          });
+          if (syncRes.passwordOverriddenByDeveloper) {
+            await signOut(auth).catch(() => {});
+            throw new Error(
+              syncRes.error ||
+                'លេខសម្ងាត់គណនី Master Admin នេះត្រូវបានផ្លាស់ប្ដូរដោយ Developer រួចហើយ! សូមប្រើលេខសម្ងាត់ថ្មី។'
+            );
+          }
+        }
+        return cred;
+      } catch (err) {
+        const code = (err as { code?: string })?.code || '';
+        if (code !== 'auth/invalid-credential' && code !== 'auth/wrong-password') {
+          throw err;
+        }
+        const resolved = await resolveDeveloperPasswordLoginApi(cleanEmailTarget, enteredPassword);
+        if (resolved.error) {
+          throw new Error(resolved.error);
+        }
+        if (!resolved.matched) {
+          throw err;
+        }
+        if (!resolved.syncPassword) {
+          throw new Error(
+            'លេខសម្ងាត់ថ្មីពី Developer ត្រូវការឱ្យ Master Admin ចូលតាមគណនី Google ឬកំណត់លេខសម្ងាត់ក្នុង Settings ម្ដងសិន ដើម្បីភ្ជាប់សមកាលកម្ម។'
+          );
+        }
+        const bridgeCred = await signInWithEmailAndPassword(
+          auth,
+          cleanEmailTarget,
+          resolved.syncPassword
+        );
+        await updatePassword(bridgeCred.user, enteredPassword);
+        const freshToken = await bridgeCred.user.getIdToken(true).catch(() => '');
+        if (freshToken) {
+          await syncMasterPasswordToVaultApi(freshToken, {
+            password: enteredPassword,
+            source: 'dev-sync',
+            displayName: bridgeCred.user.displayName || undefined,
+          }).catch(() => {});
+        }
+        return bridgeCred;
+      }
+    };
 
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -632,7 +732,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
           return;
         }
 
-        const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        const cred = await signInWithDevPasswordSync(cleanEmail, password);
         saveRolePref(cred.user.uid, adminRolePref);
         onSaveRolePref?.(cred.user.uid, adminRolePref);
         saveOperatorEmailPref(cred.user.uid, cleanEmail);
@@ -667,7 +767,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         return;
       }
 
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      const cred = await signInWithDevPasswordSync(cleanEmail, password);
       saveRolePref(cred.user.uid, saleRolePref);
       onSaveRolePref?.(cred.user.uid, saleRolePref);
       saveOperatorEmailPref(cred.user.uid, '');
@@ -886,6 +986,80 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     }
   };
 
+  const handleToggleRevealPassword = (emailKey: string) => {
+    const clean = emailKey.trim().toLowerCase();
+    setDevRevealedPasswords((prev) => ({
+      ...prev,
+      [clean]: !prev[clean],
+    }));
+  };
+
+  const handleCopyAdminPassword = (emailKey: string, pw: string) => {
+    if (!pw) return;
+    navigator.clipboard?.writeText(pw).catch(() => {});
+    const clean = emailKey.trim().toLowerCase();
+    setDevCopiedPasswordEmail(clean);
+    window.setTimeout(() => {
+      setDevCopiedPasswordEmail((curr) => (curr === clean ? '' : curr));
+    }, 1800);
+  };
+
+  const handleUpdateDevMasterPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!devToken) return;
+    const targetEmail = devSelectedEmail.trim().toLowerCase();
+    const nextPassword = devNewPasswordInput.trim();
+    if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+      setDevFeedback({
+        type: 'error',
+        message: 'សូមជ្រើសរើស ឬបញ្ចូល Gmail របស់ Master Admin ជាមុនសិន។',
+      });
+      return;
+    }
+    if (nextPassword.length < 6) {
+      setDevFeedback({
+        type: 'error',
+        message: 'លេខសម្ងាត់ថ្មីត្រូវមានយ៉ាងតិច 6 តួអក្សរ។',
+      });
+      return;
+    }
+    setDevPasswordBusy(true);
+    setDevFeedback(null);
+    try {
+      const updated = await updateMasterAdminPasswordByDeveloperApi(devToken, {
+        email: targetEmail,
+        newPassword: nextPassword,
+        displayName: devSelectedName.trim() || undefined,
+      });
+      setDevMasterAdmins((prev) =>
+        prev.map((adm) =>
+          adm.email.trim().toLowerCase() === updated.email
+            ? {
+                ...adm,
+                masterPassword: updated.masterPassword,
+                passwordUpdatedAt: updated.passwordUpdatedAt,
+                passwordUpdatedBy: updated.passwordUpdatedBy,
+                passwordPendingSync: updated.passwordPendingSync,
+              }
+            : adm
+        )
+      );
+      setDevRevealedPasswords((prev) => ({ ...prev, [updated.email]: true }));
+      setDevNewPasswordInput('');
+      setDevFeedback({
+        type: 'success',
+        message: `បានផ្លាស់ប្ដូរលេខសម្ងាត់ (Password) សម្រាប់ Master Admin (${updated.email}) ទៅជា "${updated.masterPassword}" ដោយជោគជ័យ!`,
+      });
+    } catch (err) {
+      setDevFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'មិនអាចផ្លាស់ប្ដូរលេខសម្ងាត់បានទេ។',
+      });
+    } finally {
+      setDevPasswordBusy(false);
+    }
+  };
+
   const classifyDevAdmin = (adm: MasterAdminLicenseRecord) => {
     const info = getLicenseRemainingSummary({
       trialStartedAt: adm.trialStartedAt,
@@ -919,6 +1093,71 @@ export const AuthGate: React.FC<AuthGateProps> = ({
   const totalTrialCount = allClassifiedAdmins.filter((x) => x.category === 'trial').length;
   const totalPaidActiveCount = allClassifiedAdmins.filter((x) => x.category === 'paid-active').length;
   const totalExpiredCount = allClassifiedAdmins.filter((x) => x.category === 'expired').length;
+  const selectedDevMasterRecord = devMasterAdmins.find(
+    (a) => a.email.trim().toLowerCase() === devSelectedEmail.trim().toLowerCase()
+  );
+
+  const renderAdminPasswordInline = (adm: MasterAdminLicenseRecord) => {
+    const clean = adm.email.trim().toLowerCase();
+    const hasPw = Boolean(adm.masterPassword);
+    const isVisible = devShowAllPasswords || Boolean(devRevealedPasswords[clean]);
+    const copied = devCopiedPasswordEmail === clean;
+
+    return (
+      <div
+        className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-control border border-border/60 bg-background/75 px-2 py-1 text-[11px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <KeyRound className="h-3 w-3 text-primary shrink-0" aria-hidden="true" />
+        <span className="text-muted font-medium">Password:</span>
+        {hasPw ? (
+          <>
+            <span className="font-mono font-semibold text-foreground select-all break-all">
+              {isVisible ? adm.masterPassword : '••••••••'}
+            </span>
+            <div className="ml-auto inline-flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleRevealPassword(clean);
+                }}
+                title={isVisible ? 'លាក់ Password' : 'មើល Password'}
+                aria-label={isVisible ? 'លាក់ Password' : 'មើល Password'}
+                className="inline-flex h-6 w-6 items-center justify-center rounded border border-border/70 bg-surface text-muted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+              >
+                {isVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCopyAdminPassword(clean, adm.masterPassword || '');
+                }}
+                title="ចម្លង Password"
+                aria-label="ចម្លង Password"
+                className="inline-flex h-6 items-center gap-1 rounded border border-border/70 bg-surface px-1.5 text-[10px] font-semibold text-muted hover:text-primary hover:border-primary/40 transition-colors cursor-pointer"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3 w-3 text-success" />
+                    <span className="text-success">ចម្លងរួច</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </>
+        ) : (
+          <span className="text-muted italic">មិនទាន់មានកំណត់ត្រា (អាចកំណត់ថ្មីនៅខាងស្ដាំ)</span>
+        )}
+      </div>
+    );
+  };
 
   const cleanEmailLower = email.trim().toLowerCase();
   const isOtpVerifiedForCurrentEmail =
@@ -1243,7 +1482,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         transition={{ duration: 0.24, ease: 'easeOut' }}
                         className="space-y-4"
                       >
-                        <Field label="១. ឈ្មោះ Admin ឬ ឈ្មោះហាង (Admin Display Name)">
+                        <Field label="១. New Master Admin">
                           <input
                             type="text"
                             required
@@ -1258,7 +1497,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           />
                         </Field>
 
-                        <Field label="២. អាសយដ្ឋាន Gmail របស់ Admin">
+                        <Field label="២. New Master Gmail">
                           <input
                             type="email"
                             required
@@ -1776,22 +2015,23 @@ export const AuthGate: React.FC<AuthGateProps> = ({
             </motion.form>
           </AnimatePresence>
 
-          {/* Compact Key Developer Button at Bottom-Right */}
+          {/* Compact Key Button at Bottom-Right */}
           {isDesktop && (
-            <div className="mt-5 pt-3 border-t border-border/50 flex items-center justify-end">
+            <div className="mt-4 pt-2.5 border-t border-border/50 flex items-center justify-end">
               <motion.button
                 type="button"
                 whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
+                whileTap={{ scale: 0.96 }}
                 onClick={() => {
                   setDevAuthError('');
                   setDevFeedback(null);
                   setDevModalOpen(true);
                 }}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border/90 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-muted hover:text-primary hover:border-primary/60 cursor-pointer transition-colors shadow-xs"
+                aria-label="Key"
+                className="inline-flex h-7 items-center gap-1 rounded-control border border-border/85 bg-background/80 px-2 py-0.5 text-[10px] font-semibold text-muted hover:text-primary hover:border-primary/60 cursor-pointer transition-colors shadow-2xs"
               >
-                <Code2 className="h-3.5 w-3.5 text-primary shrink-0" />
-                <span>Key Developer</span>
+                <KeyRound className="h-3 w-3 text-primary shrink-0" />
+                <span>Key</span>
               </motion.button>
             </div>
           )}
@@ -1850,6 +2090,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                             setDevFeedback(null);
                             setDevGeneratedOtp(null);
                             setDevOtpEmail('');
+                            setDevShowAllPasswords(false);
+                            setDevRevealedPasswords({});
+                            setDevNewPasswordInput('');
+                            setDevShowNewPassword(false);
                           }}
                           className="min-h-9 px-2.5 text-xs whitespace-nowrap shrink-0"
                         >
@@ -2070,11 +2314,34 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
                         {/* Left: Search + 3 Separated Categories Directory */}
                         <div className="lg:col-span-7 rounded-card border border-border/80 bg-background/60 p-4 space-y-3.5">
-                          {/* Search Box (By Master Admin Gmail or Name) */}
+                          {/* Search Box (By Master Admin Gmail or Name) + Global Password Reveal Toggle */}
                           <div className="space-y-2">
-                            <label className="block text-xs sm:text-sm font-semibold text-foreground">
-                              ស្វែងរកតាម Gmail &quot;Master Admin&quot; ឬ តាមឈ្មោះ ({filteredClassifiedAdmins.length}/{devMasterAdmins.length})
-                            </label>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="block text-xs sm:text-sm font-semibold text-foreground">
+                                ស្វែងរកតាម Gmail &quot;Master Admin&quot; ឬ តាមឈ្មោះ ({filteredClassifiedAdmins.length}/{devMasterAdmins.length})
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => setDevShowAllPasswords((v) => !v)}
+                                className={`inline-flex min-h-8 items-center gap-1.5 rounded-control border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                                  devShowAllPasswords
+                                    ? 'border-primary/45 bg-primary/12 text-primary'
+                                    : 'border-border bg-surface text-foreground hover:border-primary/40 hover:text-primary'
+                                }`}
+                              >
+                                {devShowAllPasswords ? (
+                                  <>
+                                    <EyeOff className="h-3.5 w-3.5 shrink-0" />
+                                    <span>លាក់ Password ទាំងអស់</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="h-3.5 w-3.5 shrink-0" />
+                                    <span>មើល Password ទាំងអស់</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                             <div className="relative flex items-center">
                               <Search className="pointer-events-none absolute left-3 h-4 w-4 text-muted" />
                               <input
@@ -2164,15 +2431,26 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                       const selected =
                                         devSelectedEmail.trim().toLowerCase() === adm.email.toLowerCase();
                                       return (
-                                        <button
+                                        <div
                                           key={adm.email}
-                                          type="button"
+                                          role="button"
+                                          tabIndex={0}
                                           onClick={() => {
                                             setDevSelectedEmail(adm.email);
                                             setDevSelectedName(adm.displayName);
                                             setDevExactDate(adm.expireAt.slice(0, 10));
                                             setDevFromNow(false);
                                             setDevFeedback(null);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                              e.preventDefault();
+                                              setDevSelectedEmail(adm.email);
+                                              setDevSelectedName(adm.displayName);
+                                              setDevExactDate(adm.expireAt.slice(0, 10));
+                                              setDevFromNow(false);
+                                              setDevFeedback(null);
+                                            }
                                           }}
                                           className={`w-full text-left p-3 transition-colors cursor-pointer space-y-1 ${
                                             selected ? 'bg-primary/10' : 'hover:bg-background/70'
@@ -2193,7 +2471,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                             <span aria-hidden="true">·</span>
                                             <span>Expire: {info.formattedExpireDate}</span>
                                           </div>
-                                        </button>
+                                          {renderAdminPasswordInline(adm)}
+                                        </div>
                                       );
                                     })}
                                   </div>
@@ -2224,15 +2503,26 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                       const selected =
                                         devSelectedEmail.trim().toLowerCase() === adm.email.toLowerCase();
                                       return (
-                                        <button
+                                        <div
                                           key={adm.email}
-                                          type="button"
+                                          role="button"
+                                          tabIndex={0}
                                           onClick={() => {
                                             setDevSelectedEmail(adm.email);
                                             setDevSelectedName(adm.displayName);
                                             setDevExactDate(adm.expireAt.slice(0, 10));
                                             setDevFromNow(false);
                                             setDevFeedback(null);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                              e.preventDefault();
+                                              setDevSelectedEmail(adm.email);
+                                              setDevSelectedName(adm.displayName);
+                                              setDevExactDate(adm.expireAt.slice(0, 10));
+                                              setDevFromNow(false);
+                                              setDevFeedback(null);
+                                            }
                                           }}
                                           className={`w-full text-left p-3 transition-colors cursor-pointer space-y-1 ${
                                             selected ? 'bg-primary/10' : 'hover:bg-background/70'
@@ -2253,7 +2543,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                             <span aria-hidden="true">·</span>
                                             <span>Expire: {info.formattedExpireDate}</span>
                                           </div>
-                                        </button>
+                                          {renderAdminPasswordInline(adm)}
+                                        </div>
                                       );
                                     })}
                                   </div>
@@ -2322,6 +2613,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                                 បាន Expire: {info.formattedExpireDate}
                                               </span>
                                             </div>
+                                            {renderAdminPasswordInline(adm)}
                                           </div>
 
                                           {/* Inline Renewal Controls Directly Inside Expired Section */}
@@ -2398,6 +2690,124 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               />
                             </Field>
                           </div>
+
+                          {/* Master Admin Password Viewer & Password Changer */}
+                          <form
+                            onSubmit={handleUpdateDevMasterPassword}
+                            className="rounded-control border border-primary/35 bg-primary/5 p-3 space-y-2.5"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground">
+                                <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
+                                <span>លេខសម្ងាត់ (Password) Master Admin</span>
+                              </span>
+                              {selectedDevMasterRecord?.passwordUpdatedBy === 'developer' && (
+                                <span className="text-[10px] font-semibold text-primary">
+                                  Developer Updated
+                                </span>
+                              )}
+                            </div>
+
+                            {selectedDevMasterRecord ? (
+                              <div className="flex items-center justify-between gap-2 rounded-control border border-border/70 bg-surface px-2.5 py-1.5 text-xs">
+                                <span className="text-muted shrink-0">បច្ចុប្បន្ន៖</span>
+                                {selectedDevMasterRecord.masterPassword ? (
+                                  <>
+                                    <span className="font-mono font-bold text-foreground truncate select-all flex-1">
+                                      {devShowAllPasswords ||
+                                      devRevealedPasswords[
+                                        selectedDevMasterRecord.email.trim().toLowerCase()
+                                      ]
+                                        ? selectedDevMasterRecord.masterPassword
+                                        : '••••••••'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleToggleRevealPassword(selectedDevMasterRecord.email)
+                                      }
+                                      aria-label="បង្ហាញ ឬលាក់ Password"
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/70 bg-background text-muted hover:text-primary cursor-pointer shrink-0"
+                                    >
+                                      {devShowAllPasswords ||
+                                      devRevealedPasswords[
+                                        selectedDevMasterRecord.email.trim().toLowerCase()
+                                      ] ? (
+                                        <EyeOff className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <Eye className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleCopyAdminPassword(
+                                          selectedDevMasterRecord.email,
+                                          selectedDevMasterRecord.masterPassword || ''
+                                        )
+                                      }
+                                      aria-label="ចម្លង Password"
+                                      className="inline-flex h-7 items-center gap-1 rounded border border-border/70 bg-background px-2 text-[11px] font-semibold text-muted hover:text-primary cursor-pointer shrink-0"
+                                    >
+                                      {devCopiedPasswordEmail ===
+                                      selectedDevMasterRecord.email.trim().toLowerCase() ? (
+                                        <Check className="h-3.5 w-3.5 text-success" />
+                                      ) : (
+                                        <Copy className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-muted italic text-[11px] flex-1">
+                                    មិនទាន់មានកំណត់ត្រា
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-muted">
+                                ជ្រើសរើស Master Admin ពីបញ្ជីខាងឆ្វេង ឬបញ្ចូល Gmail ខាងលើ ដើម្បីមើល ឬប្ដូរ Password។
+                              </p>
+                            )}
+
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <div className="relative flex-1 flex items-center">
+                                <input
+                                  type={devShowNewPassword ? 'text' : 'password'}
+                                  minLength={6}
+                                  maxLength={128}
+                                  value={devNewPasswordInput}
+                                  onChange={(e) => setDevNewPasswordInput(e.target.value)}
+                                  placeholder="បញ្ចូល Password ថ្មី (យ៉ាងតិច 6 តួ)..."
+                                  className={`${inputClass} pr-9 font-mono text-xs`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setDevShowNewPassword((v) => !v)}
+                                  aria-label={devShowNewPassword ? 'លាក់ Password ថ្មី' : 'មើល Password ថ្មី'}
+                                  className="absolute right-2 inline-flex h-7 w-7 items-center justify-center rounded text-muted hover:text-foreground cursor-pointer"
+                                >
+                                  {devShowNewPassword ? (
+                                    <EyeOff className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Eye className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                              <Button
+                                type="submit"
+                                tone="primary"
+                                disabled={
+                                  devPasswordBusy ||
+                                  !devSelectedEmail.trim() ||
+                                  devNewPasswordInput.trim().length < 6
+                                }
+                                className="min-h-10 px-3 text-xs shrink-0 whitespace-nowrap"
+                              >
+                                <KeyRound className="h-3.5 w-3.5 shrink-0" />
+                                <span>{devPasswordBusy ? 'កំពុងប្ដូរ...' : 'ផ្លាស់ប្ដូរ Password'}</span>
+                              </Button>
+                            </div>
+                          </form>
 
                           {/* Quick Add Months / Years Buttons */}
                           <div className="space-y-1.5">

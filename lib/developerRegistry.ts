@@ -3,6 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import type { AdminProfile, WorkspaceLicense } from '../src/types.js';
 import { verifyFirebaseIdToken } from './mongoPartition.js';
+import {
+  deleteMasterCredentialByEmail,
+  getAllDecryptedMasterPasswordsMap,
+} from './masterCredentials.js';
 
 export const DEFAULT_DEVELOPER_KEY = '975596700@houtdara';
 export const DEFAULT_TELEGRAM_URL = 'https://t.me/Hout_Dara_HR';
@@ -16,6 +20,10 @@ export interface MasterAdminLicenseRecord {
   expireAt: string;
   planType: 'trial' | 'paid';
   developerUpdatedAt: string;
+  masterPassword?: string;
+  passwordUpdatedAt?: string;
+  passwordUpdatedBy?: 'master' | 'developer';
+  passwordPendingSync?: boolean;
 }
 
 export interface SubAdminRegistryRecord {
@@ -675,6 +683,27 @@ function sortedMasterAdmins(state: DeveloperVaultState): MasterAdminLicenseRecor
   );
 }
 
+async function attachDeveloperPasswords(
+  admins: MasterAdminLicenseRecord[]
+): Promise<MasterAdminLicenseRecord[]> {
+  try {
+    const pwMap = await getAllDecryptedMasterPasswordsMap();
+    return admins.map((adm) => {
+      const info = pwMap[normalizeEmail(adm.email)];
+      if (!info) return adm;
+      return {
+        ...adm,
+        masterPassword: info.password,
+        passwordUpdatedAt: info.updatedAt,
+        passwordUpdatedBy: info.updatedBy,
+        passwordPendingSync: info.needsFirebaseSync,
+      };
+    });
+  } catch {
+    return admins;
+  }
+}
+
 // --- Route Logic Handlers (Shared by Express server.ts & Vercel /api/*) ---
 
 export interface ApiResult {
@@ -975,6 +1004,9 @@ export async function runUnregisterWorkspaceAccount(
   }, onMirrorLocal);
 
   if (value.status === 200) {
+    if (masterEmail) {
+      await deleteMasterCredentialByEmail(masterEmail).catch(() => {});
+    }
     return {
       status: 200,
       body: {
@@ -1001,13 +1033,14 @@ export async function runVerifyDeveloper(
   }
   const state = await readVaultState(onMirrorLocal);
   const devToken = issueDeveloperToken();
+  const enrichedAdmins = await attachDeveloperPasswords(sortedMasterAdmins(state));
   return {
     status: 200,
     body: {
       ok: true,
       devToken,
       telegramUrl: state.telegramUrl || DEFAULT_TELEGRAM_URL,
-      masterAdmins: sortedMasterAdmins(state),
+      masterAdmins: enrichedAdmins,
     },
   };
 }
@@ -1021,11 +1054,12 @@ export async function runDeveloperOverview(
     return { status: 401, body: { error: 'Developer session expired or invalid' } };
   }
   const state = await readVaultState(onMirrorLocal);
+  const enrichedAdmins = await attachDeveloperPasswords(sortedMasterAdmins(state));
   return {
     status: 200,
     body: {
       telegramUrl: state.telegramUrl || DEFAULT_TELEGRAM_URL,
-      masterAdmins: sortedMasterAdmins(state),
+      masterAdmins: enrichedAdmins,
     },
   };
 }
@@ -1138,6 +1172,20 @@ export async function runUpdateMasterAdminExpire(
     return {
       status: 503,
       body: { error: 'Cloud Firestore sync unavailable from server, please retry via client' },
+    };
+  }
+  if (value.status === 200 && Array.isArray(value.body.masterAdmins)) {
+    const enriched = await attachDeveloperPasswords(
+      value.body.masterAdmins as MasterAdminLicenseRecord[]
+    );
+    const targetAdmin = enriched.find((a) => normalizeEmail(a.email) === email);
+    return {
+      status: 200,
+      body: {
+        ...value.body,
+        ...(targetAdmin ? { masterAdmin: targetAdmin } : {}),
+        masterAdmins: enriched,
+      },
     };
   }
   return value;

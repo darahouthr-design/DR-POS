@@ -65,11 +65,15 @@ import {
 } from './utils/workspaceBootCache';
 import {
   checkEmailAuthGate,
+  checkPendingMasterPasswordSyncApi,
   DEFAULT_TELEGRAM_URL,
   isWorkspaceExpired,
+  syncMasterPasswordToVaultApi,
   syncWorkspaceLicenseWithServer,
 } from './services/developerLicense';
 import { APP_LOGO_URL, DrPosLogo, Icon3D, type Icon3DName } from './components/Icon3D';
+import { NetworkSpeedSignal } from './components/NetworkSpeedSignal';
+import { LicenseCountdown } from './components/LicenseCountdown';
 
 const AuthGate = React.lazy(() =>
   import('./components/AuthGate').then((m) => ({ default: m.AuthGate }))
@@ -467,61 +471,35 @@ export function App() {
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, []);
 
-  const verifyNetworkConnectivity = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setIsNetworkOnline(false);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 4500);
-    try {
-      const res = await fetch(`/manifest.webmanifest?ping=${Date.now()}`, {
-        method: 'HEAD',
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-      setIsNetworkOnline(res.ok || res.status < 500);
-    } catch {
-      setIsNetworkOnline(false);
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }, []);
-
+  // Silently sync any Developer-updated password into Firebase Auth for an active Master Admin session
   useEffect(() => {
-    const handleOffline = () => {
-      setIsNetworkOnline(false);
-    };
-    const handleOnline = () => {
-      setIsNetworkOnline(true);
-      void verifyNetworkConnectivity();
-    };
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        void verifyNetworkConnectivity();
+    if (!firebaseUser || roleState.role !== 'admin') return;
+    let cancelled = false;
+    const syncPendingDevPassword = async () => {
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        if (!idToken || cancelled) return;
+        const pending = await checkPendingMasterPasswordSyncApi(idToken);
+        if (!pending.pending || !pending.newPassword || cancelled) return;
+        await setOrLinkCurrentAdminPassword(pending.newPassword);
+        const freshToken = await firebaseUser.getIdToken(true).catch(() => idToken);
+        await syncMasterPasswordToVaultApi(freshToken, {
+          password: pending.newPassword,
+          source: 'dev-sync',
+          displayName: firebaseUser.displayName || undefined,
+        });
+      } catch {
+        // If Firebase requires recent login, next password sign-in will complete the sync seamlessly
       }
     };
-
-    window.addEventListener('offline', handleOffline);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-
-    void verifyNetworkConnectivity();
-    const pollTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void verifyNetworkConnectivity();
-      }
-    }, 25_000);
-
+    const timer = window.setTimeout(() => {
+      void syncPendingDevPassword();
+    }, 2200);
     return () => {
-      window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.clearInterval(pollTimer);
+      cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [verifyNetworkConnectivity]);
+  }, [firebaseUser, roleState.role]);
 
   // Persistent Firebase Authentication + Realtime Multi-Device Firestore Sync
   useEffect(() => {
@@ -1771,87 +1749,11 @@ export function App() {
   })();
 
   const networkSignalButtonNode = (
-    <motion.button
-      type="button"
-      role="status"
-      aria-live="polite"
-      onClick={() => void verifyNetworkConnectivity()}
-      whileHover={{ scale: 1.07 }}
-      whileTap={{ scale: 0.9 }}
-      title={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
-      aria-label={isNetworkOnline ? t.header.networkOnlineTitle : t.header.networkOfflineTitle}
-      className={`relative inline-flex h-11 w-11 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-transparent shrink-0 cursor-pointer transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
-        isNetworkOnline
-          ? 'text-success hover:bg-success/10'
-          : 'text-danger hover:bg-danger/10'
-      }`}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-        className="h-6 w-6"
-      >
-        {/* Signal Tower Mast & Base */}
-        <path d="M12 9.5v11.5M8.5 21l3.5-10 3.5 10M9.7 17.2h4.6" />
-        {isNetworkOnline ? (
-          <>
-            {/* Center Beacon */}
-            <motion.circle
-              cx="12"
-              cy="7.5"
-              r="1.6"
-              fill="currentColor"
-              stroke="none"
-              animate={{ scale: [1, 1.25, 1], opacity: [0.85, 1, 0.85] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            {/* Inner Signal Waves */}
-            <motion.path
-              d="M8.7 11a4.7 4.7 0 0 1 0-6.8"
-              animate={{ opacity: [0.35, 1, 0.35] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            <motion.path
-              d="M15.3 4.2a4.7 4.7 0 0 1 0 6.8"
-              animate={{ opacity: [0.35, 1, 0.35] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-            />
-            {/* Outer Signal Waves */}
-            <motion.path
-              d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6"
-              animate={{ opacity: [0.18, 0.95, 0.18] }}
-              transition={{
-                duration: 1.8,
-                delay: 0.35,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-            />
-            <motion.path
-              d="M18.2 1.8a8.2 8.2 0 0 1 0 11.6"
-              animate={{ opacity: [0.18, 0.95, 0.18] }}
-              transition={{
-                duration: 1.8,
-                delay: 0.35,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-            />
-          </>
-        ) : (
-          <>
-            <circle cx="12" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
-            <path d="M5.8 13.4a8.2 8.2 0 0 1 0-11.6M18.2 1.8a8.2 8.2 0 0 1 0 11.6" opacity="0.35" />
-            <path d="M4 4l16 16" strokeWidth="2.1" />
-          </>
-        )}
-      </svg>
-    </motion.button>
+    <NetworkSpeedSignal
+      onlineTitle={t.header.networkOnlineTitle}
+      offlineTitle={t.header.networkOfflineTitle}
+      onOnlineChange={setIsNetworkOnline}
+    />
   );
 
   const bellPopoverNode = (
@@ -2273,9 +2175,18 @@ export function App() {
                 </button>
               )}
               <div className={isSaleRole ? 'min-w-0 flex-1' : 'hidden md:block min-w-0 flex-1'}>
-                <h1 className="text-sm sm:text-base md:text-lg font-semibold text-foreground truncate leading-tight">
-                  {t.nav[activePage]}
-                </h1>
+                <div className="flex items-center gap-2.5 lg:gap-3 min-w-0 flex-wrap">
+                  <h1 className="text-sm sm:text-base md:text-lg font-semibold text-foreground truncate leading-tight">
+                    {t.nav[activePage]}
+                  </h1>
+                  {isDesktop && workspace.license?.expireAt && (
+                    <LicenseCountdown
+                      license={workspace.license}
+                      variant="desktop-header"
+                      expiredLabel={t.settings.statusExpired}
+                    />
+                  )}
+                </div>
                 <p className="text-[11px] sm:text-xs text-muted truncate">
                   {session.role === 'sale'
                     ? `Sale: ${session.saleName} · ${activeAdminLabel}`
@@ -2842,6 +2753,14 @@ export function App() {
                   }
                   try {
                     await setOrLinkCurrentAdminPassword(password);
+                    const idToken = await firebaseUser.getIdToken(true).catch(() => '');
+                    if (idToken) {
+                      await syncMasterPasswordToVaultApi(idToken, {
+                        password,
+                        source: 'settings',
+                        displayName: workspace.settings.personalName || session.displayName,
+                      });
+                    }
                     return {
                       ok: true,
                       message:

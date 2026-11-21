@@ -31,6 +31,7 @@ import {
   getLicenseRemainingSummary,
 } from '../services/developerLicense';
 import { CambodiaFlagAnimated, DrPosLogo, Icon3D } from './Icon3D';
+import { LicenseCountdown } from './LicenseCountdown';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import posVersionManifest from '../posVersion.json';
 import {
@@ -780,13 +781,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
           <div className="px-4 py-3 space-y-1">
             <span className="text-muted block text-xs">{t.settings.expireDateLabel}</span>
-            <strong
-              className={`block text-sm font-semibold tabular-nums ${
-                isExpired ? 'text-danger' : 'text-primary'
-              }`}
-            >
-              {licenseInfo.formattedExpireDate}
-            </strong>
+            <LicenseCountdown
+              license={license}
+              variant="settings-card"
+              expiredLabel={t.settings.statusExpired}
+            />
           </div>
           <div className="px-4 py-3 space-y-1">
             <span className="text-muted block text-xs">{t.settings.statusLabel}</span>

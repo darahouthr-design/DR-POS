@@ -60,7 +60,8 @@ export async function createSecondaryAdminUser(
   rawEmail: string,
   password: string,
   displayName: string,
-  onSeedWorkspace?: (targetDb: Firestore, uid: string, email: string, name: string) => Promise<void>
+  onSeedWorkspace?: (targetDb: Firestore, uid: string, email: string, name: string) => Promise<void>,
+  onCreatedIdToken?: (idToken: string, email: string, name: string) => Promise<void>
 ): Promise<{ uid: string; email: string; displayName: string }> {
   const email = rawEmail.trim().toLowerCase();
   const cleanName = displayName.trim() || email.split('@')[0] || 'DR-POS Admin';
@@ -80,6 +81,13 @@ export async function createSecondaryAdminUser(
 
     if (onSeedWorkspace) {
       await onSeedWorkspace(secondaryDb, cred.user.uid, email, cleanName).catch(() => {});
+    }
+
+    if (onCreatedIdToken) {
+      const idToken = await cred.user.getIdToken().catch(() => '');
+      if (idToken) {
+        await onCreatedIdToken(idToken, email, cleanName).catch(() => {});
+      }
     }
 
     return {

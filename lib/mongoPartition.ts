@@ -182,7 +182,7 @@ export async function verifyFirebaseIdToken(
   return null;
 }
 
-async function getMongoDb(): Promise<Db | null> {
+export async function getMongoDb(): Promise<Db | null> {
   if (!isMongoConfigured()) return null;
   const uri = getMongoUri();
   const state = g.__drposMongo!;

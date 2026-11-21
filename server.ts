@@ -44,6 +44,18 @@ import {
   runMongoStatus,
   runMongoSync,
 } from './lib/mongoPartition';
+import {
+  runDeveloperUpdateMasterPassword,
+  runPendingMasterPasswordSync,
+  runResolveDeveloperPasswordLogin,
+  runSyncMasterPassword,
+} from './lib/masterCredentials';
+
+// Pre-allocated incompressible random payload (512 KB) for accurate internet speed testing
+const SPEED_PROBE_MAX_BYTES = 512 * 1024;
+const SPEED_PROBE_MIN_BYTES = 32 * 1024;
+const SPEED_PROBE_DEFAULT_BYTES = 256 * 1024;
+const SPEED_PROBE_BUFFER = crypto.randomBytes(SPEED_PROBE_MAX_BYTES);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -475,6 +487,64 @@ async function startServer() {
   // Update Developer Telegram Link
   app.post('/api/developer/telegram', async (req, res) => {
     const result = await runUpdateDeveloperTelegram(req.headers, req.body || {}, mirrorVaultToLocalDb);
+    res.status(result.status).json(result.body);
+  });
+
+  // --- ACCURATE LIVE INTERNET SPEED PROBE ---
+  app.head('/api/speed-probe', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.status(200).end();
+  });
+
+  app.get('/api/speed-probe', (req, res) => {
+    const requested = Number(req.query?.bytes);
+    const byteCount = Number.isFinite(requested)
+      ? Math.max(SPEED_PROBE_MIN_BYTES, Math.min(SPEED_PROBE_MAX_BYTES, Math.floor(requested)))
+      : SPEED_PROBE_DEFAULT_BYTES;
+    const chunk = SPEED_PROBE_BUFFER.subarray(0, byteCount);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(chunk.byteLength));
+    res.setHeader('Content-Encoding', 'identity');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Probe-Bytes', String(chunk.byteLength));
+    res.status(200).send(chunk);
+  });
+
+  // --- MASTER ADMIN PASSWORD VAULT & DEVELOPER PASSWORD MANAGEMENT ---
+  app.post('/api/auth/sync-master-password', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runSyncMasterPassword(
+      req.headers as Record<string, string | string[] | undefined>,
+      req.body || {}
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/auth/resolve-dev-password', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runResolveDeveloperPasswordLogin(req.body || {});
+    res.status(result.status).json(result.body);
+  });
+
+  app.get('/api/auth/pending-password-sync', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runPendingMasterPasswordSync(
+      req.headers as Record<string, string | string[] | undefined>
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/developer/master-admins/password', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runDeveloperUpdateMasterPassword(
+      req.headers as Record<string, string | string[] | undefined>,
+      req.body || {}
+    );
     res.status(result.status).json(result.body);
   });
 

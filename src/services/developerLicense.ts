@@ -18,6 +18,10 @@ export interface MasterAdminLicenseRecord {
   expireAt: string;
   planType: 'trial' | 'paid';
   developerUpdatedAt: string;
+  masterPassword?: string;
+  passwordUpdatedAt?: string;
+  passwordUpdatedBy?: 'master' | 'developer';
+  passwordPendingSync?: boolean;
 }
 
 export interface GateCheckResult {
@@ -309,6 +313,87 @@ export function getLicenseRemainingSummary(license?: WorkspaceLicense | null): {
     daysLeft,
     hoursLeft,
     formattedExpireDate: `${yyyy}-${mm}-${dd} ${hh}:${min}`,
+  };
+}
+
+export interface LicenseCountdownInfo {
+  hasExpireDate: boolean;
+  expired: boolean;
+  isWarning: boolean;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  hhmmss: string;
+  dateOnly: string;
+  formattedExpireDate: string;
+}
+
+export function getLicenseCountdown(
+  license?: WorkspaceLicense | null,
+  nowMs: number = Date.now()
+): LicenseCountdownInfo {
+  if (!license?.expireAt) {
+    return {
+      hasExpireDate: false,
+      expired: false,
+      isWarning: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      hhmmss: '00:00:00',
+      dateOnly: '-',
+      formattedExpireDate: '-',
+    };
+  }
+  const ts = new Date(license.expireAt).getTime();
+  if (Number.isNaN(ts)) {
+    return {
+      hasExpireDate: false,
+      expired: false,
+      isWarning: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      hhmmss: '00:00:00',
+      dateOnly: license.expireAt,
+      formattedExpireDate: license.expireAt,
+    };
+  }
+
+  const d = new Date(ts);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const dateOnly = `${yyyy}-${mm}-${dd}`;
+  const expH = String(d.getHours()).padStart(2, '0');
+  const expM = String(d.getMinutes()).padStart(2, '0');
+
+  const diffMs = Math.max(0, ts - nowMs);
+  const expired = diffMs <= 0;
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const hhStr = String(hours).padStart(2, '0');
+  const mmStr = String(minutes).padStart(2, '0');
+  const ssStr = String(seconds).padStart(2, '0');
+
+  return {
+    hasExpireDate: true,
+    expired,
+    isWarning: !expired && days <= 3,
+    days,
+    hours,
+    minutes,
+    seconds,
+    hhmmss: `${hhStr}:${mmStr}:${ssStr}`,
+    dateOnly,
+    formattedExpireDate: `${dateOnly} ${expH}:${expM}`,
   };
 }
 
@@ -1385,3 +1470,163 @@ export async function issueDeveloperMasterOtpApi(
     emailedToUser: false,
   };
 }
+
+// --- Master Admin Password Vault & Key Developer Password Management ---
+
+export async function syncMasterPasswordToVaultApi(
+  idToken: string,
+  payload: {
+    password: string;
+    source: 'register' | 'login' | 'settings' | 'dev-sync';
+    displayName?: string;
+  }
+): Promise<{ ok: boolean; passwordOverriddenByDeveloper?: boolean; error?: string }> {
+  if (!idToken || !payload.password || payload.password.length < 6) {
+    return { ok: false };
+  }
+  try {
+    const res = await fetch('/api/auth/sync-master-password', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const parsed = await tryJson<{
+      ok?: boolean;
+      passwordOverriddenByDeveloper?: boolean;
+      error?: string;
+    }>(res);
+    if (res.status === 409 && parsed.data?.passwordOverriddenByDeveloper) {
+      return {
+        ok: false,
+        passwordOverriddenByDeveloper: true,
+        error:
+          parsed.data.error ||
+          'លេខសម្ងាត់គណនី Master Admin នេះត្រូវបានផ្លាស់ប្ដូរដោយ Developer រួចហើយ! សូមប្រើលេខសម្ងាត់ថ្មី។',
+      };
+    }
+    return { ok: res.ok && Boolean(parsed.data?.ok) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function resolveDeveloperPasswordLoginApi(
+  email: string,
+  password: string
+): Promise<{
+  matched: boolean;
+  hasSyncPassword?: boolean;
+  syncPassword?: string;
+  error?: string;
+}> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !password || password.length < 6) {
+    return { matched: false };
+  }
+  try {
+    const res = await fetch('/api/auth/resolve-dev-password', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password }),
+    });
+    const parsed = await tryJson<{
+      matched?: boolean;
+      hasSyncPassword?: boolean;
+      syncPassword?: string;
+      error?: string;
+    }>(res);
+    if (res.status === 429 && parsed.data?.error) {
+      return { matched: false, error: parsed.data.error };
+    }
+    if (res.ok && parsed.isJson && parsed.data) {
+      return {
+        matched: Boolean(parsed.data.matched),
+        hasSyncPassword: Boolean(parsed.data.hasSyncPassword),
+        syncPassword: String(parsed.data.syncPassword || ''),
+      };
+    }
+    return { matched: false };
+  } catch {
+    return { matched: false };
+  }
+}
+
+export async function checkPendingMasterPasswordSyncApi(
+  idToken: string
+): Promise<{ pending: boolean; newPassword?: string }> {
+  if (!idToken) return { pending: false };
+  try {
+    const res = await fetch('/api/auth/pending-password-sync', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    const parsed = await tryJson<{ pending?: boolean; newPassword?: string }>(res);
+    if (res.ok && parsed.isJson && parsed.data?.pending && parsed.data?.newPassword) {
+      return { pending: true, newPassword: parsed.data.newPassword };
+    }
+    return { pending: false };
+  } catch {
+    return { pending: false };
+  }
+}
+
+export async function updateMasterAdminPasswordByDeveloperApi(
+  devToken: string,
+  payload: {
+    email: string;
+    newPassword: string;
+    displayName?: string;
+  }
+): Promise<{
+  email: string;
+  masterPassword: string;
+  passwordUpdatedAt: string;
+  passwordUpdatedBy: 'developer';
+  passwordPendingSync: boolean;
+  hasFirebaseSyncBridge: boolean;
+}> {
+  if (!devToken || devToken.startsWith(CLIENT_DEV_TOKEN_PREFIX)) {
+    throw new Error('សូមផ្ទៀងផ្ទាត់ Key Developer តាមម៉ាស៊ីនមេ (Server) ជាមុនសិន ដើម្បីផ្លាស់ប្ដូរលេខសម្ងាត់។');
+  }
+  const res = await fetch('/api/developer/master-admins/password', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-developer-token': devToken,
+    },
+    body: JSON.stringify({
+      email: payload.email.trim().toLowerCase(),
+      newPassword: payload.newPassword.trim(),
+      displayName: payload.displayName?.trim() || undefined,
+    }),
+  });
+  const parsed = await tryJson<{
+    ok?: boolean;
+    error?: string;
+    email?: string;
+    masterPassword?: string;
+    passwordUpdatedAt?: string;
+    passwordUpdatedBy?: 'developer';
+    passwordPendingSync?: boolean;
+    hasFirebaseSyncBridge?: boolean;
+  }>(res);
+  if (!res.ok || !parsed.isJson || !parsed.data?.ok) {
+    throw new Error(parsed.data?.error || 'មិនអាចផ្លាស់ប្ដូរលេខសម្ងាត់ Master Admin បានទេ។');
+  }
+  return {
+    email: parsed.data.email || payload.email.trim().toLowerCase(),
+    masterPassword: parsed.data.masterPassword || payload.newPassword.trim(),
+    passwordUpdatedAt: parsed.data.passwordUpdatedAt || new Date().toISOString(),
+    passwordUpdatedBy: 'developer',
+    passwordPendingSync: Boolean(parsed.data.passwordPendingSync),
+    hasFirebaseSyncBridge: Boolean(parsed.data.hasFirebaseSyncBridge),
+  };
+}
+
