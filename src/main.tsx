@@ -11,3 +11,11 @@ createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </StrictMode>
 );
+
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      // Ignore service worker registration errors in restricted WebViews
+    });
+  });
+}

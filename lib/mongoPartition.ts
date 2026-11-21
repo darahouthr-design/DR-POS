@@ -41,7 +41,8 @@ if (!g.__drposMongo.deletedStockLogTombstones) {
 
 const TOKEN_CACHE_TTL_MS = 60 * 1000;
 const MAX_CACHE_ENTRIES = 500;
-const DELETE_TOMBSTONE_TTL_MS = 15 * 60 * 1000;
+const DELETE_TOMBSTONE_TTL_MS = 24 * 60 * 60 * 1000;
+const RECONCILE_GRACE_WINDOW_MS = 15 * 1000;
 
 interface FirebaseClientCfg {
   apiKey: string;
@@ -119,7 +120,7 @@ function pruneMapIfNeeded<V>(map: Map<string, V>) {
 export async function verifyFirebaseIdToken(
   headers: Record<string, string | string[] | undefined>
 ): Promise<FirebaseVerifiedUser | null> {
-  const rawAuth = headers.authorization;
+  const rawAuth = headers.authorization ?? headers.Authorization;
   const authStr = Array.isArray(rawAuth) ? String(rawAuth[0] || '') : String(rawAuth || '');
   const idToken = authStr.startsWith('Bearer ') ? authStr.slice(7).trim() : '';
   if (!idToken || idToken.length < 20) return null;
@@ -132,41 +133,53 @@ export async function verifyFirebaseIdToken(
   }
 
   const cfg = getFirebaseClientCfg();
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(cfg.apiKey)}`,
-      {
+  const lookupUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(cfg.apiKey)}`;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 9000) : null;
+    try {
+      const res = await fetch(lookupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ idToken }),
         ...(controller ? { signal: controller.signal } : {}),
-      }
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      users?: Array<{ localId?: string; email?: string }>;
-    };
-    const user = data.users?.[0];
-    if (!user?.localId) return null;
+      });
+      if (timer) clearTimeout(timer);
 
-    const verified: FirebaseVerifiedUser = {
-      uid: String(user.localId),
-      email: String(user.email || '').trim().toLowerCase(),
-    };
-    cache.set(tokenKey, {
-      uid: verified.uid,
-      email: verified.email,
-      expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
-    });
-    pruneMapIfNeeded(cache);
-    return verified;
-  } catch {
-    return null;
-  } finally {
-    if (timer) clearTimeout(timer);
+      if (res.ok) {
+        const data = (await res.json()) as {
+          users?: Array<{ localId?: string; email?: string }>;
+        };
+        const user = data.users?.[0];
+        if (!user?.localId) return null;
+
+        const verified: FirebaseVerifiedUser = {
+          uid: String(user.localId),
+          email: String(user.email || '').trim().toLowerCase(),
+        };
+        cache.set(tokenKey, {
+          uid: verified.uid,
+          email: verified.email,
+          expiresAt: Date.now() + TOKEN_CACHE_TTL_MS,
+        });
+        pruneMapIfNeeded(cache);
+        return verified;
+      }
+
+      // Do not retry on explicit 4xx invalid/expired token responses
+      if (res.status >= 400 && res.status < 500) {
+        return null;
+      }
+    } catch {
+      if (timer) clearTimeout(timer);
+    }
+
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
   }
+  return null;
 }
 
 async function getMongoDb(): Promise<Db | null> {
@@ -535,26 +548,74 @@ export async function runMongoSync(
   const deleteOrderIds = Array.from(
     new Set(
       (Array.isArray(payload.deleteOrderIds) ? (payload.deleteOrderIds as unknown[]) : [])
-        .map((v) => String(v || '').trim())
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim().slice(0, 160))
         .filter(Boolean)
     )
-  );
+  ).slice(0, 2000);
   const upsertStockLogs = Array.isArray(payload.upsertStockLogs)
     ? (payload.upsertStockLogs as Partial<StockLogEntry>[])
     : [];
   const deleteStockLogIds = Array.from(
     new Set(
       (Array.isArray(payload.deleteStockLogIds) ? (payload.deleteStockLogIds as unknown[]) : [])
-        .map((v) => String(v || '').trim())
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim().slice(0, 160))
         .filter(Boolean)
     )
-  );
-  const rawCutoffIso = String(payload.deleteStockLogsBeforeIso || '').trim();
+  ).slice(0, 2000);
+  const rawCutoffIso = typeof payload.deleteStockLogsBeforeIso === 'string'
+    ? payload.deleteStockLogsBeforeIso.trim()
+    : '';
   const parsedCutoffMs = rawCutoffIso ? Date.parse(rawCutoffIso) : NaN;
   const deleteStockLogsBeforeIso =
     rawCutoffIso && Number.isFinite(parsedCutoffMs) && parsedCutoffMs <= Date.now() + 60_000
       ? new Date(parsedCutoffMs).toISOString()
       : '';
+
+  const rawDeleteOrderScope =
+    payload.deleteOrderScope &&
+    typeof payload.deleteOrderScope === 'object' &&
+    !Array.isArray(payload.deleteOrderScope)
+      ? (payload.deleteOrderScope as Record<string, unknown>)
+      : null;
+  const scopeOperatorEmail =
+    rawDeleteOrderScope && typeof rawDeleteOrderScope.operatorEmail === 'string'
+      ? rawDeleteOrderScope.operatorEmail.trim().toLowerCase().slice(0, 200)
+      : '';
+  const scopeStaffName =
+    rawDeleteOrderScope && typeof rawDeleteOrderScope.staffName === 'string'
+      ? rawDeleteOrderScope.staffName.trim().toLowerCase().slice(0, 160)
+      : '';
+  const scopeIsMaster =
+    Boolean(rawDeleteOrderScope && rawDeleteOrderScope.isMasterAdmin === true) &&
+    Boolean(user.email) &&
+    scopeOperatorEmail === user.email;
+  const hasValidDeleteOrderScope = Boolean(scopeOperatorEmail || scopeStaffName);
+
+  const hasReconcileOrders = Array.isArray(payload.reconcileActiveOrderIds);
+  const reconcileActiveOrderIds = hasReconcileOrders
+    ? Array.from(
+        new Set(
+          (payload.reconcileActiveOrderIds as unknown[])
+            .filter((v): v is string => typeof v === 'string')
+            .map((v) => v.trim().slice(0, 160))
+            .filter(Boolean)
+        )
+      ).slice(0, 1000)
+    : [];
+
+  const hasReconcileStockLogs = Array.isArray(payload.reconcileActiveStockLogIds);
+  const reconcileActiveStockLogIds = hasReconcileStockLogs
+    ? Array.from(
+        new Set(
+          (payload.reconcileActiveStockLogIds as unknown[])
+            .filter((v): v is string => typeof v === 'string')
+            .map((v) => v.trim().slice(0, 160))
+            .filter(Boolean)
+        )
+      ).slice(0, 1000)
+    : [];
 
   let syncedOrders = 0;
   let deletedOrders = 0;
@@ -610,6 +671,71 @@ export async function runMongoSync(
     }
   }
 
+  // Scoped bulk delete ("Delete All Reports" without active filters) removes any unloaded
+  // or orphaned MongoDB orders belonging strictly to this ownerUid + operator/sale scope.
+  if (hasValidDeleteOrderScope && !deleteWorkspaceAll) {
+    const scopeFilter: Record<string, unknown> = { ownerUid: user.uid };
+    if (scopeOperatorEmail) {
+      if (scopeIsMaster) {
+        scopeFilter.$or = [
+          { operatorEmail: scopeOperatorEmail },
+          {
+            operatorEmail: { $in: ['', null] },
+            createdByEmail: { $in: [scopeOperatorEmail, '', null] },
+          },
+          {
+            operatorEmail: { $exists: false },
+            createdByEmail: { $in: [scopeOperatorEmail, '', null] },
+          },
+        ];
+      } else {
+        scopeFilter.operatorEmail = scopeOperatorEmail;
+      }
+    }
+    if (scopeStaffName) {
+      scopeFilter.staffNameLower = scopeStaffName;
+    }
+
+    const scopedDocs = await ordersCol
+      .find(scopeFilter, { projection: { id: 1 } })
+      .limit(5000)
+      .toArray()
+      .catch(() => []);
+    const scopedIds = scopedDocs.map((d) => String(d.id || '').trim()).filter(Boolean);
+    if (scopedIds.length > 0) {
+      recordTombstones(orderTombstones, user.uid, scopedIds);
+      await recordPersistentTombstones(db, user.uid, 'order', scopedIds, nowIso);
+    }
+    const scopeRes = await ordersCol.deleteMany(scopeFilter);
+    deletedOrders += scopeRes.deletedCount || 0;
+  }
+
+  // Authoritative Firestore -> MongoDB orphan reconciliation:
+  // When client sends the complete list of active Firestore order IDs (including empty []),
+  // remove any stale/deleted reports still left in MongoDB older than the 15s grace window.
+  if (hasReconcileOrders && !deleteWorkspaceAll) {
+    const graceCutoffIso = new Date(Date.now() - RECONCILE_GRACE_WINDOW_MS).toISOString();
+    const orphanFilter: Record<string, unknown> = {
+      ownerUid: user.uid,
+      syncedAt: { $lt: graceCutoffIso },
+    };
+    if (reconcileActiveOrderIds.length > 0) {
+      orphanFilter.id = { $nin: reconcileActiveOrderIds };
+    }
+    const orphanDocs = await ordersCol
+      .find(orphanFilter, { projection: { id: 1 } })
+      .limit(2000)
+      .toArray()
+      .catch(() => []);
+    const orphanIds = orphanDocs.map((d) => String(d.id || '').trim()).filter(Boolean);
+    if (orphanIds.length > 0) {
+      recordTombstones(orderTombstones, user.uid, orphanIds);
+      await recordPersistentTombstones(db, user.uid, 'order', orphanIds, nowIso);
+      const orphanRes = await ordersCol.deleteMany(orphanFilter);
+      deletedOrders += orphanRes.deletedCount || 0;
+    }
+  }
+
   if (deleteStockLogIds.length > 0) {
     recordTombstones(stockLogTombstones, user.uid, deleteStockLogIds);
     await recordPersistentTombstones(db, user.uid, 'stock_log', deleteStockLogIds, nowIso);
@@ -620,6 +746,29 @@ export async function runMongoSync(
         id: { $in: chunk },
       });
       deletedStockLogs += res.deletedCount || 0;
+    }
+  }
+
+  if (hasReconcileStockLogs && !deleteWorkspaceAll) {
+    const graceCutoffIso = new Date(Date.now() - RECONCILE_GRACE_WINDOW_MS).toISOString();
+    const orphanLogFilter: Record<string, unknown> = {
+      ownerUid: user.uid,
+      syncedAt: { $lt: graceCutoffIso },
+    };
+    if (reconcileActiveStockLogIds.length > 0) {
+      orphanLogFilter.id = { $nin: reconcileActiveStockLogIds };
+    }
+    const orphanLogDocs = await stockLogsCol
+      .find(orphanLogFilter, { projection: { id: 1 } })
+      .limit(2000)
+      .toArray()
+      .catch(() => []);
+    const orphanLogIds = orphanLogDocs.map((d) => String(d.id || '').trim()).filter(Boolean);
+    if (orphanLogIds.length > 0) {
+      recordTombstones(stockLogTombstones, user.uid, orphanLogIds);
+      await recordPersistentTombstones(db, user.uid, 'stock_log', orphanLogIds, nowIso);
+      const orphanLogRes = await stockLogsCol.deleteMany(orphanLogFilter);
+      deletedStockLogs += orphanLogRes.deletedCount || 0;
     }
   }
 
@@ -994,9 +1143,19 @@ export async function runMongoAnalytics(
   const operatorEmail = String(payload.operatorEmail || '').trim().toLowerCase();
   const staffName = String(payload.staffName || '').trim().toLowerCase();
 
+  const localTombstones = listActiveTombstonesForUid(
+    g.__drposMongo!.deletedOrderTombstones!,
+    user.uid
+  );
+  const persistentTombstones = await listPersistentTombstones(db, user.uid, 'order');
+  const combinedExcludeIds = Array.from(new Set([...localTombstones, ...persistentTombstones]));
+
   const match: Record<string, unknown> = { ownerUid: user.uid };
   if (operatorEmail) match.operatorEmail = operatorEmail;
   if (staffName) match.staffNameLower = staffName;
+  if (combinedExcludeIds.length > 0) {
+    match.id = { $nin: combinedExcludeIds };
+  }
 
   const started = Date.now();
   const agg = await db

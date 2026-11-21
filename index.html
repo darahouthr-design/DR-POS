@@ -12,16 +12,48 @@
     <meta property="og:image" content="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" />
     <meta name="twitter:image" content="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" />
     <meta name="theme-color" content="#117852" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="DR-POS" />
     <link rel="icon" type="image/png" href="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" />
     <link rel="shortcut icon" type="image/png" href="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" />
     <link rel="apple-touch-icon" href="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Kantumruy+Pro:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Kantumruy+Pro:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Kantumruy+Pro:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Kantumruy+Pro:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
   </head>
   <body class="bg-background text-foreground antialiased selection:bg-primary/15 selection:text-foreground">
-    <div id="root"></div>
+    <div id="root">
+      <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#f8faf9;font-family:system-ui,-apple-system,sans-serif;padding:24px;">
+        <div style="display:flex;align-items:center;gap:12px;background:#ffffff;border:1px solid #e4ece7;border-radius:16px;padding:18px 22px;box-shadow:0 8px 24px rgba(15,40,28,0.06);">
+          <img src="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" alt="DR-POS" width="40" height="40" style="border-radius:10px;object-fit:cover;" />
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong style="font-size:15px;color:#0f281c;letter-spacing:-0.01em;">DR-POS</strong>
+            <span style="font-size:12px;color:#526b5e;">កំពុងបើកប្រព័ន្ធ...</span>
+          </div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -34,12 +34,16 @@ import {
   getLastMongoErrorDetail,
   fetchMongoChanges,
   flushAllPendingMongoOps,
+  markOrdersDeletedLocally,
   purgeExpiredStockLogsFromMongoSync,
   queryMoreOrdersFromMongo,
   queryMoreStockLogsFromMongo,
+  reconcileWorkspaceOrdersWithMongo,
+  reconcileWorkspaceStockLogsWithMongo,
   subscribeToLocalSyncBroadcast,
   syncOrdersToMongoBackground,
   syncStockLogsToMongoBackground,
+  type MongoOrderDeleteScope,
 } from './mongoPartitionClient';
 import {
   DEFAULT_TELEGRAM_URL,
@@ -81,8 +85,8 @@ export async function fetchLatestWorkspaceSaleProfilesFromServer(
   }
 }
 
-export const ORDERS_PAGE_SIZE = 60;
-export const STOCK_LOGS_PAGE_SIZE = 40;
+export const ORDERS_PAGE_SIZE = 40;
+export const STOCK_LOGS_PAGE_SIZE = 30;
 export const LOG_RETENTION_DAYS = 30;
 export const LOG_RETENTION_MS = LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -111,6 +115,13 @@ export interface WorkspaceSubscription {
   unsubscribe: () => void;
   loadMoreOrders: () => Promise<boolean>;
   loadMoreStockLogs: () => Promise<boolean>;
+  searchOrdersFromMongo: (params: {
+    search: string;
+    operatorEmail?: string;
+    staffName?: string;
+    paymentStatus?: 'paid' | 'unpaid' | '';
+    limit?: number;
+  }) => Promise<Order[]>;
   evictOrders: (ids: string[]) => void;
   evictStockLogs: (ids: string[]) => void;
 }
@@ -534,17 +545,46 @@ export function subscribeToWorkspace(
   let didTriggerMongoBackfill = false;
   let lastMongoDeltaCursor = '';
   let mongoDeltaInFlight = false;
+  let autoSeedTriggered = false;
+  let legacyCleanupTriggered = false;
 
+  let hasEmittedInitial = false;
   let emitQueued = false;
+  let emitTimerId: number | null = null;
   let pendingNewOrders: Order[] = [];
 
-  void flushAllPendingMongoOps();
+  // Memoized sorted caches so an update in one subcollection never re-sorts the other 5
+  let productsDirty = true;
+  let ordersDirty = true;
+  let staffDirty = true;
+  let pricesDirty = true;
+  let stockLogsDirty = true;
+  let problemsDirty = true;
+  let cachedProducts: Product[] = [];
+  let cachedOrders: Order[] = [];
+  let cachedStaff: StaffMember[] = [];
+  let cachedPrices: PriceRecordItem[] = [];
+  let cachedStockLogs: StockLogEntry[] = [];
+  let cachedProblems: ProblemCustomer[] = [];
+
+  let backfillTimerId: number | null = null;
+  let initialDeltaTimerId: number | null = null;
 
   const triggerMongoBackfillIfReady = () => {
     if (didTriggerMongoBackfill || disposed) return;
     if (liveOrders.length === 0 && liveStockLogs.length === 0) return;
     didTriggerMongoBackfill = true;
-    backfillWorkspaceToMongoOnce(uid, liveOrders, liveStockLogs);
+    // Defer initial MongoDB backfill so mobile startup bandwidth goes 100% to Firestore UI boot
+    if (typeof window !== 'undefined') {
+      backfillTimerId = window.setTimeout(() => {
+        backfillTimerId = null;
+        if (!disposed) {
+          backfillWorkspaceToMongoOnce(uid, liveOrders, liveStockLogs);
+        }
+      }, 2800);
+    } else {
+      backfillWorkspaceToMongoOnce(uid, liveOrders, liveStockLogs);
+    }
   };
 
   const resolveEffectiveLicense = (): WorkspaceLicense | undefined => {
@@ -593,25 +633,58 @@ export function subscribeToWorkspace(
 
   const flushEmit = () => {
     emitQueued = false;
+    emitTimerId = null;
     if (!rootReady || disposed) return;
+    hasEmittedInitial = true;
+
+    if (productsDirty) {
+      cachedProducts = [...products].sort((a, b) => a.sortOrder - b.sortOrder);
+      productsDirty = false;
+    }
+    if (ordersDirty) {
+      cachedOrders = mergePaginatedById(liveOrders, olderOrders, deletedOrderIds, (a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      );
+      ordersDirty = false;
+    }
+    if (staffDirty) {
+      cachedStaff = [...staff].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      staffDirty = false;
+    }
+    if (pricesDirty) {
+      cachedPrices = [...priceRecords].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      pricesDirty = false;
+    }
+    if (stockLogsDirty) {
+      cachedStockLogs = mergePaginatedById(
+        liveStockLogs,
+        olderStockLogs,
+        deletedStockLogIds,
+        (a, b) => b.createdAt.localeCompare(a.createdAt)
+      ).filter((l) => !isTimestampExpired(l.createdAt));
+      stockLogsDirty = false;
+    }
+    if (problemsDirty) {
+      cachedProblems = [...problemCustomers].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt)
+      );
+      problemsDirty = false;
+    }
+
     const newOrdersBatch = pendingNewOrders;
     pendingNewOrders = [];
     callbacks.onUpdate({
       workspace: {
         email: currentEmail,
-        products: [...products].sort((a, b) => a.sortOrder - b.sortOrder),
-        orders: mergePaginatedById(liveOrders, olderOrders, deletedOrderIds, (a, b) =>
-          b.createdAt.localeCompare(a.createdAt)
-        ),
-        staff: [...staff].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-        priceRecords: [...priceRecords].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-        stockLogs: mergePaginatedById(liveStockLogs, olderStockLogs, deletedStockLogIds, (a, b) =>
-          b.createdAt.localeCompare(a.createdAt)
-        ).filter((l) => !isTimestampExpired(l.createdAt)),
+        products: cachedProducts,
+        orders: cachedOrders,
+        staff: cachedStaff,
+        priceRecords: cachedPrices,
+        stockLogs: cachedStockLogs,
         settings: currentSettings,
         license: resolveEffectiveLicense(),
       },
-      problemCustomers: [...problemCustomers].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      problemCustomers: cachedProblems,
       newOrders: newOrdersBatch,
       pagination: {
         hasMoreOrders,
@@ -627,7 +700,12 @@ export function subscribeToWorkspace(
     }
     if (!rootReady || emitQueued || disposed) return;
     emitQueued = true;
-    queueMicrotask(flushEmit);
+    // Fire first root render immediately; coalesce rapid multi-subcollection bursts into 1 smooth render
+    if (!hasEmittedInitial || typeof window === 'undefined') {
+      queueMicrotask(flushEmit);
+    } else {
+      emitTimerId = window.setTimeout(flushEmit, 45);
+    }
   };
 
   const wsPath = `workspaces/${uid}`;
@@ -638,6 +716,13 @@ export function subscribeToWorkspace(
       if (!snap.exists()) {
         if (rootReady) {
           callbacks.onDeleted();
+        } else if (!snap.metadata.fromCache && !autoSeedTriggered) {
+          autoSeedTriggered = true;
+          void seedWorkspaceIfNeeded(uid, email, displayName).catch((err) => {
+            if (!disposed) {
+              callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+            }
+          });
         }
         return;
       }
@@ -663,6 +748,10 @@ export function subscribeToWorkspace(
         docLicense = undefined;
       }
       rootReady = true;
+      if (!legacyCleanupTriggered && !rootFromCache) {
+        legacyCleanupTriggered = true;
+        void cleanupLegacySampleDataIfNeeded(uid, d, db).catch(() => {});
+      }
       syncEffectiveLicenseToWorkspaceDoc();
       emit();
     },
@@ -699,6 +788,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'products'), where('ownerUid', '==', uid)),
     (snap) => {
       products = snap.docs.map((d) => stripProduct(d.data()));
+      productsDirty = true;
       emit();
     },
     subError(`${wsPath}/products`)
@@ -798,6 +888,7 @@ export function subscribeToWorkspace(
           }
         }
         liveOrders = nextOrders;
+        ordersDirty = true;
         liveOrdersTailDoc = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null;
         if (!hasPaginatedOrders) {
           hasMoreOrders = snap.docs.length >= ORDERS_PAGE_SIZE;
@@ -808,6 +899,12 @@ export function subscribeToWorkspace(
         }
         if (removedIds.length > 0) {
           deleteOrdersFromMongoBackground(removedIds);
+        }
+        if (!snap.metadata.fromCache && snap.docs.length < ORDERS_PAGE_SIZE) {
+          reconcileWorkspaceOrdersWithMongo(
+            uid,
+            nextOrders.map((o) => o.id)
+          );
         }
         emit(newlyArrived);
       },
@@ -826,6 +923,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'staff'), where('ownerUid', '==', uid)),
     (snap) => {
       staff = snap.docs.map((d) => stripStaff(d.data()));
+      staffDirty = true;
       emit();
     },
     subError(`${wsPath}/staff`)
@@ -835,6 +933,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'priceRecords'), where('ownerUid', '==', uid)),
     (snap) => {
       priceRecords = snap.docs.map((d) => stripPriceRecord(d.data()));
+      pricesDirty = true;
       emit();
     },
     subError(`${wsPath}/priceRecords`)
@@ -905,6 +1004,7 @@ export function subscribeToWorkspace(
                   deletedStockLogIds.add(candidate.id);
                   olderStockLogs = olderStockLogs.filter((l) => l.id !== candidate.id);
                   liveStockLogs = liveStockLogs.filter((l) => l.id !== candidate.id);
+                  stockLogsDirty = true;
                   deleteStockLogsFromMongoBackground([candidate.id]);
                   emit();
                 }
@@ -922,6 +1022,7 @@ export function subscribeToWorkspace(
 
         initialStockLogsLoaded = true;
         liveStockLogs = nextLogs;
+        stockLogsDirty = true;
         liveStockLogsTailDoc = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null;
         if (!hasPaginatedStockLogs) {
           hasMoreStockLogs = snap.docs.length >= STOCK_LOGS_PAGE_SIZE;
@@ -932,6 +1033,12 @@ export function subscribeToWorkspace(
         }
         if (removedLogIds.length > 0) {
           deleteStockLogsFromMongoBackground(removedLogIds);
+        }
+        if (!snap.metadata.fromCache && snap.docs.length < STOCK_LOGS_PAGE_SIZE) {
+          reconcileWorkspaceStockLogsWithMongo(
+            uid,
+            nextLogs.map((l) => l.id)
+          );
         }
         emit();
       },
@@ -950,6 +1057,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'problemCustomers'), where('ownerUid', '==', uid)),
     (snap) => {
       problemCustomers = snap.docs.map((d) => stripProblemCustomer(d.data()));
+      problemsDirty = true;
       emit();
     },
     subError(`${wsPath}/problemCustomers`)
@@ -989,6 +1097,7 @@ export function subscribeToWorkspace(
           }
           if (fresh.length > 0) {
             olderOrders = [...olderOrders, ...fresh];
+            ordersDirty = true;
             mongoOrdersCursor = mongoRes.nextCursor || fresh[fresh.length - 1].createdAt;
             hasMoreOrders = mongoRes.hasMore;
             emit();
@@ -1030,6 +1139,7 @@ export function subscribeToWorkspace(
         knownOrderIds.add(o.id);
       }
       olderOrders = [...olderOrders, ...fetched];
+      ordersDirty = true;
       olderOrdersTailDoc = snap.docs[snap.docs.length - 1];
       hasMoreOrders = snap.docs.length >= ORDERS_PAGE_SIZE;
       syncOrdersToMongoBackground(fetched);
@@ -1078,6 +1188,7 @@ export function subscribeToWorkspace(
           const fresh = mongoRes.stockLogs.filter((l) => !existingSet.has(l.id));
           if (fresh.length > 0) {
             olderStockLogs = [...olderStockLogs, ...fresh];
+            stockLogsDirty = true;
             mongoStockLogsCursor = mongoRes.nextCursor || fresh[fresh.length - 1].createdAt;
             hasMoreStockLogs = mongoRes.hasMore;
             emit();
@@ -1121,6 +1232,7 @@ export function subscribeToWorkspace(
 
       const fetched = snap.docs.map((d) => stripStockLog(d.data()));
       olderStockLogs = [...olderStockLogs, ...fetched];
+      stockLogsDirty = true;
       olderStockLogsTailDoc = snap.docs[snap.docs.length - 1];
       hasMoreStockLogs = snap.docs.length >= STOCK_LOGS_PAGE_SIZE;
       syncStockLogsToMongoBackground(fetched);
@@ -1138,6 +1250,44 @@ export function subscribeToWorkspace(
     }
   };
 
+  const searchOrdersFromMongo = async (params: {
+    search: string;
+    operatorEmail?: string;
+    staffName?: string;
+    paymentStatus?: 'paid' | 'unpaid' | '';
+    limit?: number;
+  }): Promise<Order[]> => {
+    if (disposed) return [];
+    const q = String(params.search || '').trim();
+    if (!q) return [];
+    const mongoRes = await queryMoreOrdersFromMongo({
+      cursorCreatedAt: '',
+      excludeIds: [],
+      search: q,
+      operatorEmail: params.operatorEmail || '',
+      staffName: params.staffName || '',
+      paymentStatus: params.paymentStatus || '',
+      limit: params.limit || 60,
+    });
+    if (disposed || !mongoRes.usedMongo || mongoRes.orders.length === 0) {
+      return [];
+    }
+    const existingSet = new Set([
+      ...liveOrders.map((o) => o.id),
+      ...olderOrders.map((o) => o.id),
+    ]);
+    const fresh = mongoRes.orders.filter(
+      (o) => o?.id && !existingSet.has(o.id) && !deletedOrderIds.has(o.id)
+    );
+    if (fresh.length > 0) {
+      for (const o of fresh) knownOrderIds.add(o.id);
+      olderOrders = [...olderOrders, ...fresh];
+      ordersDirty = true;
+      emit();
+    }
+    return mongoRes.orders.filter((o) => o?.id && !deletedOrderIds.has(o.id));
+  };
+
   const evictOrders = (ids: string[]) => {
     if (!ids.length || disposed) return;
     const removeSet = new Set(ids);
@@ -1146,6 +1296,7 @@ export function subscribeToWorkspace(
     }
     olderOrders = olderOrders.filter((o) => !removeSet.has(o.id));
     liveOrders = liveOrders.filter((o) => !removeSet.has(o.id));
+    ordersDirty = true;
     emit();
   };
 
@@ -1157,8 +1308,26 @@ export function subscribeToWorkspace(
     }
     olderStockLogs = olderStockLogs.filter((l) => !removeSet.has(l.id));
     liveStockLogs = liveStockLogs.filter((l) => !removeSet.has(l.id));
+    stockLogsDirty = true;
     emit();
   };
+
+  const ordersDiffer = (a: Order, b: Order): boolean =>
+    a.paymentStatus !== b.paymentStatus ||
+    a.totalAmount !== b.totalAmount ||
+    a.totalCost !== b.totalCost ||
+    a.customerName !== b.customerName ||
+    a.customerPhone !== b.customerPhone ||
+    a.customerAddress !== b.customerAddress ||
+    a.dueDate !== b.dueDate ||
+    a.note !== b.note ||
+    a.staffName !== b.staffName ||
+    a.items.length !== b.items.length;
+
+  const stockLogsDiffer = (a: StockLogEntry, b: StockLogEntry): boolean =>
+    a.addedQuantity !== b.addedQuantity ||
+    a.newStock !== b.newStock ||
+    a.productName !== b.productName;
 
   const runMongoDeltaCheck = async () => {
     if (disposed || mongoDeltaInFlight) return;
@@ -1183,6 +1352,7 @@ export function subscribeToWorkspace(
           if (!deletedOrderIds.has(id)) {
             deletedOrderIds.add(id);
             mutated = true;
+            ordersDirty = true;
           }
         }
         const nextOlder = olderOrders.filter((o) => !removeSet.has(o.id));
@@ -1190,6 +1360,7 @@ export function subscribeToWorkspace(
         if (nextOlder.length !== olderOrders.length || nextLive.length !== liveOrders.length) {
           olderOrders = nextOlder;
           liveOrders = nextLive;
+          ordersDirty = true;
           mutated = true;
         }
       }
@@ -1200,6 +1371,7 @@ export function subscribeToWorkspace(
           if (!deletedStockLogIds.has(id)) {
             deletedStockLogIds.add(id);
             mutated = true;
+            stockLogsDirty = true;
           }
         }
         const nextOlderLogs = olderStockLogs.filter((l) => !removeSet.has(l.id));
@@ -1210,6 +1382,7 @@ export function subscribeToWorkspace(
         ) {
           olderStockLogs = nextOlderLogs;
           liveStockLogs = nextLiveLogs;
+          stockLogsDirty = true;
           mutated = true;
         }
       }
@@ -1221,19 +1394,22 @@ export function subscribeToWorkspace(
           if (!ro?.id || deletedOrderIds.has(ro.id)) continue;
           const li = liveIdxMap.get(ro.id);
           if (li !== undefined) {
-            if (JSON.stringify(liveOrders[li]) !== JSON.stringify(ro)) {
+            if (ordersDiffer(liveOrders[li], ro)) {
               liveOrders[li] = ro;
+              ordersDirty = true;
               mutated = true;
             }
           } else {
             const oi = olderIdxMap.get(ro.id);
             if (oi !== undefined) {
-              if (JSON.stringify(olderOrders[oi]) !== JSON.stringify(ro)) {
+              if (ordersDiffer(olderOrders[oi], ro)) {
                 olderOrders[oi] = ro;
+                ordersDirty = true;
                 mutated = true;
               }
             } else {
               olderOrders = [ro, ...olderOrders];
+              ordersDirty = true;
               mutated = true;
             }
           }
@@ -1247,19 +1423,22 @@ export function subscribeToWorkspace(
           if (!rl?.id || deletedStockLogIds.has(rl.id)) continue;
           const li = liveIdxMap.get(rl.id);
           if (li !== undefined) {
-            if (JSON.stringify(liveStockLogs[li]) !== JSON.stringify(rl)) {
+            if (stockLogsDiffer(liveStockLogs[li], rl)) {
               liveStockLogs[li] = rl;
+              stockLogsDirty = true;
               mutated = true;
             }
           } else {
             const oi = olderIdxMap.get(rl.id);
             if (oi !== undefined) {
-              if (JSON.stringify(olderStockLogs[oi]) !== JSON.stringify(rl)) {
+              if (stockLogsDiffer(olderStockLogs[oi], rl)) {
                 olderStockLogs[oi] = rl;
+                stockLogsDirty = true;
                 mutated = true;
               }
             } else {
               olderStockLogs = [rl, ...olderStockLogs];
+              stockLogsDirty = true;
               mutated = true;
             }
           }
@@ -1274,7 +1453,15 @@ export function subscribeToWorkspace(
     }
   };
 
-  void runMongoDeltaCheck();
+  // Defer initial background MongoDB delta sync by 2.2s so cold mobile boot is uncontested
+  if (typeof window !== 'undefined') {
+    initialDeltaTimerId = window.setTimeout(() => {
+      initialDeltaTimerId = null;
+      if (!disposed) {
+        void runMongoDeltaCheck();
+      }
+    }, 2200);
+  }
 
   const unsubLocalBroadcast = subscribeToLocalSyncBroadcast((msg) => {
     if (disposed) return;
@@ -1285,11 +1472,7 @@ export function subscribeToWorkspace(
     if (msg.type === 'mongo:deleted' && msg.kind === 'order' && Array.isArray(msg.ids)) {
       evictOrders(msg.ids);
     } else if (msg.type === 'mongo:deleted' && msg.kind === 'stock_log' && Array.isArray(msg.ids)) {
-      for (const id of msg.ids) deletedStockLogIds.add(id);
-      const rm = new Set(msg.ids);
-      olderStockLogs = olderStockLogs.filter((l) => !rm.has(l.id));
-      liveStockLogs = liveStockLogs.filter((l) => !rm.has(l.id));
-      emit();
+      evictStockLogs(msg.ids);
     }
     void runMongoDeltaCheck();
   });
@@ -1307,11 +1490,12 @@ export function subscribeToWorkspace(
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibleOrOnline);
     }
+    // Firestore realtime onSnapshot handles live updates instantly; poll MongoDB every 30s for cross-device archival sync
     mongoPollTimer = window.setInterval(() => {
       if (disposed) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void runMongoDeltaCheck();
-    }, 4500);
+    }, 30_000);
   }
 
   return {
@@ -1328,6 +1512,18 @@ export function subscribeToWorkspace(
           window.clearInterval(mongoPollTimer);
           mongoPollTimer = null;
         }
+        if (emitTimerId !== null) {
+          window.clearTimeout(emitTimerId);
+          emitTimerId = null;
+        }
+        if (backfillTimerId !== null) {
+          window.clearTimeout(backfillTimerId);
+          backfillTimerId = null;
+        }
+        if (initialDeltaTimerId !== null) {
+          window.clearTimeout(initialDeltaTimerId);
+          initialDeltaTimerId = null;
+        }
       }
       unsubRoot();
       unsubDeveloperVault();
@@ -1340,6 +1536,7 @@ export function subscribeToWorkspace(
     },
     loadMoreOrders,
     loadMoreStockLogs,
+    searchOrdersFromMongo,
     evictOrders,
     evictStockLogs,
   };
@@ -2059,8 +2256,11 @@ export async function updateOrderFs(
 }
 
 export async function deleteOrderFs(uid: string, orderId: string): Promise<void> {
-  const orderRef = doc(db, 'workspaces', uid, 'orders', orderId);
+  const cleanId = String(orderId || '').trim();
+  if (!cleanId) return;
+  const orderRef = doc(db, 'workspaces', uid, 'orders', cleanId);
   const now = new Date();
+  markOrdersDeletedLocally([cleanId]);
   try {
     await runTransaction(db, async (tx) => {
       const orderSnap = await tx.get(orderRef);
@@ -2085,20 +2285,31 @@ export async function deleteOrderFs(uid: string, orderId: string): Promise<void>
 
       tx.delete(orderRef);
     });
-    await deleteOrdersFromMongoSync([orderId]);
+    await deleteOrdersFromMongoSync([cleanId]);
   } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `workspaces/${uid}/orders/${orderId}`);
+    handleFirestoreError(err, OperationType.DELETE, `workspaces/${uid}/orders/${cleanId}`);
   }
 }
 
-export async function deleteOrdersNoRestoreFs(uid: string, orderIds: string[]): Promise<void> {
+export async function deleteOrdersNoRestoreFs(
+  uid: string,
+  orderIds: string[],
+  scope?: MongoOrderDeleteScope | null
+): Promise<void> {
   const uniqueIds = Array.from(new Set(orderIds.map((id) => id.trim()).filter(Boolean)));
-  if (uniqueIds.length === 0) return;
+  const hasScope = Boolean(scope && (scope.operatorEmail || scope.staffName));
+  if (uniqueIds.length === 0 && !hasScope) return;
 
   const ordersColPath = `workspaces/${uid}/orders`;
   const BATCH_LIMIT = 450;
 
+  if (uniqueIds.length > 0) {
+    markOrdersDeletedLocally(uniqueIds);
+  }
+
   try {
+    const deletedSet = new Set<string>(uniqueIds);
+
     for (let i = 0; i < uniqueIds.length; i += BATCH_LIMIT) {
       const chunk = uniqueIds.slice(i, i + BATCH_LIMIT);
       const batch = writeBatch(db);
@@ -2107,7 +2318,44 @@ export async function deleteOrdersNoRestoreFs(uid: string, orderIds: string[]): 
       }
       await batch.commit();
     }
-    await deleteOrdersFromMongoSync(uniqueIds);
+
+    // When deleting ALL reports in an unfiltered scope, also delete any unloaded older orders
+    // in Firestore matching the same operator/sale scope so nothing stays orphaned.
+    if (hasScope && scope) {
+      const targetOp = (scope.operatorEmail || '').trim().toLowerCase();
+      const targetSaleKey = scope.staffName ? normalizeSaleKey(scope.staffName) : '';
+      const isMaster = Boolean(scope.isMasterAdmin);
+      const extraIds: string[] = [];
+
+      const remainingSnap = await getDocs(
+        query(collection(db, 'workspaces', uid, 'orders'), where('ownerUid', '==', uid))
+      );
+      for (const d of remainingSnap.docs) {
+        if (deletedSet.has(d.id)) continue;
+        const ord = stripOrder(d.data());
+        const ordOp = (ord.operatorEmail || ord.createdByEmail || '').trim().toLowerCase();
+        const opMatches = !targetOp || ordOp === targetOp || (isMaster && !ordOp);
+        const saleMatches = !targetSaleKey || normalizeSaleKey(ord.staffName) === targetSaleKey;
+        if (opMatches && saleMatches) {
+          extraIds.push(d.id);
+          deletedSet.add(d.id);
+        }
+      }
+
+      if (extraIds.length > 0) {
+        markOrdersDeletedLocally(extraIds);
+        for (let i = 0; i < extraIds.length; i += BATCH_LIMIT) {
+          const chunk = extraIds.slice(i, i + BATCH_LIMIT);
+          const batch = writeBatch(db);
+          for (const orderId of chunk) {
+            batch.delete(doc(db, 'workspaces', uid, 'orders', orderId));
+          }
+          await batch.commit();
+        }
+      }
+    }
+
+    await deleteOrdersFromMongoSync(Array.from(deletedSet), scope || undefined);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, ordersColPath);
   }

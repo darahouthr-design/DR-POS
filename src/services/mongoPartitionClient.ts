@@ -10,18 +10,29 @@ let lastCheckedAt = 0;
 const RECHECK_INTERVAL_MS = 5 * 60 * 1000;
 const NOT_CONFIGURED_TTL_MS = 5 * 60 * 1000;
 const TRANSIENT_COOLDOWN_MS = 4 * 1000;
-const DELETE_TOMBSTONE_TTL_MS = 5 * 60 * 1000;
+const DELETE_TOMBSTONE_TTL_MS = 30 * 60 * 1000;
 
 const PENDING_ORDERS_DEL_KEY = 'drpos_mongo_pending_del_orders';
+const PENDING_ORDERS_SCOPE_DEL_KEY = 'drpos_mongo_pending_del_orders_scope';
 const PENDING_STOCK_LOGS_DEL_KEY = 'drpos_mongo_pending_del_stock_logs';
 const PENDING_ORDERS_UPSERT_KEY = 'drpos_mongo_pending_upsert_orders';
 const PENDING_STOCK_LOGS_UPSERT_KEY = 'drpos_mongo_pending_upsert_stock_logs';
 const PENDING_WS_DEL_KEY = 'drpos_mongo_pending_del_ws';
 const PENDING_WS_DEL_EMAILS_KEY = 'drpos_mongo_pending_del_ws_emails';
 
+export interface MongoOrderDeleteScope {
+  operatorEmail?: string;
+  staffName?: string;
+  isMasterAdmin?: boolean;
+}
+
 const backfilledThisSession = new Set<string>();
 const recentDeletedOrderExpiry = new Map<string, number>();
 const recentDeletedStockLogExpiry = new Map<string, number>();
+const inFlightOrderDeleteIds = new Set<string>();
+const inFlightStockLogDeleteIds = new Set<string>();
+const lastReconciledOrdersSigByUid = new Map<string, string>();
+const lastReconciledStockLogsSigByUid = new Map<string, string>();
 
 let flushDeletesInFlight: Promise<void> | null = null;
 let flushUpsertsInFlight: Promise<void> | null = null;
@@ -200,10 +211,119 @@ function isLocallyDeleted(map: Map<string, number>, pendingKey: string, id: stri
   return readStorageArray(pendingKey).includes(id);
 }
 
+function sanitizeOrderDeleteScope(
+  scope?: MongoOrderDeleteScope | null
+): MongoOrderDeleteScope | null {
+  if (!scope || typeof scope !== 'object') return null;
+  const operatorEmail = String(scope.operatorEmail || '').trim().toLowerCase().slice(0, 200);
+  const staffName = String(scope.staffName || '').trim().slice(0, 160);
+  const isMasterAdmin = Boolean(scope.isMasterAdmin);
+  if (!operatorEmail && !staffName) return null;
+  return {
+    ...(operatorEmail ? { operatorEmail } : {}),
+    ...(staffName ? { staffName } : {}),
+    ...(isMasterAdmin ? { isMasterAdmin: true } : {}),
+  };
+}
+
+function readPendingOrderDeleteScopes(): MongoOrderDeleteScope[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(PENDING_ORDERS_SCOPE_DEL_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => sanitizeOrderDeleteScope(item as MongoOrderDeleteScope))
+      .filter((item): item is MongoOrderDeleteScope => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function writePendingOrderDeleteScopes(scopes: MongoOrderDeleteScope[]): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    if (scopes.length === 0) {
+      window.localStorage.removeItem(PENDING_ORDERS_SCOPE_DEL_KEY);
+    } else {
+      window.localStorage.setItem(PENDING_ORDERS_SCOPE_DEL_KEY, JSON.stringify(scopes.slice(-20)));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function scopeKey(scope: MongoOrderDeleteScope): string {
+  return `${scope.operatorEmail || ''}|${(scope.staffName || '').toLowerCase()}|${scope.isMasterAdmin ? '1' : '0'}`;
+}
+
+function addPendingOrderDeleteScope(scope: MongoOrderDeleteScope): void {
+  const existing = readPendingOrderDeleteScopes();
+  const key = scopeKey(scope);
+  if (!existing.some((s) => scopeKey(s) === key)) {
+    writePendingOrderDeleteScopes([...existing, scope]);
+  }
+}
+
+function removePendingOrderDeleteScope(scope: MongoOrderDeleteScope): void {
+  const key = scopeKey(scope);
+  const next = readPendingOrderDeleteScopes().filter((s) => scopeKey(s) !== key);
+  writePendingOrderDeleteScopes(next);
+}
+
+function removePendingUpsertsByScope(scope: MongoOrderDeleteScope): void {
+  const current = readStorageRecord<Order>(PENDING_ORDERS_UPSERT_KEY);
+  const opTarget = (scope.operatorEmail || '').trim().toLowerCase();
+  const staffTarget = (scope.staffName || '').trim().toLowerCase();
+  let modified = false;
+  for (const [id, order] of Object.entries(current)) {
+    const orderOp = String(order?.operatorEmail || order?.createdByEmail || '').trim().toLowerCase();
+    const orderStaff = String(order?.staffName || '').trim().toLowerCase();
+    const opMatches =
+      !opTarget ||
+      orderOp === opTarget ||
+      (Boolean(scope.isMasterAdmin) && !orderOp);
+    const staffMatches = !staffTarget || orderStaff === staffTarget;
+    if (opMatches && staffMatches) {
+      delete current[id];
+      modified = true;
+    }
+  }
+  if (modified) {
+    writeStorageRecord(PENDING_ORDERS_UPSERT_KEY, current);
+  }
+}
+
+export function markOrdersDeletedLocally(orderIds: string[]): string[] {
+  const cleanIds = Array.from(
+    new Set(orderIds.map((id) => String(id || '').trim()).filter(Boolean))
+  );
+  if (!cleanIds.length) return [];
+  removePendingUpserts<Order>(PENDING_ORDERS_UPSERT_KEY, cleanIds);
+  markLocalTombstones(recentDeletedOrderExpiry, cleanIds);
+  addPendingIdsToStorage(PENDING_ORDERS_DEL_KEY, cleanIds);
+  broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order', ids: cleanIds });
+  return cleanIds;
+}
+
+export function markStockLogsDeletedLocally(stockLogIds: string[]): string[] {
+  const cleanIds = Array.from(
+    new Set(stockLogIds.map((id) => String(id || '').trim()).filter(Boolean))
+  );
+  if (!cleanIds.length) return [];
+  removePendingUpserts<StockLogEntry>(PENDING_STOCK_LOGS_UPSERT_KEY, cleanIds);
+  markLocalTombstones(recentDeletedStockLogExpiry, cleanIds);
+  addPendingIdsToStorage(PENDING_STOCK_LOGS_DEL_KEY, cleanIds);
+  broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'stock_log', ids: cleanIds });
+  return cleanIds;
+}
+
 function hasAnyPendingOps(): boolean {
   if (typeof window === 'undefined' || !window.localStorage) return false;
   if (window.localStorage.getItem(PENDING_WS_DEL_KEY) === '1') return true;
   if (readStorageArray(PENDING_ORDERS_DEL_KEY).length > 0) return true;
+  if (readPendingOrderDeleteScopes().length > 0) return true;
   if (readStorageArray(PENDING_STOCK_LOGS_DEL_KEY).length > 0) return true;
   if (Object.keys(readStorageRecord(PENDING_ORDERS_UPSERT_KEY)).length > 0) return true;
   if (Object.keys(readStorageRecord(PENDING_STOCK_LOGS_UPSERT_KEY)).length > 0) return true;
@@ -440,10 +560,20 @@ export async function flushPendingMongoDeletes(): Promise<void> {
     typeof window !== 'undefined' && window.localStorage
       ? window.localStorage.getItem(PENDING_WS_DEL_KEY) === '1'
       : false;
-  const pendingOrders = readStorageArray(PENDING_ORDERS_DEL_KEY);
-  const pendingLogs = readStorageArray(PENDING_STOCK_LOGS_DEL_KEY);
+  const pendingOrders = readStorageArray(PENDING_ORDERS_DEL_KEY).filter(
+    (id) => !inFlightOrderDeleteIds.has(id)
+  );
+  const pendingOrderScopes = readPendingOrderDeleteScopes();
+  const pendingLogs = readStorageArray(PENDING_STOCK_LOGS_DEL_KEY).filter(
+    (id) => !inFlightStockLogDeleteIds.has(id)
+  );
 
-  if (!pendingWs && pendingOrders.length === 0 && pendingLogs.length === 0) {
+  if (
+    !pendingWs &&
+    pendingOrders.length === 0 &&
+    pendingOrderScopes.length === 0 &&
+    pendingLogs.length === 0
+  ) {
     return;
   }
 
@@ -454,7 +584,7 @@ export async function flushPendingMongoDeletes(): Promise<void> {
         const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
           'sync',
           { deleteWorkspaceAll: true, accountEmails: storedEmails },
-          { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 9000, keepalive: true }
+          { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 25000 }
         );
         if (res && (res.ok || res.configured === false) && typeof window !== 'undefined') {
           window.localStorage.removeItem(PENDING_WS_DEL_KEY);
@@ -465,13 +595,34 @@ export async function flushPendingMongoDeletes(): Promise<void> {
       if (pendingOrders.length > 0) {
         for (let i = 0; i < pendingOrders.length; i += 500) {
           const chunk = pendingOrders.slice(i, i + 500);
+          for (const id of chunk) inFlightOrderDeleteIds.add(id);
+          try {
+            const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
+              'sync',
+              { deleteOrderIds: chunk },
+              { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+            );
+            if (res && (res.ok || res.configured === false)) {
+              removePendingIdsFromStorage(PENDING_ORDERS_DEL_KEY, chunk);
+            } else {
+              schedulePendingRetry();
+              break;
+            }
+          } finally {
+            for (const id of chunk) inFlightOrderDeleteIds.delete(id);
+          }
+        }
+      }
+
+      if (pendingOrderScopes.length > 0) {
+        for (const scope of pendingOrderScopes) {
           const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
             'sync',
-            { deleteOrderIds: chunk },
-            { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 8500, keepalive: true }
+            { deleteOrderScope: scope },
+            { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
           );
           if (res && (res.ok || res.configured === false)) {
-            removePendingIdsFromStorage(PENDING_ORDERS_DEL_KEY, chunk);
+            removePendingOrderDeleteScope(scope);
           } else {
             schedulePendingRetry();
             break;
@@ -482,16 +633,21 @@ export async function flushPendingMongoDeletes(): Promise<void> {
       if (pendingLogs.length > 0) {
         for (let i = 0; i < pendingLogs.length; i += 500) {
           const chunk = pendingLogs.slice(i, i + 500);
-          const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
-            'sync',
-            { deleteStockLogIds: chunk },
-            { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 8500, keepalive: true }
-          );
-          if (res && (res.ok || res.configured === false)) {
-            removePendingIdsFromStorage(PENDING_STOCK_LOGS_DEL_KEY, chunk);
-          } else {
-            schedulePendingRetry();
-            break;
+          for (const id of chunk) inFlightStockLogDeleteIds.add(id);
+          try {
+            const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
+              'sync',
+              { deleteStockLogIds: chunk },
+              { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+            );
+            if (res && (res.ok || res.configured === false)) {
+              removePendingIdsFromStorage(PENDING_STOCK_LOGS_DEL_KEY, chunk);
+            } else {
+              schedulePendingRetry();
+              break;
+            }
+          } finally {
+            for (const id of chunk) inFlightStockLogDeleteIds.delete(id);
           }
         }
       }
@@ -527,7 +683,7 @@ async function flushPendingMongoUpserts(): Promise<void> {
         const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
           'sync',
           { upsertOrders: chunk },
-          { maxAttempts: 2, timeoutMs: 8500, keepalive: true }
+          { maxAttempts: 2, timeoutMs: 18000 }
         );
         if (res && (res.ok || res.configured === false)) {
           removePendingUpserts(
@@ -548,7 +704,7 @@ async function flushPendingMongoUpserts(): Promise<void> {
         const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
           'sync',
           { upsertStockLogs: chunk },
-          { maxAttempts: 2, timeoutMs: 8500, keepalive: true }
+          { maxAttempts: 2, timeoutMs: 18000 }
         );
         if (res && (res.ok || res.configured === false)) {
           removePendingUpserts(
@@ -587,7 +743,7 @@ export async function syncOrdersToMongoSync(orders: Order[]): Promise<boolean> {
     const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
       'sync',
       { upsertOrders: chunk },
-      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 8500, keepalive: true }
+      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 18000 }
     );
     if (res && (res.ok || res.configured === false)) {
       removePendingUpserts(
@@ -613,34 +769,73 @@ export function syncOrdersToMongoBackground(orders: Order[]): void {
   void syncOrdersToMongoSync(orders);
 }
 
-export async function deleteOrdersFromMongoSync(orderIds: string[]): Promise<boolean> {
+export async function deleteOrdersFromMongoSync(
+  orderIds: string[],
+  scope?: MongoOrderDeleteScope | null
+): Promise<boolean> {
   bindOnlineFlushListener();
-  const cleanIds = Array.from(new Set(orderIds.map((id) => String(id || '').trim()).filter(Boolean)));
-  if (!cleanIds.length) return true;
+  const cleanIds = markOrdersDeletedLocally(orderIds);
+  const cleanScope = sanitizeOrderDeleteScope(scope);
+  if (cleanScope) {
+    removePendingUpsertsByScope(cleanScope);
+    addPendingOrderDeleteScope(cleanScope);
+  }
+  if (!cleanIds.length && !cleanScope) return true;
 
-  removePendingUpserts<Order>(PENDING_ORDERS_UPSERT_KEY, cleanIds);
-  markLocalTombstones(recentDeletedOrderExpiry, cleanIds);
-  addPendingIdsToStorage(PENDING_ORDERS_DEL_KEY, cleanIds);
-  broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order', ids: cleanIds });
+  const idsToSend = cleanIds.filter((id) => !inFlightOrderDeleteIds.has(id));
+  if (!idsToSend.length && !cleanScope) {
+    return true;
+  }
 
   let allDelivered = true;
-  for (let i = 0; i < cleanIds.length; i += 500) {
-    const chunk = cleanIds.slice(i, i + 500);
+
+  if (idsToSend.length > 0) {
+    for (let i = 0; i < idsToSend.length; i += 500) {
+      const chunk = idsToSend.slice(i, i + 500);
+      const includeScope = i === 0 && Boolean(cleanScope);
+      for (const id of chunk) inFlightOrderDeleteIds.add(id);
+      try {
+        const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
+          'sync',
+          {
+            deleteOrderIds: chunk,
+            ...(includeScope && cleanScope ? { deleteOrderScope: cleanScope } : {}),
+          },
+          { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+        );
+        if (res && (res.ok || res.configured === false)) {
+          removePendingIdsFromStorage(PENDING_ORDERS_DEL_KEY, chunk);
+          if (includeScope && cleanScope) {
+            removePendingOrderDeleteScope(cleanScope);
+          }
+          if (res.ok) {
+            broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order', ids: chunk });
+          }
+        } else {
+          allDelivered = false;
+          schedulePendingRetry();
+        }
+      } finally {
+        for (const id of chunk) inFlightOrderDeleteIds.delete(id);
+      }
+    }
+  } else if (cleanScope) {
     const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
       'sync',
-      { deleteOrderIds: chunk },
-      { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 9000, keepalive: true }
+      { deleteOrderScope: cleanScope },
+      { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
     );
     if (res && (res.ok || res.configured === false)) {
-      removePendingIdsFromStorage(PENDING_ORDERS_DEL_KEY, chunk);
+      removePendingOrderDeleteScope(cleanScope);
       if (res.ok) {
-        broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order', ids: chunk });
+        broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order' });
       }
     } else {
       allDelivered = false;
       schedulePendingRetry();
     }
   }
+
   return allDelivered;
 }
 
@@ -664,7 +859,7 @@ export async function syncStockLogsToMongoSync(stockLogs: StockLogEntry[]): Prom
     const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
       'sync',
       { upsertStockLogs: chunk },
-      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 8500, keepalive: true }
+      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 18000 }
     );
     if (res && (res.ok || res.configured === false)) {
       removePendingUpserts(
@@ -692,30 +887,33 @@ export function syncStockLogsToMongoBackground(stockLogs: StockLogEntry[]): void
 
 export async function deleteStockLogsFromMongoSync(stockLogIds: string[]): Promise<boolean> {
   bindOnlineFlushListener();
-  const cleanIds = Array.from(new Set(stockLogIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  const cleanIds = markStockLogsDeletedLocally(stockLogIds);
   if (!cleanIds.length) return true;
 
-  removePendingUpserts<StockLogEntry>(PENDING_STOCK_LOGS_UPSERT_KEY, cleanIds);
-  markLocalTombstones(recentDeletedStockLogExpiry, cleanIds);
-  addPendingIdsToStorage(PENDING_STOCK_LOGS_DEL_KEY, cleanIds);
-  broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'stock_log', ids: cleanIds });
+  const idsToSend = cleanIds.filter((id) => !inFlightStockLogDeleteIds.has(id));
+  if (!idsToSend.length) return true;
 
   let allDelivered = true;
-  for (let i = 0; i < cleanIds.length; i += 500) {
-    const chunk = cleanIds.slice(i, i + 500);
-    const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
-      'sync',
-      { deleteStockLogIds: chunk },
-      { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 9000, keepalive: true }
-    );
-    if (res && (res.ok || res.configured === false)) {
-      removePendingIdsFromStorage(PENDING_STOCK_LOGS_DEL_KEY, chunk);
-      if (res.ok) {
-        broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'stock_log', ids: chunk });
+  for (let i = 0; i < idsToSend.length; i += 500) {
+    const chunk = idsToSend.slice(i, i + 500);
+    for (const id of chunk) inFlightStockLogDeleteIds.add(id);
+    try {
+      const res = await postMongoAction<{ configured?: boolean; ok?: boolean }>(
+        'sync',
+        { deleteStockLogIds: chunk },
+        { maxAttempts: 3, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+      );
+      if (res && (res.ok || res.configured === false)) {
+        removePendingIdsFromStorage(PENDING_STOCK_LOGS_DEL_KEY, chunk);
+        if (res.ok) {
+          broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'stock_log', ids: chunk });
+        }
+      } else {
+        allDelivered = false;
+        schedulePendingRetry();
       }
-    } else {
-      allDelivered = false;
-      schedulePendingRetry();
+    } finally {
+      for (const id of chunk) inFlightStockLogDeleteIds.delete(id);
     }
   }
   return allDelivered;
@@ -754,7 +952,7 @@ export async function purgeExpiredStockLogsFromMongoSync(
   }>(
     'sync',
     { deleteStockLogsBeforeIso: new Date(cutoffMs).toISOString() },
-    { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 12000, keepalive: true }
+    { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 20000 }
   );
 
   if (res && (res.ok || res.configured === false)) {
@@ -789,7 +987,6 @@ export async function deleteWorkspaceFromMongoSync(accountEmails: string[] = [])
       forceRefreshIfDisabled: true,
       forceRefreshToken: true,
       timeoutMs: 25000,
-      keepalive: true,
     }
   );
   if (res && (res.ok || res.configured === false)) {
@@ -798,6 +995,7 @@ export async function deleteWorkspaceFromMongoSync(accountEmails: string[] = [])
         window.localStorage.removeItem(PENDING_WS_DEL_KEY);
         window.localStorage.removeItem(PENDING_WS_DEL_EMAILS_KEY);
         window.localStorage.removeItem(PENDING_ORDERS_DEL_KEY);
+        window.localStorage.removeItem(PENDING_ORDERS_SCOPE_DEL_KEY);
         window.localStorage.removeItem(PENDING_STOCK_LOGS_DEL_KEY);
         window.localStorage.removeItem(PENDING_ORDERS_UPSERT_KEY);
         window.localStorage.removeItem(PENDING_STOCK_LOGS_UPSERT_KEY);
@@ -861,20 +1059,110 @@ export async function fetchMongoChanges(since: string): Promise<{
   };
 }
 
+export function reconcileWorkspaceOrdersWithMongo(
+  uid: string,
+  activeOrderIds: string[]
+): void {
+  if (!uid) return;
+  bindOnlineFlushListener();
+  const cleanActiveIds = Array.from(
+    new Set(activeOrderIds.map((id) => String(id || '').trim()).filter(Boolean))
+  ).sort();
+  const sig = cleanActiveIds.join(',');
+  if (lastReconciledOrdersSigByUid.get(uid) === sig) return;
+  lastReconciledOrdersSigByUid.set(uid, sig);
+
+  void (async () => {
+    const available = await ensureMongoAvailable();
+    if (!available) {
+      if (lastReconciledOrdersSigByUid.get(uid) === sig) {
+        lastReconciledOrdersSigByUid.delete(uid);
+      }
+      return;
+    }
+    await flushPendingMongoDeletes();
+    const res = await postMongoAction<{
+      configured?: boolean;
+      ok?: boolean;
+      deletedOrders?: number;
+    }>(
+      'sync',
+      { reconcileActiveOrderIds: cleanActiveIds },
+      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+    );
+    if (!res || (!res.ok && res.configured !== false)) {
+      if (lastReconciledOrdersSigByUid.get(uid) === sig) {
+        lastReconciledOrdersSigByUid.delete(uid);
+      }
+      return;
+    }
+    if (res.ok && Number(res.deletedOrders || 0) > 0) {
+      broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'order' });
+    }
+  })();
+}
+
+export function reconcileWorkspaceStockLogsWithMongo(
+  uid: string,
+  activeStockLogIds: string[]
+): void {
+  if (!uid) return;
+  bindOnlineFlushListener();
+  const cleanActiveIds = Array.from(
+    new Set(activeStockLogIds.map((id) => String(id || '').trim()).filter(Boolean))
+  ).sort();
+  const sig = cleanActiveIds.join(',');
+  if (lastReconciledStockLogsSigByUid.get(uid) === sig) return;
+  lastReconciledStockLogsSigByUid.set(uid, sig);
+
+  void (async () => {
+    const available = await ensureMongoAvailable();
+    if (!available) {
+      if (lastReconciledStockLogsSigByUid.get(uid) === sig) {
+        lastReconciledStockLogsSigByUid.delete(uid);
+      }
+      return;
+    }
+    await flushPendingMongoDeletes();
+    const res = await postMongoAction<{
+      configured?: boolean;
+      ok?: boolean;
+      deletedStockLogs?: number;
+    }>(
+      'sync',
+      { reconcileActiveStockLogIds: cleanActiveIds },
+      { maxAttempts: 2, forceRefreshIfDisabled: true, timeoutMs: 20000 }
+    );
+    if (!res || (!res.ok && res.configured !== false)) {
+      if (lastReconciledStockLogsSigByUid.get(uid) === sig) {
+        lastReconciledStockLogsSigByUid.delete(uid);
+      }
+      return;
+    }
+    if (res.ok && Number(res.deletedStockLogs || 0) > 0) {
+      broadcastLocalSyncEvent({ type: 'mongo:deleted', kind: 'stock_log' });
+    }
+  })();
+}
+
 export function backfillWorkspaceToMongoOnce(
   uid: string,
   orders: Order[],
   stockLogs: StockLogEntry[]
 ): void {
   if (!uid || backfilledThisSession.has(uid)) return;
-  if (!orders.length && !stockLogs.length) return;
   backfilledThisSession.add(uid);
 
   void (async () => {
     const available = await ensureMongoAvailable();
-    if (!available) return;
+    if (!available) {
+      backfilledThisSession.delete(uid);
+      return;
+    }
 
     await flushAllPendingMongoOps();
+
+    if (!orders.length && !stockLogs.length) return;
 
     const filteredOrders = orders.filter(
       (o) => o?.id && !isLocallyDeleted(recentDeletedOrderExpiry, PENDING_ORDERS_DEL_KEY, o.id)
@@ -888,10 +1176,14 @@ export function backfillWorkspaceToMongoOnce(
       const orderChunk = filteredOrders.slice(i, i + 150);
       const stockChunk = filteredLogs.slice(i, i + 150);
       if (!orderChunk.length && !stockChunk.length) break;
-      await postMongoAction('sync', {
-        ...(orderChunk.length ? { upsertOrders: orderChunk } : {}),
-        ...(stockChunk.length ? { upsertStockLogs: stockChunk } : {}),
-      });
+      await postMongoAction(
+        'sync',
+        {
+          ...(orderChunk.length ? { upsertOrders: orderChunk } : {}),
+          ...(stockChunk.length ? { upsertStockLogs: stockChunk } : {}),
+        },
+        { maxAttempts: 2, timeoutMs: 18000 }
+      );
     }
   })();
 }

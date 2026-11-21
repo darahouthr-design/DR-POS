@@ -123,8 +123,6 @@ export default defineConfig(({ command }) => {
         'firebase/app',
         'firebase/auth',
         'firebase/firestore',
-        'xlsx-js-style',
-        '@zxing/library',
       ],
     },
     build: {
@@ -133,13 +131,27 @@ export default defineConfig(({ command }) => {
         output: {
           manualChunks(id) {
             if (!id.includes('node_modules')) return undefined;
+            if (
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
+              id.includes('node_modules/scheduler/')
+            ) {
+              return 'vendor-react';
+            }
             if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
               return 'vendor-firebase';
             }
             if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {
               return 'vendor-motion';
             }
-            if (id.includes('node_modules/xlsx')) {
+            if (
+              id.includes('node_modules/xlsx') ||
+              id.includes('node_modules/cfb') ||
+              id.includes('node_modules/ssf') ||
+              id.includes('node_modules/codepage') ||
+              id.includes('node_modules/jszip') ||
+              id.includes('node_modules/wmf')
+            ) {
               return 'vendor-xlsx';
             }
             if (id.includes('node_modules/lucide-react')) {

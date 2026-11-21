@@ -490,10 +490,14 @@ interface OrdersViewProps {
   hasMoreOrders?: boolean;
   loadingMoreOrders?: boolean;
   onLoadMoreOrders?: () => Promise<void>;
+  onSearchOrdersServer?: (query: string) => Promise<void>;
   onZoomImage?: (url: string, title: string) => void;
   onUpdateOrder: (id: string, payload: Partial<Order>) => Promise<boolean>;
   onDeleteOrder: (id: string) => Promise<boolean>;
-  onDeleteAllOrders: (ids: string[]) => Promise<boolean>;
+  onDeleteAllOrders: (
+    ids: string[],
+    options?: { deleteAllInScope?: boolean }
+  ) => Promise<boolean>;
 }
 
 export const OrdersView: React.FC<OrdersViewProps> = ({
@@ -508,6 +512,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   hasMoreOrders = false,
   loadingMoreOrders = false,
   onLoadMoreOrders,
+  onSearchOrdersServer,
   onZoomImage,
   onUpdateOrder,
   onDeleteOrder,
@@ -544,6 +549,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [searchingServer, setSearchingServer] = useState(false);
+  const lastServerSearchRef = useRef<string>('');
 
   const deferredFilters = useDeferredValue({
     dateFrom,
@@ -630,20 +638,58 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   ]);
 
   useEffect(() => {
-    if (remainingDomOrders <= 0) return;
+    const trimmed = searchQuery.trim();
+    if (!onSearchOrdersServer || !hasMoreOrders || trimmed.length < 2) {
+      setSearchingServer(false);
+      return;
+    }
+    if (lastServerSearchRef.current === trimmed.toLowerCase()) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearchingServer(true);
+      try {
+        await onSearchOrdersServer(trimmed);
+        if (!cancelled) {
+          lastServerSearchRef.current = trimmed.toLowerCase();
+        }
+      } finally {
+        if (!cancelled) {
+          setSearchingServer(false);
+        }
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, hasMoreOrders, onSearchOrdersServer]);
+
+  useEffect(() => {
+    const canRevealLocal = remainingDomOrders > 0;
+    const canFetchServer =
+      remainingDomOrders === 0 &&
+      hasMoreOrders &&
+      Boolean(onLoadMoreOrders) &&
+      !loadingMoreOrders;
+    if (!canRevealLocal && !canFetchServer) return;
     const node = loadMoreSentinelRef.current;
     if (!node || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        if (remainingDomOrders > 0) {
           setVisibleDomCount((prev) => prev + DOM_PAGE_STEP);
+        } else if (hasMoreOrders && onLoadMoreOrders && !loadingMoreOrders) {
+          void onLoadMoreOrders();
         }
       },
-      { rootMargin: '240px' }
+      { rootMargin: '280px' }
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [remainingDomOrders]);
+  }, [remainingDomOrders, hasMoreOrders, onLoadMoreOrders, loadingMoreOrders]);
 
   const currencyMeta = getCurrencyMeta(currency);
   const [editStockError, setEditStockError] = useState('');
@@ -905,10 +951,24 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
             <Button
               tone="primary"
-              onClick={() => exportOrdersToExcel(filteredOrders, currency)}
+              disabled={exportingExcel}
+              onClick={async () => {
+                if (exportingExcel) return;
+                setExportingExcel(true);
+                try {
+                  await exportOrdersToExcel(filteredOrders, currency);
+                } finally {
+                  setExportingExcel(false);
+                }
+              }}
               className="w-full sm:w-auto"
             >
-              <Icon3D name="excel" size={20} /> {t.orders.exportExcelBtn}
+              {exportingExcel ? (
+                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              ) : (
+                <Icon3D name="excel" size={20} />
+              )}{' '}
+              {t.orders.exportExcelBtn}
             </Button>
 
             {!readOnly && filteredOrders.length > 0 && (
@@ -931,10 +991,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         {/* Invoice Search Bar & Quick Payment Status Filter */}
         <div className="grid grid-cols-2 sm:flex sm:flex-row sm:items-center gap-2 sm:gap-2.5">
           <div className="relative min-w-0 sm:flex-1">
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
-            />
+            {searchingServer ? (
+              <Loader2
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-primary animate-spin"
+              />
+            ) : (
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted"
+              />
+            )}
             <input
               type="search"
               value={searchQuery}
@@ -1904,8 +1971,22 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     onClick={async () => {
                       const targetIds = filteredOrders.map((o) => o.id);
                       const count = targetIds.length;
+                      const hasActiveOrderFilters = Boolean(
+                        dateFrom ||
+                          dateTo ||
+                          timeFrom ||
+                          timeTo ||
+                          staffFilter !== 'ALL' ||
+                          storeFilter !== 'ALL' ||
+                          groupFilter !== 'ALL' ||
+                          (!hideWarehouse && warehouseFilter !== 'ALL') ||
+                          paymentStatusFilter !== 'ALL' ||
+                          searchQuery.trim()
+                      );
                       setBusy(true);
-                      const ok = await onDeleteAllOrders(targetIds);
+                      const ok = await onDeleteAllOrders(targetIds, {
+                        deleteAllInScope: !hasActiveOrderFilters,
+                      });
                       setBusy(false);
                       if (ok) {
                         setConfirmDeleteAll(false);

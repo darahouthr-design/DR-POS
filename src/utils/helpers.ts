@@ -1,5 +1,4 @@
 import type { CurrencyCode, LanguageCode, Order } from '../types';
-import XLSX from 'xlsx-js-style';
 
 export function resolveImageUrl(rawUrl?: string): string {
   if (!rawUrl || rawUrl.startsWith('asset:')) return '';
@@ -380,7 +379,11 @@ export function playNewOrderNotification(
   }, 0);
 }
 
-export function exportOrdersToExcel(orders: Order[], currency: CurrencyCode): void {
+export async function exportOrdersToExcel(
+  orders: Order[],
+  currency: CurrencyCode
+): Promise<void> {
+  const { default: XLSX } = await import('xlsx-js-style');
   const thinBorder = {
     top: { style: 'thin', color: { rgb: '000000' } },
     bottom: { style: 'thin', color: { rgb: '000000' } },

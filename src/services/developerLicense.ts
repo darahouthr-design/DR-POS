@@ -314,11 +314,14 @@ export function getLicenseRemainingSummary(license?: WorkspaceLicense | null): {
 
 export async function checkEmailAuthGate(email: string): Promise<GateCheckResult> {
   const cleanEmail = email.trim().toLowerCase();
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 4000) : null;
   try {
     const res = await fetch('/api/auth/gate-check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: cleanEmail }),
+      ...(controller ? { signal: controller.signal } : {}),
     });
     const parsed = await tryJson<GateCheckResult>(res);
     if (res.ok && parsed.isJson && parsed.data) {
@@ -326,6 +329,8 @@ export async function checkEmailAuthGate(email: string): Promise<GateCheckResult
     }
   } catch {
     // Fallback to Firestore vault
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   try {

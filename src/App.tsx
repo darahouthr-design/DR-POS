@@ -34,7 +34,6 @@ import {
   savePriceRecordFs,
   saveProductFs,
   saveStaffFs,
-  seedWorkspaceIfNeeded,
   subscribeToSaleActivityLogs,
   subscribeToSalePresence,
   subscribeToWorkspace,
@@ -47,7 +46,6 @@ import {
   type WorkspaceSubscription,
 } from './services/firestoreWorkspace';
 import {
-  AuthGate,
   clearRolePref,
   consumePendingOperatorEmail,
   consumePendingRolePref,
@@ -58,7 +56,12 @@ import {
   setExternalAuthError,
   SUB_ADMIN_EXTERNAL_BLOCK_ERROR,
   type StoredRolePref,
-} from './components/AuthGate';
+} from './utils/authPrefs';
+import {
+  clearWorkspaceBootSnapshot,
+  loadWorkspaceBootSnapshot,
+  saveWorkspaceBootSnapshot,
+} from './utils/workspaceBootCache';
 import {
   checkEmailAuthGate,
   DEFAULT_TELEGRAM_URL,
@@ -66,6 +69,10 @@ import {
   syncWorkspaceLicenseWithServer,
 } from './services/developerLicense';
 import { APP_LOGO_URL, DrPosLogo, Icon3D, type Icon3DName } from './components/Icon3D';
+
+const AuthGate = React.lazy(() =>
+  import('./components/AuthGate').then((m) => ({ default: m.AuthGate }))
+);
 
 const DashboardView = React.lazy(() =>
   import('./components/DashboardView').then((m) => ({ default: m.DashboardView }))
@@ -338,6 +345,7 @@ export function App() {
   const stockPurgeLastRunRef = useRef(0);
   const activityPurgeInFlightRef = useRef(false);
   const activityPurgeLastRunRef = useRef(0);
+  const bootCacheSavedAtRef = useRef(0);
   const mobileNavRef = useRef<HTMLElement | null>(null);
   const mobileNavObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -515,27 +523,11 @@ export function App() {
         return;
       }
 
-      setInitializing(true);
       setApiError('');
       setFirebaseUser(fbUser);
 
       const cleanEmail = (fbUser.email || `${fbUser.uid}@drpos.local`).trim().toLowerCase();
       const displayName = fbUser.displayName || cleanEmail.split('@')[0] || 'DR-POS User';
-
-      if (fbUser.email) {
-        const gate = await checkEmailAuthGate(cleanEmail);
-        if (currentRun !== activeRunId) return;
-        if (gate.isSubAdmin) {
-          setExternalAuthError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
-          clearRolePref(fbUser.uid);
-          setWorkspace(null);
-          setProblemCustomers([]);
-          setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
-          setInitializing(false);
-          await signOut(auth).catch(() => {});
-          return;
-        }
-      }
 
       const pendingRole = consumePendingRolePref();
       if (pendingRole) {
@@ -562,11 +554,60 @@ export function App() {
 
       saleVerifyInFlightRef.current = null;
       serverVerifiedSaleProfilesRef.current = null;
+      bootCacheSavedAtRef.current = 0;
+
+      // Instant boot hydration from compact per-uid localStorage snapshot so mobile PWA
+      // opens immediately without waiting on network round-trips while live Firestore syncs.
+      const cachedBoot = loadWorkspaceBootSnapshot(fbUser.uid);
+      let hydratedFromCache = false;
+      if (cachedBoot) {
+        let cacheAllowed = true;
+        if (resolvedRole.role === 'sale') {
+          const targetSale = normalizeSaleKey(resolvedRole.saleName || '');
+          const cachedSales = cachedBoot.workspace.settings.saleProfiles || [];
+          cacheAllowed = Boolean(
+            targetSale &&
+              cachedSales.some(
+                (sp) => sp.active !== false && normalizeSaleKey(sp.name) === targetSale
+              )
+          );
+        }
+        if (cacheAllowed) {
+          hydratedFromCache = true;
+          setWorkspace(cachedBoot.workspace);
+          setProblemCustomers(cachedBoot.problemCustomers);
+          setPagination(cachedBoot.pagination);
+          setInitializing(false);
+        }
+      }
+      if (!hydratedFromCache) {
+        setInitializing(true);
+      }
+
+      // Parallel non-blocking Sub-Admin gate check (never stalls startup waterfall)
+      if (fbUser.email) {
+        void checkEmailAuthGate(cleanEmail)
+          .then(async (gate) => {
+            if (currentRun !== activeRunId) return;
+            if (gate.isSubAdmin) {
+              if (wsSubRef.current) {
+                wsSubRef.current.unsubscribe();
+                wsSubRef.current = null;
+              }
+              clearWorkspaceBootSnapshot(fbUser.uid);
+              setExternalAuthError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
+              clearRolePref(fbUser.uid);
+              setWorkspace(null);
+              setProblemCustomers([]);
+              setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+              setInitializing(false);
+              await signOut(auth).catch(() => {});
+            }
+          })
+          .catch(() => {});
+      }
 
       try {
-        await seedWorkspaceIfNeeded(fbUser.uid, cleanEmail, displayName);
-        if (currentRun !== activeRunId) return;
-
         const rejectSaleLogin = () => {
           licenseSyncSeqRef.current += 1;
           if (activeSalePresenceRef.current) {
@@ -581,6 +622,7 @@ export function App() {
             wsSubRef.current.unsubscribe();
             wsSubRef.current = null;
           }
+          clearWorkspaceBootSnapshot(fbUser.uid);
           setExternalAuthError(
             'ឈ្មោះ Sale នេះមិនមាននៅក្នុងការកំណត់របស់ Admin ឬត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមពិនិត្យឈ្មោះ Sale ម្ដងទៀត ឬទាក់ទង Admin។'
           );
@@ -699,6 +741,16 @@ export function App() {
             setPagination(nextPag);
             setInitializing(false);
 
+            // Persist compact boot snapshot (throttled to at most once every 2.5s)
+            const nowMs = Date.now();
+            if (
+              !deletingAccountRef.current &&
+              (bootCacheSavedAtRef.current === 0 || nowMs - bootCacheSavedAtRef.current >= 2500)
+            ) {
+              bootCacheSavedAtRef.current = nowMs;
+              saveWorkspaceBootSnapshot(fbUser.uid, effectiveWs, pc, nextPag);
+            }
+
             for (const o of newOrders) {
               const targetAdmin = (activeAdminEmailRef.current || effectiveWs.email)
                 .trim()
@@ -725,6 +777,7 @@ export function App() {
           },
           onDeleted: () => {
             if (currentRun !== activeRunId) return;
+            clearWorkspaceBootSnapshot(fbUser.uid);
             setWorkspace(null);
             setProblemCustomers([]);
             setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
@@ -928,7 +981,10 @@ export function App() {
 
   useEffect(() => {
     if (!firebaseUser || !hasWorkspace) return;
-    void revalidateLicenseInBackground(false);
+    // Defer initial background license check so mobile cold-boot bandwidth stays 100% free for UI
+    const bootTimer = window.setTimeout(() => {
+      void revalidateLicenseInBackground(false);
+    }, 3000);
     const onFocus = () => void revalidateLicenseInBackground(true);
     const onOnline = () => void revalidateLicenseInBackground(true);
     const onVisibility = () => {
@@ -942,6 +998,7 @@ export function App() {
     const interval = window.setInterval(() => void revalidateLicenseInBackground(true), 60_000);
 
     return () => {
+      window.clearTimeout(bootTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -1403,28 +1460,38 @@ export function App() {
     [firebaseUser?.uid, hasWorkspace, isMasterAdmin]
   );
 
-  // Automatic 30-day cleanup scheduler for Stock Logs (on load, on Stock Log page visit, and every 6 hours)
+  // Automatic 30-day cleanup scheduler for Stock Logs (deferred on mount, on Stock Log page visit, and every 6 hours)
   useEffect(() => {
     if (!firebaseUser?.uid || !hasWorkspace || session?.role === 'sale') {
       return;
     }
-    void runStockLogAutoPurge(false);
+    const bootTimer = window.setTimeout(() => {
+      void runStockLogAutoPurge(false);
+    }, 4000);
     const timer = window.setInterval(() => {
       void runStockLogAutoPurge(false);
     }, 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(bootTimer);
+      window.clearInterval(timer);
+    };
   }, [firebaseUser?.uid, hasWorkspace, session?.role, activePage, runStockLogAutoPurge]);
 
-  // Automatic 30-day cleanup scheduler for Sale Activity Logs (Master Admin Dashboard + every 6 hours)
+  // Automatic 30-day cleanup scheduler for Sale Activity Logs (deferred on mount, Master Admin Dashboard + every 6 hours)
   useEffect(() => {
     if (!firebaseUser?.uid || !hasWorkspace || !isMasterAdmin) {
       return;
     }
-    void runActivityLogAutoPurge(false);
+    const bootTimer = window.setTimeout(() => {
+      void runActivityLogAutoPurge(false);
+    }, 4500);
     const timer = window.setInterval(() => {
       void runActivityLogAutoPurge(false);
     }, 6 * 60 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(bootTimer);
+      window.clearInterval(timer);
+    };
   }, [firebaseUser?.uid, hasWorkspace, isMasterAdmin, activePage, runActivityLogAutoPurge]);
 
   // Strict Multi-Admin Isolation across ALL pages:
@@ -1544,23 +1611,34 @@ export function App() {
     );
   }
 
-  // Mandatory Auth Gate (Cannot close or bypass until signed in)
+  // Mandatory Auth Gate (Lazy-loaded so signed-in mobile boots skip 150KB+ of auth UI)
   if (!firebaseUser || !session || !workspace) {
     return (
       <MotionConfig reducedMotion="user">
-        <AuthGate
-          onSaveOperatorPref={(uid, opEmail) => {
-            if (uid === firebaseUser?.uid) {
-              setOperatorEmailState(opEmail || session?.email || '');
-            }
-          }}
-          onSaveRolePref={(uid, pref) => {
-            if (uid === firebaseUser?.uid) {
-              setRoleState(pref);
-              activeRoleRef.current = pref;
-            }
-          }}
-        />
+        <Suspense
+          fallback={
+            <div className="min-h-dvh flex items-center justify-center bg-background p-6">
+              <Surface className="p-6 flex items-center gap-3">
+                <DrPosLogo size={42} />
+                <span className="text-sm font-medium text-muted">កំពុងភ្ជាប់ប្រព័ន្ធ DR-POS...</span>
+              </Surface>
+            </div>
+          }
+        >
+          <AuthGate
+            onSaveOperatorPref={(uid, opEmail) => {
+              if (uid === firebaseUser?.uid) {
+                setOperatorEmailState(opEmail || session?.email || '');
+              }
+            }}
+            onSaveRolePref={(uid, pref) => {
+              if (uid === firebaseUser?.uid) {
+                setRoleState(pref);
+                activeRoleRef.current = pref;
+              }
+            }}
+          />
+        </Suspense>
       </MotionConfig>
     );
   }
@@ -2309,6 +2387,17 @@ export function App() {
                 hasMoreOrders={pagination.hasMoreOrders}
                 loadingMoreOrders={loadingMoreOrders}
                 onLoadMoreOrders={handleLoadMoreOrders}
+                onSearchOrdersServer={async (q) => {
+                  if (!wsSubRef.current) return;
+                  await wsSubRef.current.searchOrdersFromMongo({
+                    search: q,
+                    operatorEmail: effectiveAdminEmail,
+                    ...(isSaleRole && session.saleName
+                      ? { staffName: session.saleName.trim() }
+                      : {}),
+                    limit: 60,
+                  });
+                }}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
                 onUpdateOrder={async (id, payload) => {
                   const targetOrder = visibleOrders.find((o) => o.id === id);
@@ -2373,9 +2462,18 @@ export function App() {
                   }
                   return ok;
                 }}
-                onDeleteAllOrders={async (ids) => {
+                onDeleteAllOrders={async (ids, options) => {
+                  const deleteScope = options?.deleteAllInScope
+                    ? {
+                        operatorEmail: effectiveAdminEmail,
+                        isMasterAdmin,
+                        ...(isSaleRole && session.saleName
+                          ? { staffName: session.saleName.trim() }
+                          : {}),
+                      }
+                    : undefined;
                   const ok = await runFsMutation(() =>
-                    deleteOrdersNoRestoreFs(firebaseUser.uid, ids)
+                    deleteOrdersNoRestoreFs(firebaseUser.uid, ids, deleteScope)
                   );
                   if (ok) {
                     wsSubRef.current?.evictOrders(ids);
@@ -2706,6 +2804,7 @@ export function App() {
                   }
                   saveOperatorEmailPref(firebaseUser.uid, '');
                   clearRolePref(firebaseUser.uid);
+                  clearWorkspaceBootSnapshot(firebaseUser.uid);
                   await signOut(auth);
                 }}
                 onDeleteAccount={async () => {
@@ -2743,6 +2842,7 @@ export function App() {
                     }
                     saveOperatorEmailPref(firebaseUser.uid, '');
                     clearRolePref(firebaseUser.uid);
+                    clearWorkspaceBootSnapshot(firebaseUser.uid);
                     await deleteUser(firebaseUser);
                   } catch (err) {
                     const code = (err as { code?: string })?.code;
