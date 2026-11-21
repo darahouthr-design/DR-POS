@@ -487,6 +487,15 @@ function isFailedPreconditionError(err: unknown): boolean {
   );
 }
 
+export interface WorkspaceCollectionReadiness {
+  products: boolean;
+  orders: boolean;
+  staff: boolean;
+  priceRecords: boolean;
+  stockLogs: boolean;
+  problemCustomers: boolean;
+}
+
 export function subscribeToWorkspace(
   uid: string,
   email: string,
@@ -498,6 +507,7 @@ export function subscribeToWorkspace(
       newOrders: Order[];
       pagination: WorkspacePaginationState;
       rootFromCache?: boolean;
+      collectionsLoaded?: WorkspaceCollectionReadiness;
     }) => void;
     onDeleted: () => void;
     onError: (err: Error) => void;
@@ -506,8 +516,12 @@ export function subscribeToWorkspace(
   let rootReady = false;
   let rootFromCache = true;
   let disposed = false;
+  let initialProductsLoaded = false;
   let initialOrdersLoaded = false;
+  let initialStaffLoaded = false;
+  let initialPricesLoaded = false;
   let initialStockLogsLoaded = false;
+  let initialProblemsLoaded = false;
   const knownOrderIds = new Set<string>();
   const deletedOrderIds = new Set<string>();
   const deletedStockLogIds = new Set<string>();
@@ -691,6 +705,14 @@ export function subscribeToWorkspace(
         hasMoreStockLogs,
       },
       rootFromCache,
+      collectionsLoaded: {
+        products: initialProductsLoaded,
+        orders: initialOrdersLoaded,
+        staff: initialStaffLoaded,
+        priceRecords: initialPricesLoaded,
+        stockLogs: initialStockLogsLoaded,
+        problemCustomers: initialProblemsLoaded,
+      },
     });
   };
 
@@ -788,6 +810,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'products'), where('ownerUid', '==', uid)),
     (snap) => {
       products = snap.docs.map((d) => stripProduct(d.data()));
+      initialProductsLoaded = true;
       productsDirty = true;
       emit();
     },
@@ -923,6 +946,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'staff'), where('ownerUid', '==', uid)),
     (snap) => {
       staff = snap.docs.map((d) => stripStaff(d.data()));
+      initialStaffLoaded = true;
       staffDirty = true;
       emit();
     },
@@ -933,6 +957,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'priceRecords'), where('ownerUid', '==', uid)),
     (snap) => {
       priceRecords = snap.docs.map((d) => stripPriceRecord(d.data()));
+      initialPricesLoaded = true;
       pricesDirty = true;
       emit();
     },
@@ -1057,6 +1082,7 @@ export function subscribeToWorkspace(
     query(collection(db, 'workspaces', uid, 'problemCustomers'), where('ownerUid', '==', uid)),
     (snap) => {
       problemCustomers = snap.docs.map((d) => stripProblemCustomer(d.data()));
+      initialProblemsLoaded = true;
       problemsDirty = true;
       emit();
     },

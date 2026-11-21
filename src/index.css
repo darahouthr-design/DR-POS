@@ -239,6 +239,41 @@ html.dark {
   will-change: transform, opacity;
 }
 
+@keyframes drposProgressShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes drposEqBar {
+  0%, 100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.drpos-progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.36) 50%,
+    transparent 100%
+  );
+  animation: drposProgressShimmer 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
+.drpos-eq-bar {
+  transform-origin: bottom;
+  animation: drposEqBar 0.95s ease-in-out infinite;
+  will-change: transform;
+}
+
 /* Print styles for Korean thermal receipts (58mm / 70mm / 80mm / A4) */
 @media print {
   body * {

@@ -44,16 +44,64 @@
   </head>
   <body class="bg-background text-foreground antialiased selection:bg-primary/15 selection:text-foreground">
     <div id="root">
-      <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#f8faf9;font-family:system-ui,-apple-system,sans-serif;padding:24px;">
-        <div style="display:flex;align-items:center;gap:12px;background:#ffffff;border:1px solid #e4ece7;border-radius:16px;padding:18px 22px;box-shadow:0 8px 24px rgba(15,40,28,0.06);">
-          <img src="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" alt="DR-POS" width="40" height="40" style="border-radius:10px;object-fit:cover;" />
-          <div style="display:flex;flex-direction:column;gap:2px;">
-            <strong style="font-size:15px;color:#0f281c;letter-spacing:-0.01em;">DR-POS</strong>
-            <span style="font-size:12px;color:#526b5e;">កំពុងបើកប្រព័ន្ធ...</span>
+      <style>
+        @keyframes drposBootShimmer{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
+        @keyframes drposBootEq{0%,100%{transform:scaleY(.32)}50%{transform:scaleY(1)}}
+        .drpos-boot-eq{transform-origin:bottom;animation:drposBootEq .95s ease-in-out infinite}
+        .drpos-boot-shimmer{background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.38) 50%,transparent 100%);animation:drposBootShimmer 1.35s ease-in-out infinite}
+      </style>
+      <div style="min-height:100dvh;display:flex;align-items:center;justify-content:center;background:#f4f8f6;font-family:'Kantumruy Pro',system-ui,-apple-system,sans-serif;padding:24px;">
+        <div style="width:100%;max-width:330px;background:#ffffff;border:1px solid #dbe6e0;border-radius:16px;padding:24px;box-shadow:0 14px 32px -8px rgba(15,40,28,.12);box-sizing:border-box;">
+          <div style="display:flex;justify-content:center;margin-bottom:20px;">
+            <div style="width:56px;height:56px;border-radius:16px;border:1px solid #e2ebe6;background:#ffffff;padding:6px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;">
+              <img src="/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png" alt="DR-POS" width="44" height="44" style="width:100%;height:100%;border-radius:12px;object-fit:cover;" />
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <span aria-hidden="true" style="display:inline-flex;align-items:flex-end;gap:2.5px;height:14px;">
+                <span class="drpos-boot-eq" style="width:3px;height:100%;border-radius:99px;background:#117852;animation-delay:0ms;"></span>
+                <span class="drpos-boot-eq" style="width:3px;height:100%;border-radius:99px;background:#117852;animation-delay:140ms;"></span>
+                <span class="drpos-boot-eq" style="width:3px;height:100%;border-radius:99px;background:#117852;animation-delay:280ms;"></span>
+                <span class="drpos-boot-eq" style="width:3px;height:100%;border-radius:99px;background:#117852;animation-delay:90ms;"></span>
+              </span>
+              <span style="font-size:14px;font-weight:600;color:#152c24;white-space:nowrap;">កំពុងដំណើរការ..</span>
+            </div>
+            <span id="drpos-boot-pct" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:700;color:#117852;font-variant-numeric:tabular-nums;">0%</span>
+          </div>
+          <div style="position:relative;height:10px;width:100%;border-radius:999px;background:#e1eae5;overflow:hidden;">
+            <div id="drpos-boot-bar" style="position:relative;height:100%;width:100%;border-radius:999px;transform-origin:left;transform:scaleX(0);background:linear-gradient(90deg,#0e6b48,#138c5f,#1ab37a);overflow:hidden;">
+              <span class="drpos-boot-shimmer" style="position:absolute;inset:0;display:block;"></span>
+            </div>
+          </div>
+          <div aria-hidden="true" style="display:flex;align-items:center;justify-content:space-between;padding:6px 2px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:#7a9186;font-variant-numeric:tabular-nums;">
+            <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
           </div>
         </div>
       </div>
     </div>
+    <script>
+      (function () {
+        var pct = 0;
+        var target = 28;
+        var bar = document.getElementById('drpos-boot-bar');
+        var txt = document.getElementById('drpos-boot-pct');
+        window.__DRPOS_BOOT_PROGRESS__ = 0;
+        var timer = setInterval(function () {
+          pct += Math.max(0.45, (target - pct) * 0.14);
+          if (pct > target) pct = target;
+          window.__DRPOS_BOOT_PROGRESS__ = pct;
+          if (bar) bar.style.transform = 'scaleX(' + (pct / 100).toFixed(4) + ')';
+          if (txt) txt.textContent = Math.round(pct) + '%';
+        }, 40);
+        document.addEventListener('DOMContentLoaded', function () {
+          target = 36;
+        });
+        window.__DRPOS_STOP_HTML_BOOT__ = function () {
+          clearInterval(timer);
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

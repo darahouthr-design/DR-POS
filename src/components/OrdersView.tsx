@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Bluetooth, Check, CheckCircle2, ChevronDown, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
+import { DatabaseProgressBar } from './DatabaseProgressBar';
 import {
   exportOrdersToExcel,
   formatMoney,
@@ -254,7 +255,6 @@ const OrderStatusDropdown: React.FC<OrderStatusDropdownProps> = ({
 
 interface OrderCardProps {
   order: Order;
-  productById: Map<string, Product>;
   currency: CurrencyCode;
   hideWarehouse: boolean;
   readOnly: boolean;
@@ -263,7 +263,6 @@ interface OrderCardProps {
   tOrders: TranslationDict['orders'];
   tCommon: TranslationDict['common'];
   onOpenReport: (order: Order) => void;
-  onZoomImage?: (url: string, title: string) => void;
   onDownloadPng: (order: Order) => void;
   onBluetoothPrint: (order: Order) => void;
   onStandardPrint: (order: Order) => void;
@@ -274,7 +273,6 @@ interface OrderCardProps {
 const OrderCard = React.memo<OrderCardProps>(
   ({
     order,
-    productById,
     currency,
     hideWarehouse,
     readOnly,
@@ -283,7 +281,6 @@ const OrderCard = React.memo<OrderCardProps>(
     tOrders,
     tCommon,
     onOpenReport,
-    onZoomImage,
     onDownloadPng,
     onBluetoothPrint,
     onStandardPrint,
@@ -293,136 +290,93 @@ const OrderCard = React.memo<OrderCardProps>(
     <div>
       <Surface
         onClick={() => onOpenReport(order)}
-        className="p-4 sm:p-5 space-y-3.5 sm:space-y-4 h-full flex flex-col justify-between cursor-pointer hover:border-primary/45 hover:shadow-card transition-all"
+        className="p-4 sm:p-5 space-y-3 h-full flex flex-col justify-between cursor-pointer hover:border-primary/45 hover:shadow-card active:scale-[0.995] transition-all"
       >
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border/50 pb-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <Icon3D name="orders" size={30} />
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-mono font-semibold text-xs sm:text-sm text-foreground">
-                    {order.orderNumber}
-                  </span>
-                  <span
-                    className={`text-xs font-semibold ${
-                      order.paymentStatus === 'paid' ? 'text-primary' : 'text-danger'
-                    }`}
-                  >
-                    · {order.paymentStatus === 'paid' ? tCommon.paid : tCommon.unpaid}
-                  </span>
-                </div>
-                <p className="text-xs text-muted tabular-nums">
-                  {order.date} · {tOrders.atTime} {order.time}
-                </p>
+        <div className="space-y-2.5">
+          {/* Invoice Code & Payment Status */}
+          <div className="space-y-1.5 border-b border-border/50 pb-2.5 text-xs sm:text-[13px] leading-relaxed">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex items-center gap-2">
+                <Icon3D name="orders" size={26} />
+                <span className="text-muted shrink-0">{tOrders.invoiceCodeLabel}</span>
+                <span className="font-mono font-semibold text-foreground truncate">
+                  {order.orderNumber}
+                </span>
               </div>
             </div>
-
-            <div className="text-right ml-auto">
-              <p className="text-base sm:text-lg font-bold tabular-nums text-primary">
-                {formatMoney(order.totalAmount, currency)}
-              </p>
-              {order.dueDate && (
-                <p className="text-[11px] sm:text-xs text-accent font-medium tabular-nums">
-                  {tOrders.dueAt} {order.dueDate}
-                </p>
-              )}
+            <div className="min-w-0">
+              <span className="text-muted">{tOrders.paymentStatusLabel} </span>
+              <strong
+                className={
+                  order.paymentStatus === 'paid' ? 'text-primary' : 'text-danger'
+                }
+              >
+                {order.paymentStatus === 'paid' ? tCommon.paid : tCommon.unpaid}
+              </strong>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 text-xs leading-relaxed">
-            <div className="min-w-0">
-              <span className="text-muted">{tOrders.customerLabel} </span>
-              <strong className="text-foreground break-words">{order.customerName}</strong>
+          {/* Compact Core Order Info */}
+          <div className="space-y-1.5 text-xs sm:text-[13px] leading-relaxed">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <div className="min-w-0">
+                <span className="text-muted">{tOrders.customerLabel} </span>
+                <strong className="text-foreground break-words">
+                  {order.customerName || '-'}
+                </strong>
+              </div>
+              <div className="min-w-0">
+                <span className="text-muted">{tOrders.phoneLabel} </span>
+                <strong className="text-foreground tabular-nums break-words">
+                  {order.customerPhone || '-'}
+                </strong>
+              </div>
             </div>
-            <div className="min-w-0">
-              <span className="text-muted">{tOrders.phoneLabel} </span>
-              <strong className="text-foreground tabular-nums break-words">{order.customerPhone || '-'}</strong>
-            </div>
+
             <div className="min-w-0">
               <span className="text-muted">{tOrders.addressLabel} </span>
-              <span className="text-foreground break-words">{order.customerAddress || '-'}</span>
+              <span className="text-foreground break-words">
+                {order.customerAddress || '-'}
+              </span>
             </div>
-            <div className="min-w-0">
-              <span className="text-muted">{tOrders.staffLabel} </span>
-              <strong className="text-foreground break-words">{order.staffName}</strong>
+
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+              <div className="min-w-0">
+                <span className="text-muted">{tOrders.storeLabel} </span>
+                <span className="text-foreground font-medium break-words">
+                  {order.storeName || '-'}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <span className="text-muted">{tOrders.groupLabel} </span>
+                <span className="text-foreground font-medium break-words">
+                  {order.groupName || '-'}
+                </span>
+              </div>
             </div>
-            <div className="min-w-0 sm:col-span-2">
-              <span className="text-muted">{tOrders.storeLabel} </span>
-              <span className="text-foreground font-medium break-words">{order.storeName || '-'}</span>
-              <span className="text-muted"> / {tOrders.groupLabel} </span>
-              <span className="text-foreground font-medium break-words">{order.groupName || '-'}</span>
-            </div>
+
             {!hideWarehouse && (
               <div className="min-w-0">
                 <span className="text-muted">{tOrders.warehouseLabel} </span>
-                <span className="text-foreground break-words">{order.warehouse || '-'}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-border/40 pt-3 space-y-2">
-            {order.items.map((it, idx) => {
-              const prodImage = productById.get(it.productId)?.imageUrl || '';
-              return (
-                <div
-                  key={`${it.productId}-${idx}`}
-                  className="flex items-center justify-between gap-2.5 rounded-control border border-border/50 bg-background/60 px-2.5 py-2"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <ProductImage
-                      src={prodImage}
-                      alt={it.productName}
-                      className="h-11 w-11 shrink-0"
-                      onZoom={onZoomImage}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-foreground truncate leading-snug">
-                        {it.productName}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted tabular-nums mt-0.5">
-                        <span>
-                          {formatMoney(it.unitPrice, currency)} ×{' '}
-                          <strong className="text-foreground">{it.quantity}</strong>
-                        </span>
-                        {it.catalogUnitPrice !== undefined &&
-                          Math.abs(it.catalogUnitPrice - it.unitPrice) > 0.001 && (
-                            <span className="text-primary font-medium">
-                              {tOrders.priceEditedTag}
-                            </span>
-                          )}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="tabular-nums text-xs font-semibold text-foreground shrink-0">
-                    {formatMoney(it.unitPrice * it.quantity, currency)}
-                  </span>
-                </div>
-              );
-            })}
-            {(order.discountAmount || 0) > 0 && (
-              <div className="flex justify-between gap-2 text-xs text-danger pt-1.5 border-t border-dashed border-border/50">
-                <span>
-                  {tOrders.discountLabel}
-                  {order.discountType === 'percent' && order.discountValue
-                    ? ` (${order.discountValue}%)`
-                    : ''}
-                  :
+                <span className="text-foreground break-words">
+                  {order.warehouse || '-'}
                 </span>
-                <strong className="tabular-nums">
-                  -{formatMoney(order.discountAmount || 0, currency)}
-                </strong>
               </div>
             )}
           </div>
 
-          {order.note && (
-            <p className="text-xs text-muted border-t border-border/40 pt-2">
-              {tOrders.noteLabel} {order.note}
-            </p>
-          )}
+          {/* Total Amount */}
+          <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2.5">
+            <span className="text-xs sm:text-[13px] font-medium text-muted">
+              {tOrders.totalAmountLabel}
+            </span>
+            <strong className="text-base sm:text-lg font-bold tabular-nums text-primary">
+              {formatMoney(order.totalAmount, currency)}
+            </strong>
+          </div>
         </div>
 
+        {/* 4 Action Buttons: Invoice (PNG), Bluetooth, Standard Print, Edit */}
         <div
           onClick={(e) => e.stopPropagation()}
           className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 border-t border-border/50 pt-3"
@@ -431,7 +385,7 @@ const OrderCard = React.memo<OrderCardProps>(
             tone="quiet"
             onClick={() => onDownloadPng(order)}
             disabled={isDownloading}
-            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs"
+            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs whitespace-nowrap"
             title={tOrders.invoicePngBtn}
           >
             <Download className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -442,7 +396,7 @@ const OrderCard = React.memo<OrderCardProps>(
           <Button
             tone="quiet"
             onClick={() => onBluetoothPrint(order)}
-            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs"
+            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs whitespace-nowrap"
           >
             <Bluetooth className="h-3.5 w-3.5 text-primary shrink-0" />
             <span className="truncate">Bluetooth ({bluetoothSize})</span>
@@ -450,25 +404,28 @@ const OrderCard = React.memo<OrderCardProps>(
           <Button
             tone="quiet"
             onClick={() => onStandardPrint(order)}
-            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs"
+            className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs whitespace-nowrap"
           >
-            <Printer className="h-3.5 w-3.5 shrink-0" /> {tOrders.standardPrintBtn}
+            <Printer className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{tOrders.standardPrintBtn}</span>
           </Button>
           {!readOnly && (
             <>
               <Button
                 tone="quiet"
                 onClick={() => onEdit(order)}
-                className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs"
+                className="w-full sm:w-auto min-h-11 sm:min-h-9 px-2.5 sm:px-3 text-xs whitespace-nowrap"
               >
-                <Icon3D name="edit" size={16} /> {tCommon.edit}
+                <Icon3D name="edit" size={16} />
+                <span className="truncate">{tCommon.edit}</span>
               </Button>
               <Button
                 tone="danger"
                 onClick={() => onDelete(order)}
-                className="col-span-2 sm:col-span-1 w-full sm:w-auto min-h-11 sm:min-h-9 px-3 text-xs sm:ml-auto"
+                className="col-span-2 sm:col-span-1 w-full sm:w-auto min-h-11 sm:min-h-9 px-3 text-xs sm:ml-auto whitespace-nowrap"
               >
-                <Icon3D name="trash" size={16} /> {tCommon.delete}
+                <Icon3D name="trash" size={16} />
+                <span className="truncate">{tCommon.delete}</span>
               </Button>
             </>
           )}
@@ -1054,6 +1011,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         )}
       </Surface>
 
+      <DatabaseProgressBar
+        active={loadingMoreOrders || searchingServer}
+        variant="banner"
+        label={
+          searchingServer
+            ? 'កំពុងស្វែងរករបាយការណ៍ពី Database..'
+            : 'កំពុងទាញរបាយការណ៍បន្ថែមពី Database..'
+        }
+        resetKey={searchingServer ? `search-${searchQuery}` : `page-${orders.length}`}
+      />
+
       {/* Order Form Cards List (Progressive Windowing + Firestore Cursor Pagination) */}
       {filteredOrders.length === 0 ? (
         <Surface className="p-10 text-center space-y-3">
@@ -1086,7 +1054,6 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               <OrderCard
                 key={order.id}
                 order={order}
-                productById={productById}
                 currency={currency}
                 hideWarehouse={hideWarehouse}
                 readOnly={readOnly}
@@ -1095,7 +1062,6 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 tOrders={t.orders}
                 tCommon={t.common}
                 onOpenReport={setReportOrder}
-                onZoomImage={onZoomImage}
                 onDownloadPng={handleDownloadInvoicePng}
                 onBluetoothPrint={handleBluetoothPrint}
                 onStandardPrint={(o) => setPrintPreviewOrder({ order: o, mode: 'standard' })}
@@ -2006,7 +1972,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         )}
       </AnimatePresence>
 
-      {/* ANIMATED ORDER DETAIL REPORT MODAL WITH PRODUCT IMAGES */}
+      {/* ANIMATED FULL ORDER DETAIL MODAL WITH PRODUCT IMAGES */}
       <AnimatePresence>
         {reportOrder && (
           <motion.div
@@ -2017,16 +1983,16 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.18, ease: 'easeOut' }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             onClick={() => setReportOrder(null)}
             className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-foreground/65 backdrop-blur-[2px] p-0 sm:p-4"
           >
             <motion.div
               key="order-detail-report-card"
-              initial={{ opacity: 0, y: 28, scale: 0.95 }}
+              initial={{ opacity: 0, y: 28, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.96 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.8 }}
+              exit={{ opacity: 0, y: 18, scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30, mass: 0.78 }}
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-2xl"
             >
@@ -2035,25 +2001,22 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   <div className="h-1 w-10 rounded-full bg-border" />
                 </div>
 
-                {/* Header */}
+                {/* Standard Modal Header */}
                 <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 sm:px-6 py-3.5 shrink-0">
                   <div className="flex items-center gap-3 min-w-0">
                     <Icon3D name="orders" size={34} />
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm sm:text-base font-semibold text-foreground truncate">
-                          {t.orders.orderReportTitle} ({reportOrder.orderNumber})
-                        </h3>
-                        <span
-                          className={`text-xs font-semibold ${
-                            reportOrder.paymentStatus === 'paid' ? 'text-primary' : 'text-danger'
-                          }`}
-                        >
-                          · {reportOrder.paymentStatus === 'paid' ? t.common.paid : t.common.unpaid}
+                      <h3 className="text-sm sm:text-base font-semibold text-foreground truncate">
+                        {t.orders.orderReportTitle}
+                      </h3>
+                      <p className="text-xs text-muted tabular-nums flex flex-wrap items-center gap-x-1.5">
+                        <span className="font-mono font-semibold text-foreground">
+                          {reportOrder.orderNumber}
                         </span>
-                      </div>
-                      <p className="text-xs text-muted tabular-nums">
-                        {reportOrder.date} · {t.orders.atTime} {reportOrder.time}
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          {reportOrder.date} {t.orders.atTime} {reportOrder.time}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -2067,13 +2030,31 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   </button>
                 </div>
 
-                {/* Report Content Body */}
-                <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
-                  {/* Customer & Metadata Summary */}
-                  <div className="rounded-card border border-border/70 bg-background/50 p-3.5 sm:p-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs leading-relaxed">
+                {/* Full Order Detail Body */}
+                <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-5">
+                  {/* Complete Customer & Order Information */}
+                  <div className="border-b border-border/60 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs sm:text-[13px] leading-relaxed">
+                    <div className="min-w-0">
+                      <span className="text-muted">{t.orders.invoiceCodeLabel} </span>
+                      <strong className="font-mono text-foreground break-words">
+                        {reportOrder.orderNumber}
+                      </strong>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-muted">{t.orders.paymentStatusLabel} </span>
+                      <strong
+                        className={
+                          reportOrder.paymentStatus === 'paid' ? 'text-primary' : 'text-danger'
+                        }
+                      >
+                        {reportOrder.paymentStatus === 'paid' ? t.common.paid : t.common.unpaid}
+                      </strong>
+                    </div>
                     <div className="min-w-0">
                       <span className="text-muted">{t.orders.customerLabel} </span>
-                      <strong className="text-foreground break-words">{reportOrder.customerName}</strong>
+                      <strong className="text-foreground break-words">
+                        {reportOrder.customerName || '-'}
+                      </strong>
                     </div>
                     <div className="min-w-0">
                       <span className="text-muted">{t.orders.phoneLabel} </span>
@@ -2088,15 +2069,13 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       </span>
                     </div>
                     <div className="min-w-0">
-                      <span className="text-muted">{t.orders.staffLabel} </span>
-                      <strong className="text-foreground break-words">{reportOrder.staffName}</strong>
-                    </div>
-                    <div className="min-w-0 sm:col-span-2">
                       <span className="text-muted">{t.orders.storeLabel} </span>
                       <span className="text-foreground font-medium break-words">
                         {reportOrder.storeName || '-'}
                       </span>
-                      <span className="text-muted"> / {t.orders.groupLabel} </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-muted">{t.orders.groupLabel} </span>
                       <span className="text-foreground font-medium break-words">
                         {reportOrder.groupName || '-'}
                       </span>
@@ -2109,6 +2088,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         </span>
                       </div>
                     )}
+                    <div className="min-w-0">
+                      <span className="text-muted">{t.orders.staffLabel} </span>
+                      <strong className="text-foreground break-words">
+                        {reportOrder.staffName || '-'}
+                      </strong>
+                    </div>
                     {reportOrder.dueDate && (
                       <div className="min-w-0">
                         <span className="text-muted">{t.orders.dueAt} </span>
@@ -2116,7 +2101,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                       </div>
                     )}
                     {reportOrder.note && (
-                      <div className="min-w-0 sm:col-span-2 pt-1 border-t border-border/50">
+                      <div className="min-w-0 sm:col-span-2 pt-2 border-t border-border/50">
                         <span className="text-muted">{t.orders.noteLabel} </span>
                         <span className="text-foreground break-words">{reportOrder.note}</span>
                       </div>
@@ -2124,17 +2109,24 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   </div>
 
                   {/* Ordered Products List with Product Images */}
-                  <div className="space-y-2.5">
+                  <div className="space-y-3">
                     <h4 className="text-xs sm:text-sm font-semibold text-foreground">
                       {t.orders.orderItemsSectionTitle} ({reportOrder.items.length})
                     </h4>
-                    <div className="space-y-2.5">
+                    <div className="divide-y divide-border/50 border-y border-border/50">
                       {reportOrder.items.map((it, idx) => {
                         const prodImage = productById.get(it.productId)?.imageUrl || '';
                         return (
-                          <div
+                          <motion.div
                             key={`${it.productId}-${idx}`}
-                            className="flex items-center justify-between gap-3 rounded-card border border-border/80 bg-surface p-3"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{
+                              duration: 0.16,
+                              delay: Math.min(idx * 0.025, 0.12),
+                              ease: [0.16, 1, 0.3, 1],
+                            }}
+                            className="flex items-center justify-between gap-3 py-3"
                           >
                             <div className="flex items-center gap-3 min-w-0">
                               <ProductImage
@@ -2181,14 +2173,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                                 {formatMoney(it.unitPrice * it.quantity, currency)}
                               </p>
                             </div>
-                          </div>
+                          </motion.div>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* Totals Summary */}
-                  <div className="rounded-card border border-primary/25 bg-primary/5 p-3.5 sm:p-4 space-y-1.5 text-xs sm:text-sm tabular-nums">
+                  {/* Financial Totals Summary */}
+                  <div className="rounded-control bg-primary/5 border border-primary/20 p-3.5 sm:p-4 space-y-1.5 text-xs sm:text-sm tabular-nums">
                     {(reportOrder.discountAmount || 0) > 0 && (
                       <>
                         <div className="flex justify-between gap-2 text-muted">
@@ -2216,7 +2208,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         </div>
                       </>
                     )}
-                    <div className="flex justify-between items-center gap-2 pt-1 text-sm sm:text-base font-bold text-foreground">
+                    <div className="flex justify-between items-center gap-2 pt-0.5 text-sm sm:text-base font-bold text-foreground">
                       <span>{t.orders.totalAmountLabel}</span>
                       <span className="text-primary text-base sm:text-lg">
                         {formatMoney(reportOrder.totalAmount, currency)}
@@ -2226,12 +2218,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 </div>
 
                 {/* Footer Actions */}
-                <div className="shrink-0 border-t border-border/60 bg-surface px-4 sm:px-6 py-3 pb-safe grid grid-cols-2 sm:flex sm:flex-wrap justify-end gap-2">
+                <div className="shrink-0 border-t border-border/60 bg-surface px-4 sm:px-6 py-3 pb-safe grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
                   <Button
                     tone="quiet"
                     onClick={() => handleDownloadInvoicePng(reportOrder)}
                     disabled={downloadingId === reportOrder.id}
-                    className="w-full sm:w-auto min-h-10 px-3 text-xs"
+                    className="w-full sm:w-auto min-h-10 px-3 text-xs whitespace-nowrap"
                   >
                     <Download className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="truncate">
@@ -2243,7 +2235,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   <Button
                     tone="quiet"
                     onClick={() => handleBluetoothPrint(reportOrder)}
-                    className="w-full sm:w-auto min-h-10 px-3 text-xs"
+                    className="w-full sm:w-auto min-h-10 px-3 text-xs whitespace-nowrap"
                   >
                     <Bluetooth className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span className="truncate">Bluetooth ({bluetoothSize})</span>
@@ -2251,27 +2243,45 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   <Button
                     tone="quiet"
                     onClick={() => setPrintPreviewOrder({ order: reportOrder, mode: 'standard' })}
-                    className="w-full sm:w-auto min-h-10 px-3 text-xs"
+                    className="w-full sm:w-auto min-h-10 px-3 text-xs whitespace-nowrap"
                   >
-                    <Printer className="h-3.5 w-3.5 shrink-0" /> {t.orders.standardPrintBtn}
+                    <Printer className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{t.orders.standardPrintBtn}</span>
                   </Button>
                   {!readOnly && (
-                    <Button
-                      tone="quiet"
-                      onClick={() => {
-                        const target = reportOrder;
-                        setReportOrder(null);
-                        openEditModal(target);
-                      }}
-                      className="w-full sm:w-auto min-h-10 px-3 text-xs"
-                    >
-                      <Icon3D name="edit" size={16} /> {t.common.edit}
-                    </Button>
+                    <>
+                      <Button
+                        tone="quiet"
+                        onClick={() => {
+                          const target = reportOrder;
+                          setReportOrder(null);
+                          openEditModal(target);
+                        }}
+                        className="w-full sm:w-auto min-h-10 px-3 text-xs whitespace-nowrap"
+                      >
+                        <Icon3D name="edit" size={16} />
+                        <span className="truncate">{t.common.edit}</span>
+                      </Button>
+                      <Button
+                        tone="danger"
+                        onClick={() => {
+                          const target = reportOrder;
+                          setReportOrder(null);
+                          setConfirmDeleteOrder(target);
+                        }}
+                        className="w-full sm:w-auto min-h-10 px-3 text-xs whitespace-nowrap"
+                      >
+                        <Icon3D name="trash" size={16} />
+                        <span className="truncate">{t.common.delete}</span>
+                      </Button>
+                    </>
                   )}
                   <Button
                     tone="primary"
                     onClick={() => setReportOrder(null)}
-                    className="col-span-2 sm:col-span-1 w-full sm:w-auto min-h-10 px-4 text-xs sm:ml-auto"
+                    className={`${
+                      !readOnly ? '' : 'col-span-2 sm:col-span-1'
+                    } w-full sm:w-auto min-h-10 px-4 text-xs sm:ml-auto whitespace-nowrap`}
                   >
                     {t.common.close}
                   </Button>

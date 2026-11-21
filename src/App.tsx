@@ -43,6 +43,7 @@ import {
   updateSettingsFs,
   updateWorkspaceLicenseFs,
   upsertSalePresenceFs,
+  type WorkspaceCollectionReadiness,
   type WorkspaceSubscription,
 } from './services/firestoreWorkspace';
 import {
@@ -114,6 +115,8 @@ const SettingsView = React.lazy(() =>
   import('./components/SettingsAndAboutViews').then((m) => ({ default: m.SettingsView }))
 );
 import { Button, ImageZoomModal, Surface } from './components/ui';
+import { AppBootSplash, type BootStage } from './components/AppBootSplash';
+import { DatabaseProgressBar } from './components/DatabaseProgressBar';
 import { SaleMobileHome } from './components/SaleMobileHome';
 import { useIsDesktopDevice } from './utils/device';
 import {
@@ -287,9 +290,41 @@ const SALE_ALLOWED_PAGES: PageId[] = [
   'settings',
 ];
 
+const EMPTY_COLLECTION_READINESS: WorkspaceCollectionReadiness = {
+  products: false,
+  orders: false,
+  staff: false,
+  priceRecords: false,
+  stockLogs: false,
+  problemCustomers: false,
+};
+
+const PAGE_DB_DEPS: Record<PageId, Array<keyof WorkspaceCollectionReadiness>> = {
+  dashboard: ['orders', 'products'],
+  pos: ['products', 'orders', 'problemCustomers', 'staff'],
+  orders: ['orders', 'products'],
+  products: ['products'],
+  'track-staff': ['orders', 'staff'],
+  analytics: ['orders'],
+  'due-payments': ['orders'],
+  'problem-customers': ['problemCustomers', 'orders'],
+  'staff-info': ['staff'],
+  'price-record': ['priceRecords'],
+  'stock-log': ['stockLogs', 'products'],
+  settings: ['staff'],
+  about: [],
+};
+
 export function App() {
   const isDesktop = useIsDesktopDevice();
   const [initializing, setInitializing] = useState<boolean>(true);
+  const [bootStage, setBootStage] = useState<BootStage>('auth');
+  const [splashDismissed, setSplashDismissed] = useState<boolean>(false);
+  const [collectionsLoaded, setCollectionsLoaded] = useState<WorkspaceCollectionReadiness>(
+    EMPTY_COLLECTION_READINESS
+  );
+  const [usedBootCache, setUsedBootCache] = useState<boolean>(false);
+  const [dbCardHolding, setDbCardHolding] = useState<boolean>(false);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [operatorEmailState, setOperatorEmailState] = useState<string>('');
   const [roleState, setRoleState] = useState<StoredRolePref>({ role: 'admin' });
@@ -519,10 +554,18 @@ export function App() {
         setWorkspace(null);
         setProblemCustomers([]);
         setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+        setCollectionsLoaded(EMPTY_COLLECTION_READINESS);
+        setUsedBootCache(false);
+        setDbCardHolding(false);
+        setBootStage('ready');
         setInitializing(false);
         return;
       }
 
+      setBootStage('workspace');
+      setCollectionsLoaded(EMPTY_COLLECTION_READINESS);
+      setUsedBootCache(false);
+      setDbCardHolding(false);
       setApiError('');
       setFirebaseUser(fbUser);
 
@@ -574,13 +617,16 @@ export function App() {
         }
         if (cacheAllowed) {
           hydratedFromCache = true;
+          setUsedBootCache(true);
           setWorkspace(cachedBoot.workspace);
           setProblemCustomers(cachedBoot.problemCustomers);
           setPagination(cachedBoot.pagination);
+          setBootStage('ready');
           setInitializing(false);
         }
       }
       if (!hydratedFromCache) {
+        setSplashDismissed(false);
         setInitializing(true);
       }
 
@@ -641,8 +687,21 @@ export function App() {
             newOrders,
             pagination: nextPag,
             rootFromCache,
+            collectionsLoaded: nextCollections,
           }) => {
             if (currentRun !== activeRunId) return;
+            if (nextCollections) {
+              setCollectionsLoaded((prev) =>
+                prev.products === nextCollections.products &&
+                prev.orders === nextCollections.orders &&
+                prev.staff === nextCollections.staff &&
+                prev.priceRecords === nextCollections.priceRecords &&
+                prev.stockLogs === nextCollections.stockLogs &&
+                prev.problemCustomers === nextCollections.problemCustomers
+                  ? prev
+                  : nextCollections
+              );
+            }
 
             let effectiveWs = ws;
             const currentRole = activeRoleRef.current;
@@ -1600,14 +1659,29 @@ export function App() {
     [visibleOrders]
   );
 
-  if (initializing) {
+  const activePageDbDeps = PAGE_DB_DEPS[activePage] || [];
+  const activePageLoadedCount = activePageDbDeps.filter((k) => collectionsLoaded[k]).length;
+  const isActivePageDbFetching =
+    activePageDbDeps.length > 0 && activePageLoadedCount < activePageDbDeps.length;
+  const activePageDbTarget =
+    activePageDbDeps.length > 0
+      ? Math.min(94, Math.round(28 + (activePageLoadedCount / activePageDbDeps.length) * 64))
+      : 94;
+
+  useEffect(() => {
+    if (!usedBootCache && isActivePageDbFetching) {
+      setDbCardHolding(true);
+    }
+  }, [usedBootCache, isActivePageDbFetching]);
+
+  if (initializing || !splashDismissed) {
     return (
-      <div className="min-h-dvh flex items-center justify-center bg-background p-6">
-        <Surface className="p-6 flex items-center gap-3">
-          <DrPosLogo size={42} />
-          <span className="text-sm font-medium text-muted">កំពុងភ្ជាប់ប្រព័ន្ធ DR-POS...</span>
-        </Surface>
-      </div>
+      <MotionConfig reducedMotion="user">
+        <AppBootSplash
+          stage={initializing ? bootStage : 'ready'}
+          onComplete={() => setSplashDismissed(true)}
+        />
+      </MotionConfig>
     );
   }
 
@@ -1615,16 +1689,7 @@ export function App() {
   if (!firebaseUser || !session || !workspace) {
     return (
       <MotionConfig reducedMotion="user">
-        <Suspense
-          fallback={
-            <div className="min-h-dvh flex items-center justify-center bg-background p-6">
-              <Surface className="p-6 flex items-center gap-3">
-                <DrPosLogo size={42} />
-                <span className="text-sm font-medium text-muted">កំពុងភ្ជាប់ប្រព័ន្ធ DR-POS...</span>
-              </Surface>
-            </div>
-          }
-        >
+        <Suspense fallback={<AppBootSplash stage="suspense" />}>
           <AuthGate
             onSaveOperatorPref={(uid, opEmail) => {
               if (uid === firebaseUser?.uid) {
@@ -2281,16 +2346,37 @@ export function App() {
                 : 'pb-[calc(5.25rem+env(safe-area-inset-bottom,0px))] md:pb-6'
             }`}
           >
-            <Suspense
-              fallback={
-                <div className="min-h-[45dvh] flex items-center justify-center">
-                  <Surface className="px-5 py-3.5 flex items-center gap-3">
-                    <DrPosLogo size={32} />
-                    <span className="text-sm font-medium text-muted">កំពុងបើកទំព័រ...</span>
-                  </Surface>
-                </div>
-              }
-            >
+            {!usedBootCache && (isActivePageDbFetching || dbCardHolding) ? (
+              <DatabaseProgressBar
+                active={isActivePageDbFetching}
+                targetProgress={activePageDbTarget}
+                variant="card"
+                label="កំពុងទាញរបាយការណ៍ពី Database.."
+                resetKey={activePage}
+                onComplete={() => setDbCardHolding(false)}
+              />
+            ) : (
+              <>
+                {usedBootCache && (
+                  <DatabaseProgressBar
+                    active={isActivePageDbFetching}
+                    targetProgress={activePageDbTarget}
+                    variant="banner"
+                    label="កំពុងទាញរបាយការណ៍ពី Database.."
+                    resetKey={activePage}
+                    className="mb-4"
+                  />
+                )}
+                <Suspense
+                  fallback={
+                    <DatabaseProgressBar
+                      active
+                      variant="card"
+                      label="កំពុងដំណើរការ.."
+                      resetKey={activePage}
+                    />
+                  }
+                >
             {activePage === 'dashboard' && (
               <DashboardView
                 orders={visibleOrders}
@@ -2866,7 +2952,9 @@ export function App() {
             )}
 
             {!isSaleRole && activePage === 'about' && <AboutView />}
-            </Suspense>
+                </Suspense>
+              </>
+            )}
           </main>
         </div>
 

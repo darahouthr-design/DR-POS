@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Button, Surface, inputClass } from './ui';
+import { DatabaseProgressBar } from './DatabaseProgressBar';
 import { cleanSaleNameDisplay, formatCompactCount, formatMoney } from '../utils/helpers';
 import { useI18n } from '../utils/i18nContext';
 import type { CurrencyCode, SaleActivityActionType, SaleActivityLog } from '../types';
@@ -339,18 +340,11 @@ export const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({
 
         {/* Chronological Event Feed */}
         {loading ? (
-          <div className="mt-4 divide-y divide-border/45" aria-busy="true">
-            {Array.from({ length: 4 }).map((_, idx) => (
-              <div key={idx} className="py-3.5 flex items-center justify-between gap-4">
-                <div className="space-y-2 flex-1 min-w-0">
-                  <div className="h-3.5 w-44 rounded bg-border/60 animate-pulse" />
-                  <div className="h-3 w-72 max-w-full rounded bg-border/40 animate-pulse" />
-                </div>
-                <div className="h-3 w-32 rounded bg-border/50 animate-pulse shrink-0" />
-              </div>
-            ))}
-            <p className="sr-only">{t.dashboard.activityLoading}</p>
-          </div>
+          <DatabaseProgressBar
+            active
+            variant="inline"
+            label={t.dashboard.activityLoading}
+          />
         ) : logs.length === 0 ? (
           <div className="py-10 text-center space-y-1.5">
             <p className="text-sm font-semibold text-foreground">

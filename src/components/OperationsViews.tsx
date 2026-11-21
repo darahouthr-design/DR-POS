@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Plus, Trash2, Upload, CheckCircle2, X, ChevronDown, Loader2, Clock3 } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
+import { DatabaseProgressBar } from './DatabaseProgressBar';
 import {
   formatMoney,
   getCurrencyMeta,
@@ -1601,6 +1602,13 @@ export const StockLogView: React.FC<{
           </div>
 
           <div ref={loadMoreSentinelRef} aria-hidden="true" className="h-1 w-full" />
+
+          <DatabaseProgressBar
+            active={loadingMoreStockLogs}
+            variant="banner"
+            label="កំពុងទាញប្រវត្តិស្តុកបន្ថែមពី Database.."
+            resetKey={stockLogs.length}
+          />
 
           {(remainingDomLogs > 0 || hasMoreStockLogs || stockLogs.length > 0) && (
             <Surface className="p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

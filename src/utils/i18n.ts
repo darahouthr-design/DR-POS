@@ -352,6 +352,8 @@ export interface TranslationDict {
     noMatchingOrders: string;
     atTime: string;
     dueAt: string;
+    invoiceCodeLabel: string;
+    paymentStatusLabel: string;
     customerLabel: string;
     phoneLabel: string;
     addressLabel: string;
@@ -1123,6 +1125,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       noMatchingOrders: 'មិនមានទិន្នន័យការបញ្ជាទិញតាមលក្ខខណ្ឌស្វែងរកទេ។',
       atTime: 'ម៉ោង',
       dueAt: 'ណាត់ទូទាត់៖',
+      invoiceCodeLabel: 'កូដ Invoice៖',
+      paymentStatusLabel: 'ស្ថានភាពទូទាត់៖',
       customerLabel: 'អតិថិជន៖',
       phoneLabel: 'ទូរស័ព្ទ៖',
       addressLabel: 'អាសយដ្ឋាន៖',
@@ -1913,6 +1917,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       noMatchingOrders: 'No orders match the current filters.',
       atTime: 'Time',
       dueAt: 'Due:',
+      invoiceCodeLabel: 'Invoice Code:',
+      paymentStatusLabel: 'Payment Status:',
       customerLabel: 'Customer:',
       phoneLabel: 'Phone:',
       addressLabel: 'Address:',
@@ -2701,6 +2707,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       noMatchingOrders: '검색 조건에 해당하는 주문이 없습니다.',
       atTime: '시간',
       dueAt: '결제예정일:',
+      invoiceCodeLabel: '주문번호:',
+      paymentStatusLabel: '결제 상태:',
       customerLabel: '고객:',
       phoneLabel: '전화:',
       addressLabel: '주소:',
