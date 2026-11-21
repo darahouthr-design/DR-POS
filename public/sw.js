@@ -1,4 +1,4 @@
-const CACHE_NAME = 'drpos-shell-v2';
+const CACHE_NAME = 'drpos-shell-v3';
 const FONT_CACHE_NAME = 'drpos-fonts-v1';
 
 const PRECACHE_ASSETS = [
