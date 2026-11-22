@@ -115,6 +115,9 @@ const TrackStaffView = React.lazy(() =>
 const AboutView = React.lazy(() =>
   import('./components/SettingsAndAboutViews').then((m) => ({ default: m.AboutView }))
 );
+const PrivacyPolicyView = React.lazy(() =>
+  import('./components/SettingsAndAboutViews').then((m) => ({ default: m.PrivacyPolicyView }))
+);
 const SettingsView = React.lazy(() =>
   import('./components/SettingsAndAboutViews').then((m) => ({ default: m.SettingsView }))
 );
@@ -282,6 +285,7 @@ const NAV_ITEMS: Array<{ id: PageId; icon: Icon3DName }> = [
   { id: 'price-record', icon: 'price-record' },
   { id: 'stock-log', icon: 'stock-log' },
   { id: 'settings', icon: 'settings' },
+  { id: 'privacy-policy', icon: 'privacy-policy' },
   { id: 'about', icon: 'about' },
 ];
 
@@ -292,6 +296,8 @@ const SALE_ALLOWED_PAGES: PageId[] = [
   'products',
   'due-payments',
   'settings',
+  'privacy-policy',
+  'about',
 ];
 
 const EMPTY_COLLECTION_READINESS: WorkspaceCollectionReadiness = {
@@ -316,6 +322,7 @@ const PAGE_DB_DEPS: Record<PageId, Array<keyof WorkspaceCollectionReadiness>> = 
   'price-record': ['priceRecords'],
   'stock-log': ['stockLogs', 'products'],
   settings: ['staff'],
+  'privacy-policy': [],
   about: [],
 };
 
@@ -2160,7 +2167,7 @@ export function App() {
                   type="button"
                   onClick={() =>
                     setActivePage(
-                      isSaleRole || blockedPages.includes('about') ? 'dashboard' : 'about'
+                      !isSaleRole && blockedPages.includes('about') ? 'dashboard' : 'about'
                     )
                   }
                   title="DR-POS App Profile"
@@ -2870,14 +2877,19 @@ export function App() {
               />
             )}
 
-            {!isSaleRole && activePage === 'about' && <AboutView />}
+            {(isSaleRole || !blockedPages.includes('privacy-policy')) &&
+              activePage === 'privacy-policy' && <PrivacyPolicyView />}
+
+            {(isSaleRole || !blockedPages.includes('about')) && activePage === 'about' && (
+              <AboutView />
+            )}
                 </Suspense>
               </>
             )}
           </main>
         </div>
 
-        {/* Mobile & Tablet Bottom Thumb-Zone Navigation Bar (Hidden for Mobile Sale which uses the 2x3 Home Launcher + Back button) */}
+        {/* Mobile & Tablet Bottom Thumb-Zone Navigation Bar (Hidden for Mobile Sale which uses the 2x4 Home Launcher + Back button) */}
         {!isSaleMobileMode && (
         <nav
           ref={setMobileNavEl}
@@ -2888,7 +2900,7 @@ export function App() {
         >
           <div
             className={`grid ${
-              isSaleRole ? 'grid-cols-6 max-w-3xl mx-auto' : 'grid-cols-5'
+              isSaleRole ? 'grid-cols-8 max-w-3xl mx-auto' : 'grid-cols-5'
             } items-center h-14 sm:h-15 px-1`}
           >
             {(isSaleRole

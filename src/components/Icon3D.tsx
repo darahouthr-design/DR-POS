@@ -14,6 +14,7 @@ export type Icon3DName =
   | 'price-record'
   | 'stock-log'
   | 'settings'
+  | 'privacy-policy'
   | 'about'
   | 'bell'
   | 'cart'
@@ -116,6 +117,7 @@ function getPaletteForIcon(name: Icon3DName): Palette {
     case 'staff-info':
     case 'user':
     case 'printer':
+    case 'privacy-policy':
       return PALETTES.sky;
     case 'stock-log':
     case 'upload':
@@ -325,6 +327,17 @@ function renderGlyph(name: Icon3DName, fillOrStroke: string): React.ReactNode {
           d="M22 23.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm9.5-3.5-2-1.2.2-2.3-2.1-2.1-2.3.2-1.2-2h-4.2l-1.2 2-2.3-.2-2.1 2.1.2 2.3-2 1.2v4l2 1.2-.2 2.3 2.1 2.1 2.3-.2 1.2 2h4.2l1.2-2 2.3.2 2.1-2.1-.2-2.3 2-1.2v-4Z"
           stroke={fillOrStroke}
           strokeWidth="2"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      );
+    case 'privacy-policy':
+      return (
+        <path
+          d="M22 11l8 3.2v5.4c0 4.9-3.2 8.7-8 10.4-4.8-1.7-8-5.5-8-10.4v-5.4L22 11Zm-2.6 9.5 1.9 1.9 3.6-3.8"
+          stroke={fillOrStroke}
+          strokeWidth="2.2"
+          strokeLinecap="round"
           strokeLinejoin="round"
           fill="none"
         />

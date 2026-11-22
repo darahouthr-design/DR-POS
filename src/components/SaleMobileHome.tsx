@@ -431,6 +431,163 @@ const ArtworkSettings3D: React.FC = () => (
   </svg>
 );
 
+/**
+ * 7. Privacy Policy — 3D Protective Shield & Padlock Illustration
+ */
+const ArtworkPrivacyPolicy3D: React.FC = () => (
+  <svg viewBox="0 0 120 114" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(14,26,115,0.34)]" aria-hidden="true">
+    <defs>
+      <linearGradient id="sm-priv-shield-back" x1="22" y1="14" x2="96" y2="104" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#2647b8" />
+        <stop offset="100%" stopColor="#12216b" />
+      </linearGradient>
+      <linearGradient id="sm-priv-shield-face" x1="22" y1="12" x2="94" y2="98" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#8ce4ff" />
+        <stop offset="48%" stopColor="#4bb3ff" />
+        <stop offset="100%" stopColor="#2268e6" />
+      </linearGradient>
+      <linearGradient id="sm-priv-inner" x1="34" y1="24" x2="84" y2="88" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#ffffff" />
+        <stop offset="100%" stopColor="#d7e8ff" />
+      </linearGradient>
+      <linearGradient id="sm-priv-lock" x1="46" y1="48" x2="74" y2="82" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#ffe175" />
+        <stop offset="100%" stopColor="#e69410" />
+      </linearGradient>
+    </defs>
+
+    {/* Ground shadow */}
+    <ellipse cx="60" cy="103" rx="35" ry="5.5" fill="#0d175e" fillOpacity="0.32" />
+
+    {/* Extruded 3D Shield Depth */}
+    <path
+      d="M62 14L96 27.5V54.5C96 76.5 81.8 94.5 62 102C42.2 94.5 28 76.5 28 54.5V27.5L62 14Z"
+      fill="url(#sm-priv-shield-back)"
+    />
+
+    {/* Front 3D Shield Face */}
+    <path
+      d="M58 11L92 24.5V51.5C92 73.5 77.8 91.5 58 99C38.2 91.5 24 73.5 24 51.5V24.5L58 11Z"
+      fill="url(#sm-priv-shield-face)"
+      stroke="#c7f2ff"
+      strokeWidth="1.8"
+    />
+
+    {/* Inner Glossy White Shield Inset */}
+    <path
+      d="M58 20L83 30V50.5C83 67.5 72.4 81.4 58 87.5C43.6 81.4 33 67.5 33 50.5V30L58 20Z"
+      fill="url(#sm-priv-inner)"
+    />
+
+    {/* Soft Left Gloss Reflection */}
+    <path
+      d="M58 20L33 30V50.5C33 67.5 43.6 81.4 58 87.5V20Z"
+      fill="#ffffff"
+      fillOpacity="0.32"
+    />
+
+    {/* 3D Golden Padlock Emblem */}
+    <path
+      d="M49.5 49V43.5C49.5 38.8 53.3 35 58 35C62.7 35 66.5 38.8 66.5 43.5V49"
+      stroke="#2b55c9"
+      strokeWidth="4.6"
+      strokeLinecap="round"
+    />
+    <rect x="45.5" y="49.5" width="27" height="22" rx="6.5" fill="#b36a05" />
+    <rect x="44.5" y="47.5" width="27" height="22" rx="6.5" fill="url(#sm-priv-lock)" stroke="#fff4c2" strokeWidth="1.3" />
+    <circle cx="58" cy="56.8" r="2.8" fill="#7a4400" />
+    <rect x="56.7" y="58.2" width="2.6" height="5.6" rx="1.3" fill="#7a4400" />
+
+    {/* Floating Green Verified Badge */}
+    <g transform="translate(88, 76)">
+      <circle cx="0" cy="2" r="12" fill="#06733b" />
+      <circle cx="0" cy="0" r="12" fill="#1ed76c" stroke="#d8ffea" strokeWidth="1.6" />
+      <path
+        d="M-4.8 0.3L-1.4 3.7L5.2 -3.2"
+        stroke="#ffffff"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
+  </svg>
+);
+
+/**
+ * 8. About — 3D Indigo-Gold App Information Emblem & Shield Illustration
+ */
+const ArtworkAbout3D: React.FC = () => (
+  <svg viewBox="0 0 120 112" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(32,20,120,0.34)]" aria-hidden="true">
+    <defs>
+      <linearGradient id="sm-about-card-back" x1="20" y1="22" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#65d4ff" />
+        <stop offset="100%" stopColor="#267de8" />
+      </linearGradient>
+      <linearGradient id="sm-about-disc" x1="28" y1="16" x2="92" y2="92" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#ffffff" />
+        <stop offset="65%" stopColor="#e3ecff" />
+        <stop offset="100%" stopColor="#bdd1ff" />
+      </linearGradient>
+      <linearGradient id="sm-about-rim" x1="24" y1="20" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#3c7cf0" />
+        <stop offset="100%" stopColor="#1e3c9c" />
+      </linearGradient>
+      <linearGradient id="sm-about-letter" x1="48" y1="30" x2="72" y2="82" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#5d4ef7" />
+        <stop offset="100%" stopColor="#2e1fb8" />
+      </linearGradient>
+      <linearGradient id="sm-about-star" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#fff099" />
+        <stop offset="100%" stopColor="#f5a614" />
+      </linearGradient>
+    </defs>
+
+    {/* Ground shadow */}
+    <ellipse cx="60" cy="100" rx="38" ry="6" fill="#211473" fillOpacity="0.3" />
+
+    {/* Tilted 3D App Document Card Behind */}
+    <g transform="rotate(-12 58 58)">
+      <rect x="20" y="23" width="66" height="64" rx="15" fill="#174494" />
+      <rect x="18" y="20" width="66" height="64" rx="15" fill="url(#sm-about-card-back)" />
+      <rect x="26" y="31" width="28" height="5" rx="2.5" fill="#ffffff" fillOpacity="0.65" />
+      <rect x="26" y="40" width="20" height="4" rx="2" fill="#ffffff" fillOpacity="0.4" />
+    </g>
+
+    {/* Main 3D Extruded Circular Info Medallion */}
+    <circle cx="66" cy="60" r="34" fill="url(#sm-about-rim)" />
+    <circle cx="64" cy="56" r="34" fill="url(#sm-about-disc)" stroke="#ffffff" strokeWidth="2" />
+    <circle cx="64" cy="56" r="27.5" fill="none" stroke="#85a6ff" strokeWidth="1.5" strokeOpacity="0.45" />
+
+    {/* Raised 3D "i" Emblem */}
+    <circle cx="65.2" cy="41.5" r="5.4" fill="#b7c6ff" />
+    <circle cx="64" cy="40.5" r="5.4" fill="url(#sm-about-letter)" />
+    <rect x="60.4" y="51.2" width="9.2" height="23.5" rx="4.6" fill="#b7c6ff" />
+    <rect x="59.4" y="50" width="9.2" height="23.5" rx="4.6" fill="url(#sm-about-letter)" />
+
+    {/* Gloss Highlight Arc */}
+    <path
+      d="M41 44C45.5 34.5 54.5 29 64.5 29"
+      stroke="#ffffff"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeOpacity="0.85"
+    />
+
+    {/* Floating 3D Golden Star Badge */}
+    <g transform="translate(94, 24)">
+      <path
+        d="M0 -11L2.9 -3.2L11 -0.5L2.9 2.3L0 10.5L-2.9 2.3L-11 -0.5L-2.9 -3.2L0 -11Z"
+        fill="#b86c04"
+        transform="translate(0, 1.8)"
+      />
+      <path
+        d="M0 -11L2.9 -3.2L11 -0.5L2.9 2.3L0 10.5L-2.9 2.3L-11 -0.5L-2.9 -3.2L0 -11Z"
+        fill="url(#sm-about-star)"
+      />
+    </g>
+  </svg>
+);
+
 const LAUNCHER_TILES: LauncherTileConfig[] = [
   {
     id: 'dashboard',
@@ -467,6 +624,18 @@ const LAUNCHER_TILES: LauncherTileConfig[] = [
     gradientClass: 'bg-gradient-to-br from-[#20dacb] via-[#0db3a8] to-[#058a84]',
     shadowClass: 'shadow-[0_12px_26px_-8px_rgba(5,138,132,0.4)]',
     renderArtwork: () => <ArtworkSettings3D />,
+  },
+  {
+    id: 'privacy-policy',
+    gradientClass: 'bg-gradient-to-br from-[#4d79ff] via-[#3155f2] to-[#1b34c4]',
+    shadowClass: 'shadow-[0_12px_26px_-8px_rgba(27,52,196,0.42)]',
+    renderArtwork: () => <ArtworkPrivacyPolicy3D />,
+  },
+  {
+    id: 'about',
+    gradientClass: 'bg-gradient-to-br from-[#9e6bff] via-[#7c46f5] to-[#5a22d9]',
+    shadowClass: 'shadow-[0_12px_26px_-8px_rgba(90,34,217,0.42)]',
+    renderArtwork: () => <ArtworkAbout3D />,
   },
 ];
 

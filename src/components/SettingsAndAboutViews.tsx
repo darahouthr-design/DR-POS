@@ -67,6 +67,7 @@ const BLOCKABLE_PAGE_IDS: PageId[] = [
   'staff-info',
   'price-record',
   'stock-log',
+  'privacy-policy',
   'about',
 ];
 
@@ -2325,12 +2326,17 @@ export const AboutView: React.FC = () => {
   }));
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 sm:space-y-6">
-      <Surface className="p-4 sm:p-8 space-y-5 sm:space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/50 pb-6">
-          <DrPosLogo size={64} showTagline />
-          <div className="flex flex-col sm:items-end gap-2">
-            <span className="text-xs font-medium text-muted">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+      className="mx-auto w-full max-w-5xl space-y-4 sm:space-y-6 pb-2"
+    >
+      <Surface className="p-4 sm:p-8 space-y-5 sm:space-y-6 overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/50 pb-5 sm:pb-6">
+          <DrPosLogo size={58} showTagline />
+          <div className="flex flex-col items-start sm:items-end gap-2">
+            <span className="text-xs font-medium text-muted leading-relaxed">
               {t.about.tagline}
             </span>
             <div className="inline-flex items-center gap-2 rounded-control border border-primary/45 bg-gradient-to-r from-primary/15 via-primary/10 to-accent/15 px-3 py-1.5 shadow-xs">
@@ -2345,44 +2351,338 @@ export const AboutView: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3.5 sm:space-y-4">
           <h2 className="text-base font-semibold text-foreground">{t.about.keyFeaturesTitle}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-3.5">
             {features.map((f, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-3.5 rounded-card border border-border/70 p-4"
+                className="flex items-center gap-3.5 rounded-card border border-border/70 bg-background/40 p-3.5 sm:p-4 transition-colors hover:border-primary/40"
               >
-                <Icon3D name={f.icon} size={34} />
-                <span className="text-sm font-medium text-foreground">{f.text}</span>
+                <div className="shrink-0">
+                  <Icon3D name={f.icon} size={34} />
+                </div>
+                <span className="text-sm font-medium text-foreground leading-snug">{f.text}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="border-t border-border/50 pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
+        <div className="border-t border-border/50 pt-5 sm:pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">
             <CambodiaFlagAnimated className="shrink-0" />
             <div className="min-w-0">
               <p className="text-xs text-muted">{t.about.developerLabel}</p>
-              <p className="text-lg font-bold text-foreground">{t.about.developerName}</p>
-              <p className="text-sm text-primary font-medium">{t.about.developerRole}</p>
+              <p className="text-base sm:text-lg font-bold text-foreground truncate">
+                {t.about.developerName}
+              </p>
+              <p className="text-xs sm:text-sm text-primary font-medium leading-snug">
+                {t.about.developerRole}
+              </p>
             </div>
           </div>
 
-          <div className="relative overflow-hidden rounded-card border-2 border-primary/45 bg-gradient-to-br from-primary/15 via-surface to-accent/15 px-5 py-3 shadow-sm sm:text-right shrink-0">
+          <div className="relative overflow-hidden rounded-card border-2 border-primary/45 bg-gradient-to-br from-primary/15 via-surface to-accent/15 px-4 sm:px-5 py-3 shadow-sm sm:text-right shrink-0">
             <div className="flex items-center sm:justify-end gap-2">
               <span className="h-2 w-2 rounded-xs bg-primary shrink-0" aria-hidden="true" />
               <p className="text-xs font-extrabold uppercase tracking-wider text-primary">
                 {t.about.versionLabel}
               </p>
             </div>
-            <p className="mt-1 text-lg font-extrabold tracking-tight text-foreground font-mono tabular-nums">
+            <p className="mt-1 text-base sm:text-lg font-extrabold tracking-tight text-foreground font-mono tabular-nums">
               {appVersion}
             </p>
           </div>
         </div>
       </Surface>
-    </div>
+    </motion.div>
+  );
+};
+
+/* =========================================================
+   13. PRIVACY POLICY VIEW
+   ========================================================= */
+interface PrivacySectionBlock {
+  number: string;
+  title: string;
+  intro?: string;
+  bullets?: Array<{ label: string; text: string; isEmail?: boolean }>;
+  numberedItems?: Array<{ num: number; label: string; text: string }>;
+  body?: string;
+}
+
+const PRIVACY_POLICY_SECTIONS: PrivacySectionBlock[] = [
+  {
+    number: '1',
+    title: 'Information We Collect',
+    intro:
+      'To ensure smooth sales operations, inventory tracking, and accurate reporting, we collect the following types of information:',
+    bullets: [
+      {
+        label: 'Account & Administrator Details:',
+        text: 'Name, email address, phone number, administrative role (Super Admin / Staff), and encrypted authentication credentials (hashed passwords and security PINs).',
+      },
+      {
+        label: 'Transaction & Sales Data:',
+        text: 'Item lists, pricing, sales volumes, receipt records, payment methods, transaction timestamps, and financial summaries.',
+      },
+      {
+        label: 'Customer & Delivery Information:',
+        text: 'Customer names, phone numbers, and shipping addresses (when entered for order fulfillment and courier tracking).',
+      },
+      {
+        label: 'Technical & Device Information:',
+        text: 'IP addresses, browser types, device/hardware specifications, session logs, and access timestamps collected to detect fraudulent activities, automated bots, and unauthorized intrusions.',
+      },
+    ],
+  },
+  {
+    number: '2',
+    title: 'How We Use Your Information',
+    intro: 'We process and utilize the collected data strictly for operational purposes:',
+    numberedItems: [
+      {
+        num: 1,
+        label: 'Core Operations:',
+        text: 'Providing reliable point-of-sale functionality, real-time inventory management, and daily cash flow tracking.',
+      },
+      {
+        num: 2,
+        label: 'Account Security & Verification:',
+        text: 'Authenticating Super Admin identities via automated One-Time Password (Email OTP) delivery during registration and critical administrative actions.',
+      },
+      {
+        num: 3,
+        label: 'Business Intelligence:',
+        text: 'Generating analytics, sales summaries, and exportable financial reports for store owners.',
+      },
+      {
+        num: 4,
+        label: 'Platform Security:',
+        text: 'Defending against automated bot attacks, unauthorized access attempts, and distributed threats using rate limiting and puzzle CAPTCHA mechanisms.',
+      },
+      {
+        num: 5,
+        label: 'Technical Support:',
+        text: 'Diagnosing system faults, synchronization errors, and operational issues.',
+      },
+    ],
+  },
+  {
+    number: '3',
+    title: 'Data Storage & Security',
+    bullets: [
+      {
+        label: 'Storage Architecture:',
+        text: 'All structured operational and reporting data is securely maintained in managed cloud databases, paired with local browser storage (Local Storage / IndexedDB) for offline caching and fast front-end rendering.',
+      },
+      {
+        label: 'Transmission Security:',
+        text: 'All communications between client devices and servers are strictly enforced over HTTPS protocols with Transport Layer Security (TLS/SSL encryption in transit).',
+      },
+      {
+        label: 'Credential Protection:',
+        text: 'Passwords and authentication secrets are irreversibly hashed and salted; plaintext credentials are never logged or stored.',
+      },
+      {
+        label: 'Access Control:',
+        text: 'System administrative privileges are governed by multi-factor checks, including puzzle verification and email-based OTP challenges.',
+      },
+    ],
+  },
+  {
+    number: '4',
+    title: 'Third-Party Disclosures & Sharing',
+    intro:
+      'We do not sell, trade, rent, or disclose your business transaction records or personal information to third parties for marketing or advertising purposes. Disclosures occur only in the following contexts:',
+    bullets: [
+      {
+        label: 'Infrastructure & Service Providers:',
+        text: 'Trusted cloud infrastructure platforms, managed database clusters, and transactional email relay services (such as SMTP gateways for automated OTP delivery) operating under strict data confidentiality obligations.',
+      },
+      {
+        label: 'Legal Compliance:',
+        text: 'In response to lawful requests, official search warrants, court orders, or mandatory government inquiries under applicable regulatory frameworks.',
+      },
+    ],
+  },
+  {
+    number: '5',
+    title: 'Data Ownership & User Rights',
+    intro:
+      'You maintain full ownership of your business data. Within the application, you retain the right to:',
+    bullets: [
+      {
+        label: 'Access & Rectify:',
+        text: 'Inspect, edit, and update staff account credentials, catalog inventories, and store profile information at any time.',
+      },
+      {
+        label: 'Data Portability:',
+        text: 'Export transaction records, inventory reports, and customer delivery logs in standard formats (such as Excel, CSV, or PDF).',
+      },
+      {
+        label: 'Account & Data Deletion:',
+        text: 'Request the complete erasure of your administrative profile and historical store data from our active databases, subject to any statutory accounting retention periods.',
+      },
+    ],
+  },
+  {
+    number: '6',
+    title: 'Modifications to This Policy',
+    body: 'We may update this Privacy Policy periodically to reflect new software features, security updates, or adjustments in statutory standards. Any revisions will be published directly within the application, accompanied by an updated "Last Updated" timestamp at the top of this document.',
+  },
+  {
+    number: '7',
+    title: 'Contact Information',
+    intro:
+      'If you have inquiries, security concerns, or requests regarding this Privacy Policy or your data, please contact:',
+    bullets: [
+      {
+        label: 'Lead Developer & Administrator:',
+        text: 'Huot Dara',
+      },
+      {
+        label: 'Application Name:',
+        text: 'DR-POS Web Application',
+      },
+      {
+        label: 'Official Support Email:',
+        text: 'darahouthr@gmail.com',
+        isEmail: true,
+      },
+    ],
+  },
+];
+
+export const PrivacyPolicyView: React.FC = () => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 24, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 360, damping: 28, mass: 0.82 }}
+      className="mx-auto w-full max-w-4xl space-y-4 sm:space-y-5 pb-3"
+    >
+      <Surface className="p-4 sm:p-8 space-y-5 sm:space-y-6 overflow-hidden">
+        {/* Standard Legal Document Header */}
+        <div className="space-y-4 border-b border-border/60 pb-5 sm:pb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="shrink-0">
+                <Icon3D name="privacy-policy" size={44} />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground leading-tight">
+                  Privacy Policy
+                </h1>
+                <p className="mt-1 text-xs sm:text-sm font-medium text-primary">
+                  DR-POS Web Application
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap sm:flex-col sm:items-end gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-control border border-primary/35 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                <Shield className="h-3.5 w-3.5 shrink-0" />
+                <span>Last Updated: November 22, 2026</span>
+              </span>
+              <span className="text-xs font-medium text-muted">
+                Developer &amp; System Administrator:{' '}
+                <strong className="text-foreground">Huot Dara</strong>
+              </span>
+            </div>
+          </div>
+
+          <p className="rounded-card border border-border/70 bg-background/60 p-3.5 sm:p-4 text-xs sm:text-sm leading-relaxed text-foreground/90">
+            This Privacy Policy describes how the DR-POS Web Application (&quot;we&quot;,
+            &quot;us&quot;, or &quot;the System&quot;) collects, uses, stores, and protects your
+            personal information and business transaction data when you access and use our
+            web-based Point of Sale application.
+          </p>
+        </div>
+
+        {/* Structured Numbered Sections */}
+        <div className="space-y-3.5 sm:space-y-4">
+          {PRIVACY_POLICY_SECTIONS.map((sec, idx) => (
+            <motion.section
+              key={sec.number}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                type: 'spring',
+                stiffness: 380,
+                damping: 30,
+                delay: 0.04 + idx * 0.035,
+              }}
+              className="rounded-card border border-border/75 bg-background/40 p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-primary/14 text-xs font-extrabold tabular-nums text-primary">
+                  {sec.number}
+                </span>
+                <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug">
+                  {sec.title}
+                </h2>
+              </div>
+
+              {sec.intro && (
+                <p className="text-xs sm:text-sm leading-relaxed text-muted">{sec.intro}</p>
+              )}
+
+              {sec.body && (
+                <p className="text-xs sm:text-sm leading-relaxed text-foreground/90">{sec.body}</p>
+              )}
+
+              {sec.bullets && (
+                <ul className="space-y-2.5 pl-1">
+                  {sec.bullets.map((item) => (
+                    <li
+                      key={item.label}
+                      className="flex items-start gap-2.5 text-xs sm:text-sm leading-relaxed text-foreground/90"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="mt-2 h-1.5 w-1.5 rounded-full bg-primary shrink-0"
+                      />
+                      <span className="min-w-0">
+                        <strong className="font-semibold text-foreground">{item.label}</strong>{' '}
+                        {item.isEmail ? (
+                          <a
+                            href={`mailto:${item.text}`}
+                            className="font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary break-all"
+                          >
+                            {item.text}
+                          </a>
+                        ) : (
+                          item.text
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {sec.numberedItems && (
+                <ol className="space-y-2.5 pl-1">
+                  {sec.numberedItems.map((item) => (
+                    <li
+                      key={item.num}
+                      className="flex items-start gap-2.5 text-xs sm:text-sm leading-relaxed text-foreground/90"
+                    >
+                      <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/12 text-[11px] font-bold tabular-nums text-primary">
+                        {item.num}
+                      </span>
+                      <span className="min-w-0">
+                        <strong className="font-semibold text-foreground">{item.label}</strong>{' '}
+                        {item.text}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </motion.section>
+          ))}
+        </div>
+      </Surface>
+    </motion.div>
   );
 };

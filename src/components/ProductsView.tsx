@@ -71,6 +71,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [scannerMode, setScannerMode] = useState<'toolbar' | 'form' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearch = useDeferredValue(searchQuery);
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [warehouseFilter, setWarehouseFilter] = useState<string>('ALL');
   const [photoCameraTarget, setPhotoCameraTarget] = useState<
     { mode: 'form' } | { mode: 'item'; product: Product } | null
   >(null);
@@ -95,17 +97,66 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [visibleProdCount, setVisibleProdCount] = useState(PRODUCTS_DOM_STEP);
   const longPressTimerRef = useRef<number | null>(null);
 
+  const filterCategoryOptions = useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+    for (const c of settings.categories) {
+      const clean = String(c || '').trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        list.push(clean);
+      }
+    }
+    for (const p of localOrder) {
+      const clean = String(p.category || '').trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        list.push(clean);
+      }
+    }
+    return list;
+  }, [settings.categories, localOrder]);
+
+  const filterWarehouseOptions = useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+    for (const w of settings.warehouses) {
+      const clean = String(w || '').trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        list.push(clean);
+      }
+    }
+    for (const p of localOrder) {
+      const clean = String(p.warehouse || '').trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        list.push(clean);
+      }
+    }
+    return list;
+  }, [settings.warehouses, localOrder]);
+
   const trimmedSearch = deferredSearch.trim().toLowerCase();
-  const isFiltering = trimmedSearch.length > 0;
+  const isFiltering =
+    trimmedSearch.length > 0 ||
+    categoryFilter !== 'ALL' ||
+    (!hideWarehouse && warehouseFilter !== 'ALL');
 
   const filteredProducts = useMemo(() => {
-    if (!trimmedSearch) return localOrder;
-    return localOrder.filter(
-      (p) =>
+    return localOrder.filter((p) => {
+      if (categoryFilter !== 'ALL' && p.category !== categoryFilter) return false;
+      if (!hideWarehouse && warehouseFilter !== 'ALL' && p.warehouse !== warehouseFilter) {
+        return false;
+      }
+      if (!trimmedSearch) return true;
+      return (
         p.name.toLowerCase().includes(trimmedSearch) ||
-        (p.barcode || '').toLowerCase().includes(trimmedSearch)
-    );
-  }, [localOrder, trimmedSearch]);
+        (p.barcode || '').toLowerCase().includes(trimmedSearch) ||
+        (p.category || '').toLowerCase().includes(trimmedSearch)
+      );
+    });
+  }, [localOrder, trimmedSearch, categoryFilter, warehouseFilter, hideWarehouse]);
 
   const visibleProductsList = useMemo(
     () =>
@@ -212,6 +263,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
     if (matched) {
       setActiveReorderId(null);
+      setCategoryFilter('ALL');
+      setWarehouseFilter('ALL');
       setSearchQuery(matched.barcode?.trim() || matched.name);
       setFeedback(
         t.products.scanFoundMsg.replace('{name}', matched.name).replace('{code}', code)
@@ -498,35 +551,90 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
           </div>
         </div>
 
-        {/* Search by Product Name / Barcode + Live Result Counter */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
-          <div className="relative flex-1 min-w-0">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t.products.searchPlaceholder}
-              aria-label={t.products.searchPlaceholder}
-              className={`${inputClass} pl-10 ${searchQuery ? 'pr-10' : ''}`}
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label={t.products.clearSearchBtn}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground hover:bg-background cursor-pointer"
+        {/* Search + Side-by-Side Category & Warehouse Filters + Live Result Counter */}
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-3">
+            <div className="relative lg:col-span-5 min-w-0">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t.products.searchPlaceholder}
+                aria-label={t.products.searchPlaceholder}
+                className={`${inputClass} pl-10 ${searchQuery ? 'pr-10' : ''}`}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label={t.products.clearSearchBtn}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-control text-muted hover:text-foreground hover:bg-background cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div
+              className={`grid ${
+                hideWarehouse ? 'grid-cols-1' : 'grid-cols-2'
+              } gap-2.5 sm:gap-3 lg:col-span-7`}
+            >
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className={inputClass}
+                aria-label={t.pos.allCategories}
               >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
+                <option value="ALL">{t.pos.allCategories}</option>
+                {filterCategoryOptions.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+
+              {!hideWarehouse && (
+                <select
+                  value={warehouseFilter}
+                  onChange={(e) => setWarehouseFilter(e.target.value)}
+                  className={inputClass}
+                  aria-label={t.pos.allWarehouses}
+                >
+                  <option value="ALL">{t.pos.allWarehouses}</option>
+                  {filterWarehouseOptions.map((wh) => (
+                    <option key={wh} value={wh}>
+                      {wh}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
+
           {localOrder.length > 0 && (
-            <span className="text-xs font-medium text-muted tabular-nums shrink-0 sm:px-1">
-              {t.products.searchCountLabel
-                .replace('{shown}', String(filteredProducts.length))
-                .replace('{total}', String(localOrder.length))}
-            </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted tabular-nums">
+                {t.products.searchCountLabel
+                  .replace('{shown}', String(filteredProducts.length))
+                  .replace('{total}', String(localOrder.length))}
+              </span>
+              {isFiltering && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setCategoryFilter('ALL');
+                    setWarehouseFilter('ALL');
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  <span>{t.products.clearSearchBtn}</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -568,18 +676,24 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
           ) : filteredProducts.length === 0 ? (
             <div className="py-10 text-center space-y-3">
               <p className="text-sm text-muted">
-                {t.products.noSearchResults.replace('{query}', searchQuery.trim())}
+                {searchQuery.trim()
+                  ? t.products.noSearchResults.replace('{query}', searchQuery.trim())
+                  : t.pos.noMatchingProducts}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button
                   tone="quiet"
-                  onClick={() => setSearchQuery('')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    setCategoryFilter('ALL');
+                    setWarehouseFilter('ALL');
+                  }}
                   className="whitespace-nowrap"
                 >
                   <X className="h-4 w-4 shrink-0" />
                   <span>{t.products.clearSearchBtn}</span>
                 </Button>
-                {!readOnly && (
+                {!readOnly && searchQuery.trim() && (
                   <Button
                     tone="primary"
                     onClick={() => openAddModal({ name: searchQuery.trim() })}
@@ -593,7 +707,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                 )}
               </div>
             </div>
-          ) : null}
+          ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-1 gap-2.5 sm:gap-3.5 lg:gap-3">
           {visibleProductsList.map((prod) => {
             const orderIdx = localOrder.findIndex((item) => item.id === prod.id);
             const idx = orderIdx >= 0 ? orderIdx : 0;
@@ -628,13 +743,160 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                 }}
                 onPointerUp={clearLongPressTimer}
                 onPointerLeave={clearLongPressTimer}
-                className={`rounded-card border p-4 transition-colors ${
+                className={`rounded-card border p-2.5 sm:p-3.5 lg:p-4 flex flex-col justify-between transition-colors ${
                   isReordering
                     ? 'border-primary bg-primary/8 shadow-float cursor-grabbing'
+                    : prod.stock <= 0
+                    ? 'border-danger/40 bg-surface'
                     : 'border-border/80 bg-surface'
                 }`}
               >
-                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 xl:gap-4">
+                {/* Mobile & Tablet (< lg): 2-Column POS-Style Product Card */}
+                <div className="flex flex-col justify-between h-full space-y-2.5 sm:space-y-3 lg:hidden">
+                  <div className="space-y-2 sm:space-y-2.5">
+                    <div className="relative">
+                      <ProductImage
+                        src={prod.imageUrl}
+                        alt={prod.name}
+                        className="h-28 sm:h-40 w-full"
+                        onZoom={onZoomImage}
+                      />
+                      <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-control bg-surface/90 backdrop-blur-xs border border-border/60 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-muted shadow-xs">
+                        #{idx + 1}
+                      </span>
+                      {prod.stock <= 0 && (
+                        <span className="pointer-events-none absolute top-1.5 right-1.5 rounded-control bg-danger px-2 py-0.5 text-[10px] font-bold text-danger-foreground shadow-xs">
+                          {t.pos.outOfStockBadge}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="min-w-0 space-y-0.5">
+                      <h4
+                        className="font-semibold text-xs sm:text-sm text-foreground line-clamp-2 leading-snug"
+                        title={prod.name}
+                      >
+                        {prod.name}
+                      </h4>
+                      <p className="text-[11px] sm:text-xs text-muted truncate">
+                        {prod.category}
+                        {!hideWarehouse && prod.warehouse ? ` · ${prod.warehouse}` : ''}
+                      </p>
+                      {prod.barcode && (
+                        <p className="text-[10px] sm:text-[11px] font-mono text-muted/85 truncate">
+                          {prod.barcode}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border/50 pt-2 sm:pt-2.5 space-y-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-1">
+                      <div className="min-w-0">
+                        <span className="text-sm sm:text-base font-bold tabular-nums text-primary">
+                          {formatMoney(effective, currency)}
+                        </span>
+                        {prod.promotion > 0 && (
+                          <span className="ml-1 text-[10px] sm:text-xs line-through text-muted tabular-nums">
+                            {formatMoney(prod.sellingPrice, currency)}
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-[11px] sm:text-xs tabular-nums ${
+                          prod.stock <= 0
+                            ? 'text-danger font-bold'
+                            : prod.stock <= 10
+                            ? 'text-danger font-semibold'
+                            : 'text-muted font-semibold'
+                        }`}
+                      >
+                        {t.products.stockPrefix} {prod.stock}
+                      </span>
+                    </div>
+
+                    {!readOnly && (
+                      <div className="text-[11px] text-muted tabular-nums">
+                        {t.products.costPrefix}{' '}
+                        <strong className="text-foreground">
+                          {formatMoney(prod.costPrice, currency)}
+                        </strong>
+                      </div>
+                    )}
+
+                    {!readOnly && (
+                      <div
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          clearLongPressTimer();
+                        }}
+                        className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-border/40"
+                      >
+                        <Button
+                          tone="quiet"
+                          onClick={() => moveItemByIndex(idx, -1)}
+                          disabled={idx === 0 || isFiltering}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                          title={t.products.moveUp}
+                          aria-label={t.products.moveUp}
+                        >
+                          <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+                        </Button>
+                        <Button
+                          tone="quiet"
+                          onClick={() => moveItemByIndex(idx, 1)}
+                          disabled={idx === localOrder.length - 1 || isFiltering}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                          title={t.products.moveDown}
+                          aria-label={t.products.moveDown}
+                        >
+                          <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+                        </Button>
+                        <Button
+                          tone="quiet"
+                          onClick={() => openItemCamera(prod)}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                          title={t.ui.cameraPhotoTitle}
+                          aria-label={t.products.capturePhotoBtn}
+                        >
+                          <Camera className="h-3.5 w-3.5 text-primary shrink-0" />
+                        </Button>
+                        <Button
+                          tone={quickStockId === prod.id ? 'primary' : 'quiet'}
+                          onClick={() => toggleQuickStock(prod)}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                          title={t.products.adjustStockBtn}
+                          aria-label={t.products.adjustStockBtn}
+                        >
+                          <PackagePlus
+                            className={`h-3.5 w-3.5 shrink-0 ${
+                              quickStockId === prod.id ? '' : 'text-primary'
+                            }`}
+                          />
+                        </Button>
+                        <Button
+                          tone="quiet"
+                          onClick={() => loadForEdit(prod)}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                        >
+                          <Icon3D name="edit" size={14} />{' '}
+                          <span className="truncate">{t.common.edit}</span>
+                        </Button>
+                        <Button
+                          tone="danger"
+                          onClick={() => onDeleteProduct(prod.id)}
+                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
+                        >
+                          <Icon3D name="trash" size={14} />{' '}
+                          <span className="truncate">{t.common.delete}</span>
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Desktop (>= lg): Full-width Horizontal Product Management Row */}
+                <div className="hidden lg:flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 xl:gap-4">
                   <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
                     {!readOnly && (
                       <div
@@ -752,14 +1014,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       e.stopPropagation();
                       clearLongPressTimer();
                     }}
-                    className="mt-3 pt-3 border-t border-border/60 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5"
+                    className="mt-2.5 lg:mt-3 pt-2.5 lg:pt-3 border-t border-border/60 flex flex-col lg:flex-row lg:items-center justify-between gap-2"
                   >
                     {(() => {
                       const delta = parseSignedDelta(quickStockInput);
                       const nextStock = Math.max(0, prod.stock + delta);
                       return (
                         <>
-                          <div className="flex flex-wrap items-center gap-2 text-xs tabular-nums">
+                          <div className="flex flex-wrap items-center gap-1.5 lg:gap-2 text-[11px] lg:text-xs tabular-nums">
                             <span className="text-muted">
                               {t.products.oldStockLabel} <strong className="text-foreground">{prod.stock}</strong>
                             </span>
@@ -779,7 +1041,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5 lg:gap-2 w-full lg:w-auto">
                             <input
                               type="text"
                               autoFocus
@@ -795,27 +1057,29 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                                 }
                               }}
                               placeholder={t.products.placeholderStockAdjust}
-                              className={`${inputClass} min-h-10 sm:w-44 tabular-nums`}
+                              className={`${inputClass} min-h-9 lg:min-h-10 w-full lg:w-44 text-xs tabular-nums`}
                             />
-                            <Button
-                              tone="primary"
-                              onClick={() => handleQuickStockSave(prod)}
-                              disabled={quickStockSaving || delta === 0}
-                              className="min-h-10 px-3 text-xs shrink-0 whitespace-nowrap"
-                            >
-                              {quickStockSaving ? t.common.saving : t.common.save}
-                            </Button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQuickStockId(null);
-                                setQuickStockInput('');
-                              }}
-                              aria-label={t.common.close}
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center gap-1.5 w-full lg:w-auto">
+                              <Button
+                                tone="primary"
+                                onClick={() => handleQuickStockSave(prod)}
+                                disabled={quickStockSaving || delta === 0}
+                                className="flex-1 lg:flex-none min-h-9 lg:min-h-10 px-2.5 lg:px-3 text-xs shrink-0 whitespace-nowrap"
+                              >
+                                {quickStockSaving ? t.common.saving : t.common.save}
+                              </Button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuickStockId(null);
+                                  setQuickStockInput('');
+                                }}
+                                aria-label={t.common.close}
+                                className="inline-flex h-9 w-9 lg:h-10 lg:w-10 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                         </>
                       );
@@ -825,6 +1089,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
               </motion.div>
             );
           })}
+          </div>
+          )}
           {remainingProdCount > 0 && (
             <div className="pt-2 flex justify-center">
               <Button

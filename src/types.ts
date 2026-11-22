@@ -11,6 +11,7 @@ export type PageId =
   | 'price-record'
   | 'stock-log'
   | 'settings'
+  | 'privacy-policy'
   | 'about';
 
 export type LanguageCode = 'kh' | 'en' | 'kr';

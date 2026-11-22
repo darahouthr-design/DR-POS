@@ -9,6 +9,8 @@ export interface TranslationDict {
     products: string;
     'due-payments': string;
     settings: string;
+    'privacy-policy': string;
+    about: string;
     menu: string;
   };
   common: {
@@ -771,6 +773,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       'price-record': 'កំណត់ត្រាតម្លៃ',
       'stock-log': 'ប្រវត្តិស្តុក',
       settings: 'ការកំណត់',
+      'privacy-policy': 'គោលការណ៍ឯកជនភាព',
       about: 'អំពីកម្មវិធី',
     },
     navShort: {
@@ -780,6 +783,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       products: 'ទំនិញ',
       'due-payments': 'ណាត់ទូទាត់',
       settings: 'ការកំណត់',
+      'privacy-policy': 'ឯកជនភាព',
+      about: 'អំពី',
       menu: 'ម៉ឺនុយ',
     },
     common: {
@@ -1109,7 +1114,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       totalAmountLabel: 'សរុបទឹកប្រាក់៖',
       saleOnlyHint: '· ឃើញតែ Orders ផ្ទាល់ខ្លួនប៉ុណ្ណោះ',
       filtersBtn: 'តម្រង',
-      printWidthLabel: 'ខ្នាតព្រីន៖',
+      printWidthLabel: 'កំណត់ខ្នាតព្រីន',
       exportExcelBtn: 'Export Excel',
       fromDate: 'ចាប់ពីថ្ងៃ/ខែ/ឆ្នាំ',
       toDate: 'រហូតដល់ថ្ងៃ/ខែ/ឆ្នាំ',
@@ -1530,7 +1535,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       savedFeedbackMsg: 'បានរក្សាទុកព័ត៌មានផ្ទាល់ខ្លួនជោគជ័យ!',
     },
     about: {
-      tagline: 'ប្រព័ន្ធគ្រប់គ្រងការលក់ Realtime ស្តង់ដារអាជីវកម្ម',
+      tagline: 'ប្រព័ន្ធគ្រប់គ្រងការលក់ស្តង់ដារអាជីវកម្ម',
       keyFeaturesTitle: 'មុខងារសំខាន់ៗ',
       features: [
         'លក់ទំនិញយ៉ាងលឿន (បញ្ចូលការលក់ថ្មី)',
@@ -1563,6 +1568,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       'price-record': 'Price Record',
       'stock-log': 'Stock Log',
       settings: 'Settings',
+      'privacy-policy': 'Privacy Policy',
       about: 'About',
     },
     navShort: {
@@ -1572,6 +1578,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       products: 'Products',
       'due-payments': 'Due Pay',
       settings: 'Settings',
+      'privacy-policy': 'Privacy',
+      about: 'About',
       menu: 'Menu',
     },
     common: {
@@ -1901,7 +1909,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       totalAmountLabel: 'Total Amount:',
       saleOnlyHint: '· Showing only your own orders',
       filtersBtn: 'Filters',
-      printWidthLabel: 'Print Width:',
+      printWidthLabel: 'Print Size',
       exportExcelBtn: 'Export Excel',
       fromDate: 'From Date',
       toDate: 'To Date',
@@ -2353,6 +2361,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       'price-record': '가격 기록',
       'stock-log': '재고 기록',
       settings: '환경 설정',
+      'privacy-policy': '개인정보 처리방침',
       about: '프로그램 정보',
     },
     navShort: {
@@ -2362,6 +2371,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       products: '상품',
       'due-payments': '미수금',
       settings: '설정',
+      'privacy-policy': '개인정보',
+      about: '정보',
       menu: '메뉴',
     },
     common: {
@@ -2691,7 +2702,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       totalAmountLabel: '총 합계 금액:',
       saleOnlyHint: '· 본인 주문 내역만 표시됩니다',
       filtersBtn: '필터',
-      printWidthLabel: '용지 폭:',
+      printWidthLabel: '인쇄 용지',
       exportExcelBtn: 'Excel 내보내기',
       fromDate: '시작일 (From Date)',
       toDate: '종료일 (To Date)',

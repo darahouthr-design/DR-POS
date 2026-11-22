@@ -487,6 +487,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | 'paid' | 'unpaid'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [printSizeModalOpen, setPrintSizeModalOpen] = useState(false);
   const [visibleDomCount, setVisibleDomCount] = useState(DOM_PAGE_STEP);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -652,13 +653,15 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [editStockError, setEditStockError] = useState('');
 
   useEffect(() => {
-    if (!productPickerOpen && !reportOrder && !filtersOpen) return;
+    if (!productPickerOpen && !reportOrder && !filtersOpen && !printSizeModalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (productPickerOpen) {
           setProductPickerOpen(false);
         } else if (reportOrder) {
           setReportOrder(null);
+        } else if (printSizeModalOpen) {
+          setPrintSizeModalOpen(false);
         } else if (filtersOpen) {
           setFiltersOpen(false);
         }
@@ -666,7 +669,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [productPickerOpen, reportOrder, filtersOpen]);
+  }, [productPickerOpen, reportOrder, filtersOpen, printSizeModalOpen]);
 
   const sortedPickerProducts = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
@@ -870,78 +873,87 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
-            <Button
-              tone={filtersOpen || activeFilterCount > 0 ? 'primary' : 'quiet'}
-              onClick={() => setFiltersOpen(true)}
-              className="w-full sm:w-auto min-h-10 px-3.5 text-xs whitespace-nowrap"
-            >
-              <SlidersHorizontal className="h-4 w-4 shrink-0" />
-              <span>
-                {t.orders.filtersBtn}
-                {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-              </span>
-            </Button>
+          <div className="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2 w-full lg:w-auto">
+            {/* Row 1 (Mobile & Tablet side-by-side): Filter & Print Size Settings Button */}
+            <div className="grid grid-cols-2 lg:flex lg:items-center gap-2">
+              <Button
+                tone={filtersOpen || activeFilterCount > 0 ? 'primary' : 'quiet'}
+                onClick={() => setFiltersOpen(true)}
+                className="w-full lg:w-auto min-h-10 px-2.5 sm:px-3.5 text-xs whitespace-nowrap"
+              >
+                <SlidersHorizontal className="h-4 w-4 shrink-0" />
+                <span className="truncate">
+                  {t.orders.filtersBtn}
+                  {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                </span>
+              </Button>
 
-            <div className="flex items-center justify-between sm:justify-start gap-2 rounded-control border border-border bg-background px-2.5 py-1.5">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-foreground shrink-0">
-                <Bluetooth className="h-4 w-4 text-primary shrink-0" />
-                <span>{t.orders.printWidthLabel}</span>
-              </span>
-              <div className="flex items-center gap-1">
-                {(['58mm', '70mm', '80mm'] as const).map((sz) => (
-                  <button
-                    key={sz}
-                    type="button"
-                    onClick={() => setBluetoothSize(sz)}
-                    className={`min-h-10 sm:min-h-8 rounded px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
-                      bluetoothSize === sz
-                        ? 'bg-primary text-primary-foreground shadow-xs'
-                        : 'text-muted hover:text-foreground'
-                    }`}
-                  >
-                    {sz}
-                  </button>
-                ))}
-              </div>
+              <Button
+                tone={printSizeModalOpen ? 'primary' : 'quiet'}
+                onClick={() => setPrintSizeModalOpen(true)}
+                className="w-full lg:w-auto min-h-10 px-2.5 sm:px-3.5 text-xs whitespace-nowrap"
+              >
+                <Bluetooth
+                  className={`h-4 w-4 shrink-0 ${
+                    printSizeModalOpen ? 'text-primary-foreground' : 'text-primary'
+                  }`}
+                />
+                <span className="truncate">{t.orders.printWidthLabel}</span>
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] sm:text-[11px] font-bold tabular-nums shrink-0 ${
+                    printSizeModalOpen
+                      ? 'bg-white/20 text-primary-foreground'
+                      : 'bg-primary/12 text-primary'
+                  }`}
+                >
+                  {bluetoothSize}
+                </span>
+              </Button>
             </div>
 
-            <Button
-              tone="primary"
-              disabled={exportingExcel}
-              onClick={async () => {
-                if (exportingExcel) return;
-                setExportingExcel(true);
-                try {
-                  await exportOrdersToExcel(filteredOrders, currency);
-                } finally {
-                  setExportingExcel(false);
-                }
-              }}
-              className="w-full sm:w-auto"
+            {/* Row 2 (Mobile & Tablet side-by-side): Export Excel & Delete All */}
+            <div
+              className={`grid ${
+                !readOnly && filteredOrders.length > 0 ? 'grid-cols-2' : 'grid-cols-1'
+              } lg:flex lg:items-center gap-2`}
             >
-              {exportingExcel ? (
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-              ) : (
-                <Icon3D name="excel" size={20} />
-              )}{' '}
-              {t.orders.exportExcelBtn}
-            </Button>
-
-            {!readOnly && filteredOrders.length > 0 && (
               <Button
-                tone="danger"
-                onClick={() => {
-                  setStatusMessage('');
-                  setConfirmDeleteAll(true);
+                tone="primary"
+                disabled={exportingExcel}
+                onClick={async () => {
+                  if (exportingExcel) return;
+                  setExportingExcel(true);
+                  try {
+                    await exportOrdersToExcel(filteredOrders, currency);
+                  } finally {
+                    setExportingExcel(false);
+                  }
                 }}
-                disabled={busy}
-                className="w-full sm:w-auto whitespace-nowrap"
+                className="w-full lg:w-auto min-h-10 px-2.5 sm:px-3.5 text-xs whitespace-nowrap"
               >
-                <Trash2 className="h-4 w-4 shrink-0" />
-                <span>{t.orders.deleteAllBtn}</span>
+                {exportingExcel ? (
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                ) : (
+                  <Icon3D name="excel" size={18} />
+                )}
+                <span className="truncate">{t.orders.exportExcelBtn}</span>
               </Button>
-            )}
+
+              {!readOnly && filteredOrders.length > 0 && (
+                <Button
+                  tone="danger"
+                  onClick={() => {
+                    setStatusMessage('');
+                    setConfirmDeleteAll(true);
+                  }}
+                  disabled={busy}
+                  className="w-full lg:w-auto min-h-10 px-2.5 sm:px-3.5 text-xs whitespace-nowrap"
+                >
+                  <Trash2 className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{t.orders.deleteAllBtn}</span>
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2487,6 +2499,147 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <Icon3D name="check" size={18} />
                     <span>{t.orders.doneAddingBtn}</span>
                   </Button>
+                </div>
+              </Surface>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ANIMATED POP-UP PRINT WIDTH SETTINGS CART (58mm, 70mm, 80mm) */}
+      <AnimatePresence>
+        {printSizeModalOpen && (
+          <motion.div
+            key="orders-print-size-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.orders.printWidthLabel}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            onClick={() => setPrintSizeModalOpen(false)}
+            className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-foreground/65 backdrop-blur-[2px] p-0 sm:p-4"
+          >
+            <motion.div
+              key="orders-print-size-card"
+              initial={{ opacity: 0, y: 28, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.8 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md"
+            >
+              <Surface className="w-full flex flex-col rounded-t-2xl sm:rounded-card shadow-float overflow-hidden">
+                <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+                  <div className="h-1 w-10 rounded-full bg-border" />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 sm:px-5 py-3.5 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="inline-flex h-9 w-9 items-center justify-center rounded-control bg-primary/12 text-primary shrink-0">
+                      <Bluetooth className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-semibold text-foreground truncate">
+                        {t.orders.printWidthLabel}
+                      </h3>
+                      <p className="text-xs text-muted truncate tabular-nums">
+                        Thermal Bluetooth · {bluetoothSize}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPrintSizeModalOpen(false)}
+                    aria-label={t.common.close}
+                    className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-4 sm:p-5 space-y-2.5 pb-safe">
+                  {(
+                    [
+                      {
+                        size: '58mm' as const,
+                        barClass: 'w-6',
+                        desc: lang === 'kh' ? 'ក្រដាសព្រីនខ្នាតតូច (Compact)' : lang === 'kr' ? '소형 영수증 용지' : 'Compact Thermal Roll',
+                      },
+                      {
+                        size: '70mm' as const,
+                        barClass: 'w-8',
+                        desc: lang === 'kh' ? 'ក្រដាសព្រីនខ្នាតកណ្តាល (Medium)' : lang === 'kr' ? '중형 영수증 용지' : 'Medium Thermal Roll',
+                      },
+                      {
+                        size: '80mm' as const,
+                        barClass: 'w-10',
+                        desc: lang === 'kh' ? 'ក្រដាសព្រីនខ្នាតស្តង់ដារ (Standard POS)' : lang === 'kr' ? '표준 POS 영수증 용지' : 'Standard POS Thermal Roll',
+                      },
+                    ] as const
+                  ).map((item, idx) => {
+                    const active = bluetoothSize === item.size;
+                    return (
+                      <motion.button
+                        key={item.size}
+                        type="button"
+                        initial={{ opacity: 0, y: 12, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{
+                          type: 'spring',
+                          stiffness: 420,
+                          damping: 28,
+                          delay: idx * 0.05,
+                        }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          setBluetoothSize(item.size);
+                          setPrintSizeModalOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between gap-3 rounded-card border p-3.5 text-left transition-colors cursor-pointer ${
+                          active
+                            ? 'border-primary bg-primary/10 shadow-xs'
+                            : 'border-border/80 bg-background/50 hover:border-primary/45 hover:bg-background'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`inline-flex h-11 w-11 items-center justify-center rounded-control border shrink-0 ${
+                              active
+                                ? 'border-primary/40 bg-primary text-primary-foreground'
+                                : 'border-border/70 bg-surface text-muted'
+                            }`}
+                          >
+                            <div className="flex flex-col items-center gap-1">
+                              <Printer className="h-4 w-4" />
+                              <span
+                                className={`h-1 rounded-full ${item.barClass} ${
+                                  active ? 'bg-primary-foreground/85' : 'bg-primary/50'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm sm:text-base font-bold tabular-nums text-foreground leading-tight">
+                              {item.size}
+                            </p>
+                            <p className="text-xs text-muted truncate mt-0.5">{item.desc}</p>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`inline-flex h-6 w-6 items-center justify-center rounded-full shrink-0 transition-colors ${
+                            active
+                              ? 'bg-primary text-primary-foreground'
+                              : 'border border-border bg-surface text-transparent'
+                          }`}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </div>
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </Surface>
             </motion.div>
