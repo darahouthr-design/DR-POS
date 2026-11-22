@@ -1419,11 +1419,9 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       activePrefix: 'កំពុងប្រើ៖',
       subAdminHeading: 'បង្កើត Admin រង',
       workspaceAdminsCount: 'ចំនួន Admin ក្នុង Workspace៖',
-      subAdminHint1:
-        '• Gmail ដែលបង្កើតនៅទីនេះ (Admin 2, Admin 3...) គឺទុកសម្រាប់តែ Switch Account នៅក្នុង DR-POS ប៉ុណ្ណោះ (មិនអាចយកទៅ Sign In ឬបង្កើត Master Admin នៅផ្នែកខាងក្រៅបានទេ)។',
-      subAdminHint2:
-        '• ពេល Switch ទៅ Admin ណាមួយ របាយការណ៍លក់ទាំងអស់នឹងបង្ហាញដាច់ដោយឡែកតែរបស់ Admin នោះប៉ុណ្ណោះ (លើកលែងតែ Problem Customers ដែលបង្ហាញរួមគ្នា)។',
-      subAdminNameLabel: 'ឈ្មោះ Admin (ឧ. Admin ២ / សាខា B)',
+     
+    
+      subAdminNameLabel: 'ឈ្មោះ Admin រង',
       subAdminNamePlaceholder: 'ឧ. Admin 2',
       subAdminEmailLabel: 'Gmail សម្រាប់ Switch Account',
       creatingBtn: 'កំពុងបង្កើត...',
@@ -1432,8 +1430,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       currentlyActiveBadge: 'កំពុងប្រើ',
       switchBtn: 'Switch',
       setPasswordTitle: 'កំណត់ ឬប្ដូរ Password គណនី Master Admin ({email}) សម្រាប់ Sale ចូលប្រើ',
-      setPasswordHint:
-        'ប្រសិនបើអ្នកចូលតាម Google Popup សូមកំណត់ Password នៅទីនេះ ដើម្បីឱ្យបុគ្គលិក Sale ចូលប្រើលើទូរស័ព្ទ/ថេបលេតបាន។',
+      
       newPasswordLabel: 'Password ថ្មី (>= 6 តួអក្សរ)',
       confirmPasswordLabel: 'បញ្ជាក់ Password ម្ដងទៀត',
       savingPasswordBtn: 'កំពុងរក្សាទុក...',
@@ -1497,15 +1494,15 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       categoriesPlaceholder: 'បន្ថែមប្រភេទទំនិញ (Category)...',
       emptyCategories: 'មិនទាន់មានប្រភេទទំនិញនៅឡើយទេ។',
       staffMgmtTitle: 'ឈ្មោះបុគ្គលិកលក់',
-      staffMgmtSubtitle: 'រូបភាពបំលែងជា URL តាម Cloudinary (Cloud name: bn5s5spm, Upload preset: PConly)',
+  
       staffFieldName: '1. ឈ្មោះបុគ្គលិកលក់',
       staffPlaceholderName: 'ឈ្មោះបុគ្គលិក...',
-      staffFieldPosition: '2. មុខតំណែង (Position)',
+      staffFieldPosition: '2. មុខតំណែង',
       staffPlaceholderPosition: 'ឧ. បុគ្គលិកលក់ / ប្រធានផ្នែក',
       staffFieldPhone: '3. លេខទូរស័ព្ទ',
       staffFieldAddress: '4. អាសយដ្ឋាន',
       staffPlaceholderAddress: 'អាសយដ្ឋានបុគ្គលិក...',
-      staffFieldPhoto: '5. Uploads រូបភាពបុគ្គលិក (Cloudinary)',
+      staffFieldPhoto: '5. Uploads រូបភាពបុគ្គលិក',
       staffUploading: 'កំពុង Upload...',
       staffChoosePhoto: 'ជ្រើសរើសរូបភាព',
       staffSaveBtn: 'រក្សាទុកបុគ្គលិក',

@@ -1687,9 +1687,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             onChange={(e) => onSaveSettings({ currency: e.target.value as CurrencyCode })}
                             className={inputClass}
                           >
-                            <option value="en">USD ($) — EN</option>
-                            <option value="kh">រៀលខ្មែរ (៛) — KH</option>
-                            <option value="kr">원화 KRW (₩) — KR</option>
+                            <option value="en">USD ($)</option>
+                            <option value="kh">រៀលខ្មែរ (៛)</option>
+                            <option value="kr">원화 KRW (₩)</option>
                           </select>
                         </Field>
                       </div>
