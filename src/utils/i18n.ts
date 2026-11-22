@@ -943,7 +943,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colStatus: 'ស្ថានភាព',
       noFilteredOrders: 'មិនមានការបញ្ជាទិញតាមស្ថានភាពដែលបានជ្រើសរើសទេ។',
       salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់ Sale',
-      
+      salePresenceSubtitle: '',
       onlineCountSummary: 'កំពុង Online',
       statusOnline: 'Online',
       statusOffline: 'Offline',
@@ -962,7 +962,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deviceDesktop: 'កុំព្យូទ័រ',
       manageSalesBtn: 'គ្រប់គ្រង Sale',
       activityLogTitle: 'កំណត់ត្រាសកម្មភាពបុគ្គលិក Sale',
-      
+      activityLogSubtitle: '',
       activityEventsUnit: 'សកម្មភាព',
       activityFilterAll: 'ទាំងអស់',
       activityActionCreated: 'បង្កើតការបញ្ជាទិញ',
@@ -1397,7 +1397,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       saleLanguageLabel: 'ភាសា',
       saleActiveAdminPrefix: 'Admin កំពុងប្រើ៖',
       saleSwitchAdminTitle: 'ប្ដូរគណនី',
-      
+      saleSwitchAdminSubtitle: '',
       saleSwitchKeepNameNote: 'កំពុងឈរលើឈ្មោះ Sale៖',
       saleSingleAdminHint:
         'បច្ចុប្បន្នមានគណនី Admin តែ ១ ក្នុងប្រព័ន្ធ (ពេល Master Admin បង្កើត Admin រងបន្ថែម គណនីទាំងនោះនឹងបង្ហាញនៅទីនេះសម្រាប់ Switch)។',
@@ -1419,8 +1419,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       activePrefix: 'កំពុងប្រើ៖',
       subAdminHeading: 'បង្កើត Admin រង',
       workspaceAdminsCount: 'ចំនួន Admin ក្នុង Workspace៖',
-     
-    
+      subAdminHint1: '',
+      subAdminHint2: '',
       subAdminNameLabel: 'ឈ្មោះ Admin រង',
       subAdminNamePlaceholder: 'ឧ. Admin 2',
       subAdminEmailLabel: 'Gmail សម្រាប់ Switch Account',
@@ -1430,14 +1430,13 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       currentlyActiveBadge: 'កំពុងប្រើ',
       switchBtn: 'Switch',
       setPasswordTitle: 'កំណត់ ឬប្ដូរ Password គណនី Master Admin ({email}) សម្រាប់ Sale ចូលប្រើ',
-      
+      setPasswordHint: '',
       newPasswordLabel: 'Password ថ្មី (>= 6 តួអក្សរ)',
       confirmPasswordLabel: 'បញ្ជាក់ Password ម្ដងទៀត',
       savingPasswordBtn: 'កំពុងរក្សាទុក...',
       savePasswordBtn: 'រក្សាទុក Password',
       saleMgmtHeading: 'កំណត់ឈ្មោះ Sale',
-      saleMgmtHint:
-        'ពេល Sale ចូលប្រើលើទូរស័ព្ទ ឬថេបលេត ត្រូវបញ្ចូល៖ Gmail Admin ({email}) + Password របស់ Admin + ឈ្មោះ Sale ដែលបានបង្កើតខាងក្រោម។ Sale ម្នាក់ៗនឹងឃើញតែរបាយការណ៍ Orders របស់ខ្លួនម្នាក់ប៉ុណ្ណោះ។',
+      saleMgmtHint: '',
       saleNameLabel: 'ឈ្មោះ Sale',
       saleNamePlaceholder: 'ឧ. Sale សុខា / Dara Sale',
       salePhoneOptionalLabel: 'លេខទូរស័ព្ទ (Optional)',
@@ -1494,7 +1493,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       categoriesPlaceholder: 'បន្ថែមប្រភេទទំនិញ (Category)...',
       emptyCategories: 'មិនទាន់មានប្រភេទទំនិញនៅឡើយទេ។',
       staffMgmtTitle: 'ឈ្មោះបុគ្គលិកលក់',
-  
+      staffMgmtSubtitle: '',
       staffFieldName: '1. ឈ្មោះបុគ្គលិកលក់',
       staffPlaceholderName: 'ឈ្មោះបុគ្គលិក...',
       staffFieldPosition: '2. មុខតំណែង',

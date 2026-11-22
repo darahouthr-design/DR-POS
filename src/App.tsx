@@ -2896,12 +2896,12 @@ export function App() {
           aria-label="Mobile Quick Navigation"
           className={`${
             isSaleRole ? (isDesktop ? 'lg:hidden' : '') : 'md:hidden'
-          } fixed bottom-0 inset-x-0 z-30 border-t border-border/80 bg-surface pb-safe`}
+          } fixed bottom-0 inset-x-0 z-30 border-t border-border/80 bg-surface pb-[max(0.25rem,env(safe-area-inset-bottom,0px))]`}
         >
           <div
             className={`grid ${
               isSaleRole ? 'grid-cols-8 max-w-3xl mx-auto' : 'grid-cols-5'
-            } items-center h-14 sm:h-15 px-1`}
+            } items-stretch h-12 sm:h-14 px-0.5 sm:px-1`}
           >
             {(isSaleRole
               ? SALE_ALLOWED_PAGES
@@ -2921,20 +2921,32 @@ export function App() {
                   type="button"
                   aria-current={isActive ? 'page' : undefined}
                   onClick={() => setActivePage(pid)}
-                  className={`relative flex flex-col items-center justify-center min-h-11 px-0.5 rounded-control transition-colors cursor-pointer ${
-                    isActive ? 'text-primary font-semibold' : 'text-muted hover:text-foreground'
+                  className={`relative flex flex-col items-center justify-center gap-0.5 h-full w-full min-w-0 px-0.5 pt-1 pb-0.5 select-none transition-colors cursor-pointer ${
+                    isActive ? 'text-primary' : 'text-muted hover:text-foreground'
                   }`}
                 >
-                  {isActive && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute top-0 inset-x-2.5 sm:inset-x-4 h-0.5 rounded-full bg-primary"
-                    />
-                  )}
-                  <Icon3D name={navMeta.icon} size={isSaleRole ? 20 : 21} />
                   <span
-                    className={`mt-0.5 leading-snug truncate max-w-full whitespace-nowrap ${
-                      isSaleRole ? 'text-[10px] sm:text-[11px]' : 'text-[11px]'
+                    aria-hidden="true"
+                    className={`pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 h-[2px] rounded-full bg-primary transition-opacity duration-150 ${
+                      isSaleRole ? 'w-5 sm:w-7' : 'w-6 sm:w-8'
+                    } ${isActive ? 'opacity-100' : 'opacity-0'}`}
+                  />
+                  <span className="inline-flex h-[18px] w-[18px] sm:h-5 sm:w-5 items-center justify-center shrink-0">
+                    <Icon3D
+                      name={navMeta.icon}
+                      size={isSaleRole ? 17 : 18}
+                      className={
+                        isSaleRole
+                          ? 'h-[17px] w-[17px] sm:h-[19px] sm:w-[19px]'
+                          : 'h-[18px] w-[18px] sm:h-5 sm:w-5'
+                      }
+                    />
+                  </span>
+                  <span
+                    className={`block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] truncate whitespace-nowrap font-medium ${
+                      isSaleRole
+                        ? 'text-[9px] sm:text-[10.5px]'
+                        : 'text-[9.5px] sm:text-[10.5px]'
                     }`}
                   >
                     {shortLabel}
@@ -2943,26 +2955,31 @@ export function App() {
               );
             })}
 
-            {!isSaleRole && (
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen(true)}
-                className={`relative flex flex-col items-center justify-center min-h-11 px-1 rounded-control transition-colors cursor-pointer ${
-                  !['dashboard', 'pos', 'orders', 'products'].includes(activePage)
-                    ? 'text-primary font-semibold'
-                    : 'text-muted hover:text-foreground'
-                }`}
-              >
-                {!['dashboard', 'pos', 'orders', 'products'].includes(activePage) && (
+            {!isSaleRole && (() => {
+              const isMenuActive = !['dashboard', 'pos', 'orders', 'products'].includes(activePage);
+              return (
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(true)}
+                  className={`relative flex flex-col items-center justify-center gap-0.5 h-full w-full min-w-0 px-0.5 pt-1 pb-0.5 select-none transition-colors cursor-pointer ${
+                    isMenuActive ? 'text-primary' : 'text-muted hover:text-foreground'
+                  }`}
+                >
                   <span
                     aria-hidden="true"
-                    className="absolute top-0 inset-x-4 h-0.5 rounded-full bg-primary"
+                    className={`pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-6 sm:w-8 h-[2px] rounded-full bg-primary transition-opacity duration-150 ${
+                      isMenuActive ? 'opacity-100' : 'opacity-0'
+                    }`}
                   />
-                )}
-                <Menu className="h-5 w-5" />
-                <span className="mt-0.5 text-[11px] leading-snug">{t.navShort.menu}</span>
-              </button>
-            )}
+                  <span className="inline-flex h-[18px] w-[18px] sm:h-5 sm:w-5 items-center justify-center shrink-0">
+                    <Menu className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
+                  </span>
+                  <span className="block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] text-[9.5px] sm:text-[10.5px] font-medium truncate whitespace-nowrap">
+                    {t.navShort.menu}
+                  </span>
+                </button>
+              );
+            })()}
           </div>
         </nav>
         )}
