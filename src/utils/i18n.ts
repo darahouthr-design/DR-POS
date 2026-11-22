@@ -1385,24 +1385,23 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       autoClearNone: 'មិនមានប្រវត្តិស្តុកចាស់លើស ៣០ ថ្ងៃទេ',
     },
     settings: {
-      userRestrictedTitle: 'ព័ត៌មានគណនី (Sale Settings)',
+      userRestrictedTitle: 'ព័ត៌មានគណនី',
       userRestrictedNameLabel: 'ឈ្មោះ Sale៖',
       userRestrictedNotice:
-        'គណនី Sale អាចប្ដូរ Dark Mode, សម្លេងជូនដំណឹង, ភាសា (KH / EN / KR) ផ្ទាល់ខ្លួន, ប្ដូរគណនី Admin (Switch Account) និងចាកចេញពីគណនី (Sign out) ដោយរក្សាឈ្មោះ Sale ផ្ទាល់ខ្លួនដដែល។',
-      salePersonalPrefsTitle: 'ការកំណត់ផ្ទាល់ខ្លួន (Dark Mode, សម្លេង និង ភាសា)',
+        'គណនី Sale អាចប្ដូរ Dark Mode, សម្លេងជូនដំណឹង, ភាសា (KH)(EN)(KR) ផ្ទាល់ខ្លួន,(Switch Account) និងចាកចេញពីគណនី (Sign out) ដោយរក្សាឈ្មោះ Sale ផ្ទាល់ខ្លួនដដែល។',
+      salePersonalPrefsTitle: 'ការកំណត់ផ្ទាល់ខ្លួន',
       salePersonalPrefsNote:
-        'ការផ្លាស់ប្ដូរនៅទីនេះអនុវត្តចំពោះតែឈ្មោះ Sale របស់អ្នកម្នាក់ប៉ុណ្ណោះ — បុគ្គលិក Sale ផ្សេងទៀត ឬ Admin មិនផ្លាស់ប្ដូរតាមឡើយ។',
-      saleDarkModeLabel: 'Dark Mode / Light Mode',
+        'ការផ្លាស់ប្ដូរនៅទីនេះអនុវត្តចំពោះតែឈ្មោះ Sale របស់អ្នកម្នាក់ប៉ុណ្ណោះ។',
+      saleDarkModeLabel: '🌙Dark Mode ☀️Light Mode',
       saleSoundLabel: 'សម្លេងជូនដំណឹង',
       saleLanguageLabel: 'ភាសា',
       saleActiveAdminPrefix: 'Admin កំពុងប្រើ៖',
-      saleSwitchAdminTitle: 'ប្ដូរគណនី Admin (Switch Account)',
-      saleSwitchAdminSubtitle:
-        'ជ្រើសរើសគណនី Admin ខាងក្រោមដើម្បីលក់ ឬមើលរបាយការណ៍លក់របស់អ្នកក្នុង Admin នោះ — ឈ្មោះ Sale របស់អ្នកនៅតែរក្សាដដែល។',
+      saleSwitchAdminTitle: 'ប្ដូរគណនី',
+      
       saleSwitchKeepNameNote: 'កំពុងឈរលើឈ្មោះ Sale៖',
       saleSingleAdminHint:
         'បច្ចុប្បន្នមានគណនី Admin តែ ១ ក្នុងប្រព័ន្ធ (ពេល Master Admin បង្កើត Admin រងបន្ថែម គណនីទាំងនោះនឹងបង្ហាញនៅទីនេះសម្រាប់ Switch)។',
-      userSignOutTitle: 'ចាកចេញពីគណនី (Sign Out)',
+      userSignOutTitle: 'ចាកចេញពីគណនី',
       userSignOutSubtitle: 'ចុច Sign out ដើម្បីចាកចេញ ឬប្ដូរឈ្មោះ Sale',
       signOutBtn: 'Sign out',
       licenseTitle: 'សុពលភាពការប្រើប្រាស់ DR-POS',

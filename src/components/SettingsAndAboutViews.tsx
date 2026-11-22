@@ -621,9 +621,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }
                 className={inputClass}
               >
-                <option value="kh">ភាសាខ្មែរ (KH)</option>
-                <option value="en">English (EN)</option>
-                <option value="kr">한국어 (KR)</option>
+                <option value="kh">🇰🇭 ភាសាខ្មែរ</option>
+                <option value="en">🇺🇸 English</option>
+                <option value="kr">🇰🇷 한국어</option>
               </select>
             </Field>
           </div>
