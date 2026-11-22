@@ -2150,7 +2150,7 @@ export function App() {
         {/* Main Workspace Pane */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Workspace Header (Clean single-row bar: App Profile on left, quick actions on right) */}
-          <header className="sticky top-0 z-30 border-b border-border/80 bg-surface/95 backdrop-blur-md px-3.5 md:px-6 h-14 md:h-auto md:py-3 flex items-center justify-between gap-3">
+          <header className="sticky top-0 z-30 border-b border-border/80 bg-surface md:bg-surface/95 md:backdrop-blur-md px-3.5 md:px-6 h-14 md:h-auto md:py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {isSaleMobileMode ? (
                 <button
@@ -2896,7 +2896,7 @@ export function App() {
           aria-label="Mobile Quick Navigation"
           className={`${
             isSaleRole ? (isDesktop ? 'lg:hidden' : '') : 'md:hidden'
-          } fixed bottom-0 inset-x-0 z-30 border-t border-border/80 bg-surface/95 backdrop-blur-md pb-safe`}
+          } fixed bottom-0 inset-x-0 z-30 border-t border-border/80 bg-surface pb-safe`}
         >
           <div
             className={`grid ${

@@ -37,7 +37,7 @@ function getInitials(name: string): string {
  * 1. Dashboard — 3D Sky-Blue Cozy House Illustration
  */
 const ArtworkDashboard3D: React.FC = () => (
-  <svg viewBox="0 0 120 112" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(120,10,10,0.28)]" aria-hidden="true">
+  <svg viewBox="0 0 120 112" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-house-roof" x1="16" y1="22" x2="104" y2="62" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#64c8ff" />
@@ -122,7 +122,7 @@ const ArtworkDashboard3D: React.FC = () => (
  * 2. Orders — 3D Tilted Checklist Clipboard Illustration
  */
 const ArtworkOrders3D: React.FC = () => (
-  <svg viewBox="0 0 120 118" fill="none" className="w-full h-full drop-shadow-[0_10px_16px_rgba(7,46,138,0.3)]" aria-hidden="true">
+  <svg viewBox="0 0 120 118" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-ord-board" x1="26" y1="20" x2="96" y2="104" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#eab097" />
@@ -137,6 +137,9 @@ const ArtworkOrders3D: React.FC = () => (
         <stop offset="100%" stopColor="#2ca69b" />
       </linearGradient>
     </defs>
+
+    {/* Ground shadow */}
+    <ellipse cx="60" cy="107" rx="34" ry="5.5" fill="#072e8a" fillOpacity="0.26" />
 
     <g transform="rotate(26 60 60)">
       {/* Extruded Board Depth */}
@@ -183,7 +186,7 @@ const ArtworkOrders3D: React.FC = () => (
  * 3. Products — 3D Cardboard Parcel Box + Smartphone Checklist Illustration
  */
 const ArtworkProducts3D: React.FC = () => (
-  <svg viewBox="0 0 124 112" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(3,94,20,0.3)]" aria-hidden="true">
+  <svg viewBox="0 0 124 112" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-box-top" x1="18" y1="22" x2="80" y2="48" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#d8ba43" />
@@ -251,7 +254,7 @@ const ArtworkProducts3D: React.FC = () => (
  * 4. Due Payments — 3D Clipboard + Paper Invoice + Floating Golden $ Coins
  */
 const ArtworkDuePayments3D: React.FC = () => (
-  <svg viewBox="0 0 124 114" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(140,80,0,0.28)]" aria-hidden="true">
+  <svg viewBox="0 0 124 114" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-due-board" x1="28" y1="22" x2="94" y2="104" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#659be6" />
@@ -326,7 +329,7 @@ const ArtworkDuePayments3D: React.FC = () => (
  * 5. POS — 3D Modern Cash Register & Touch Terminal Illustration
  */
 const ArtworkPos3D: React.FC = () => (
-  <svg viewBox="0 0 124 112" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(128,0,128,0.3)]" aria-hidden="true">
+  <svg viewBox="0 0 124 112" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-pos-screen" x1="36" y1="16" x2="98" y2="62" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#94a9ff" />
@@ -385,7 +388,7 @@ const ArtworkPos3D: React.FC = () => (
  * 6. Settings — 3D Blue-and-Gold Mechanical Cogwheel Gear Illustration
  */
 const ArtworkSettings3D: React.FC = () => (
-  <svg viewBox="0 0 116 114" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(3,79,76,0.3)]" aria-hidden="true">
+  <svg viewBox="0 0 116 114" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-gear-blue" x1="20" y1="16" x2="96" y2="96" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#3da3f5" />
@@ -435,7 +438,7 @@ const ArtworkSettings3D: React.FC = () => (
  * 7. Privacy Policy — 3D Protective Shield & Padlock Illustration
  */
 const ArtworkPrivacyPolicy3D: React.FC = () => (
-  <svg viewBox="0 0 120 114" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(14,26,115,0.34)]" aria-hidden="true">
+  <svg viewBox="0 0 120 114" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-priv-shield-back" x1="22" y1="14" x2="96" y2="104" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#2647b8" />
@@ -517,7 +520,7 @@ const ArtworkPrivacyPolicy3D: React.FC = () => (
  * 8. About — 3D Indigo-Gold App Information Emblem & Shield Illustration
  */
 const ArtworkAbout3D: React.FC = () => (
-  <svg viewBox="0 0 120 112" fill="none" className="w-full h-full drop-shadow-[0_10px_14px_rgba(32,20,120,0.34)]" aria-hidden="true">
+  <svg viewBox="0 0 120 112" fill="none" className="w-full h-full" aria-hidden="true">
     <defs>
       <linearGradient id="sm-about-card-back" x1="20" y1="22" x2="96" y2="96" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stopColor="#65d4ff" />
@@ -656,21 +659,22 @@ export const SaleMobileHome: React.FC<SaleMobileHomeProps> = ({
 
   return (
     <div className="min-h-dvh w-full bg-[#fcfbfd] dark:bg-background text-foreground flex flex-col">
-      {/* Top Profile, Online Signal & Notification Row */}
-      <header className="sticky top-0 z-30 bg-[#fcfbfd]/95 dark:bg-background/95 backdrop-blur-md pt-[max(1rem,env(safe-area-inset-top,0px))] pb-3">
+      {/* Top Profile, Online Signal & Notification Row (Solid surface avoids iOS WebKit sticky backdrop-filter artifacts) */}
+      <header className="sticky top-0 z-30 bg-[#fcfbfd] dark:bg-background pt-[max(1rem,env(safe-area-inset-top,0px))] pb-3">
         <div className="w-full max-w-xl mx-auto px-5 sm:px-6 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3.5 min-w-0 flex-1">
             {/* Read-only Sale Avatar controlled exclusively by Master Admin */}
             <div
               aria-label={saleName}
-              className="relative h-15 w-15 sm:h-16 sm:w-16 shrink-0 rounded-full p-[3px] bg-gradient-to-tr from-[#22c8e5] via-[#2ed7cb] to-[#49e3c4] shadow-sm select-none"
+              className="relative h-15 w-15 sm:h-16 sm:w-16 shrink-0 rounded-full p-[3px] bg-gradient-to-tr from-[#22c8e5] via-[#2ed7cb] to-[#49e3c4] shadow-sm select-none isolate"
             >
               <div className="h-full w-full rounded-full bg-white dark:bg-surface p-[2.5px] overflow-hidden">
                 {cleanAvatarUrl ? (
                   <img
                     src={cleanAvatarUrl}
                     alt={saleName}
-                    className="h-full w-full rounded-full object-cover"
+                    decoding="async"
+                    className="block h-full w-full rounded-full object-cover"
                   />
                 ) : (
                   <div className="h-full w-full rounded-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-100 font-bold text-lg select-none">
@@ -714,8 +718,8 @@ export const SaleMobileHome: React.FC<SaleMobileHomeProps> = ({
 
       {banners}
 
-      {/* 2x3 Vibrant 3D Launcher Grid */}
-      <main className="flex-1 w-full max-w-xl mx-auto px-4 sm:px-6 pt-3 pb-[max(1.75rem,env(safe-area-inset-bottom,0px))] flex flex-col justify-center">
+      {/* 2x4 Vibrant 3D Launcher Grid */}
+      <main className="flex-1 w-full max-w-xl mx-auto px-4 sm:px-6 pt-2.5 sm:pt-3 pb-[max(1.75rem,env(safe-area-inset-bottom,0px))] flex flex-col justify-start">
         <div className="grid grid-cols-2 gap-3.5 sm:gap-4">
           {LAUNCHER_TILES.map((tile, index) => {
             const label = t.nav[tile.id];
@@ -732,16 +736,16 @@ export const SaleMobileHome: React.FC<SaleMobileHomeProps> = ({
                   ease: [0.16, 1, 0.3, 1],
                 }}
                 whileTap={prefersReducedMotion ? undefined : { scale: 0.96 }}
-                className={`group relative overflow-hidden rounded-[26px] sm:rounded-[30px] aspect-[1/1.08] min-h-[162px] p-4 sm:p-5 text-left flex flex-col justify-between cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${tile.gradientClass} ${tile.shadowClass}`}
+                className={`group relative isolate overflow-hidden rounded-[26px] sm:rounded-[30px] aspect-[1/1.08] min-h-[162px] p-4 sm:p-5 text-left flex flex-col justify-between cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${tile.gradientClass} ${tile.shadowClass}`}
               >
-                {/* Soft top-left luminous sheen */}
+                {/* Soft top-left luminous sheen — pure radial gradient (zero CSS blur filter overflow on iOS WebKit) */}
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute -top-10 -left-10 h-32 w-32 rounded-full bg-white/18 blur-2xl"
+                  className="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_14%_12%,rgba(255,255,255,0.28)_0%,rgba(255,255,255,0.09)_32%,transparent_60%)]"
                 />
 
                 {/* Top-Left Crisp White Card Label */}
-                <span className="relative z-10 block text-[17px] sm:text-[19px] font-bold text-white leading-snug tracking-tight drop-shadow-[0_1px_2px_rgba(0,0,0,0.14)] truncate">
+                <span className="relative z-10 block text-[17px] sm:text-[19px] font-bold text-white leading-snug tracking-tight [text-shadow:0_1px_2px_rgba(0,0,0,0.16)] truncate">
                   {label}
                 </span>
 
