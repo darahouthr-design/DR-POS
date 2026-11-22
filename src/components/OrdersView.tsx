@@ -1,11 +1,14 @@
 import React, { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Bluetooth, Check, CheckCircle2, ChevronDown, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
+import { Bluetooth, Check, CheckCircle2, ChevronDown, FileDown, FileSpreadsheet, FileText, Loader2, Printer, Plus, Minus, Search, Trash2, X, Download, SlidersHorizontal } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { Button, Field, ProductImage, Surface, inputClass } from './ui';
 import { DatabaseProgressBar } from './DatabaseProgressBar';
 import {
+  exportOrdersToCsv,
   exportOrdersToExcel,
+  exportOrdersToPdf,
+  type OrderExportFormat,
   formatMoney,
   getCurrencyMeta,
   inputAmountToUsd,
@@ -507,7 +510,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<OrderExportFormat | null>(null);
   const [searchingServer, setSearchingServer] = useState(false);
   const lastServerSearchRef = useRef<string>('');
 
@@ -653,13 +657,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [editStockError, setEditStockError] = useState('');
 
   useEffect(() => {
-    if (!productPickerOpen && !reportOrder && !filtersOpen && !printSizeModalOpen) return;
+    if (!productPickerOpen && !reportOrder && !filtersOpen && !printSizeModalOpen && !exportModalOpen) {
+      return;
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (productPickerOpen) {
           setProductPickerOpen(false);
         } else if (reportOrder) {
           setReportOrder(null);
+        } else if (exportModalOpen && !exportingFormat) {
+          setExportModalOpen(false);
         } else if (printSizeModalOpen) {
           setPrintSizeModalOpen(false);
         } else if (filtersOpen) {
@@ -669,7 +677,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [productPickerOpen, reportOrder, filtersOpen, printSizeModalOpen]);
+  }, [productPickerOpen, reportOrder, filtersOpen, printSizeModalOpen, exportModalOpen, exportingFormat]);
 
   const sortedPickerProducts = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
@@ -919,24 +927,17 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             >
               <Button
                 tone="primary"
-                disabled={exportingExcel}
-                onClick={async () => {
-                  if (exportingExcel) return;
-                  setExportingExcel(true);
-                  try {
-                    await exportOrdersToExcel(filteredOrders, currency);
-                  } finally {
-                    setExportingExcel(false);
-                  }
-                }}
+                disabled={Boolean(exportingFormat)}
+                onClick={() => setExportModalOpen(true)}
                 className="w-full lg:w-auto min-h-10 px-2.5 sm:px-3.5 text-xs whitespace-nowrap"
               >
-                {exportingExcel ? (
+                {exportingFormat ? (
                   <Loader2 className="h-4 w-4 animate-spin shrink-0" />
                 ) : (
-                  <Icon3D name="excel" size={18} />
+                  <Download className="h-4 w-4 shrink-0" />
                 )}
                 <span className="truncate">{t.orders.exportExcelBtn}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-85 shrink-0" />
               </Button>
 
               {!readOnly && filteredOrders.length > 0 && (
@@ -2637,6 +2638,189 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         >
                           <Check className="h-3.5 w-3.5" />
                         </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </Surface>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ANIMATED POP-UP EXPORT TO CART (EXCEL, CSV, PDF) */}
+      <AnimatePresence>
+        {exportModalOpen && (
+          <motion.div
+            key="orders-export-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.orders.exportExcelBtn}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            onClick={() => {
+              if (!exportingFormat) setExportModalOpen(false);
+            }}
+            className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-foreground/65 backdrop-blur-[2px] p-0 sm:p-4"
+          >
+            <motion.div
+              key="orders-export-card"
+              initial={{ opacity: 0, y: 28, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.96 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.8 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md"
+            >
+              <Surface className="w-full flex flex-col rounded-t-2xl sm:rounded-card shadow-float overflow-hidden">
+                <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
+                  <div className="h-1 w-10 rounded-full bg-border" />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 sm:px-5 py-3.5 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="inline-flex h-9 w-9 items-center justify-center rounded-control bg-primary/12 text-primary shrink-0">
+                      <Download className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm sm:text-base font-semibold text-foreground truncate">
+                        {t.orders.exportExcelBtn}
+                      </h3>
+                      <p className="text-xs text-muted truncate tabular-nums">
+                        {filteredOrders.length} Orders · {formatMoney(filteredOrdersTotal, currency)}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={Boolean(exportingFormat)}
+                    onClick={() => setExportModalOpen(false)}
+                    aria-label={t.common.close}
+                    className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0 disabled:opacity-50"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-4 sm:p-5 space-y-2.5 pb-safe">
+                  {(
+                    [
+                      {
+                        format: 'excel' as OrderExportFormat,
+                        title: 'Excel (.xlsx)',
+                        badge: 'XLSX',
+                        desc:
+                          lang === 'kh'
+                            ? 'តារាងរបាយការណ៍ស្តង់ដារ មានហាយឡាយ + សរុបតាមផលិតផល'
+                            : lang === 'kr'
+                            ? '스타일 적용 주문 표 + 상품별 합계 시트'
+                            : 'Highlighted styled table + Per-Product Summary sheets',
+                        iconBoxClass:
+                          'border-emerald-500/35 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300',
+                        badgeClass:
+                          'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
+                        Icon: FileSpreadsheet,
+                      },
+                      {
+                        format: 'csv' as OrderExportFormat,
+                        title: 'CSV (.csv)',
+                        badge: 'CSV',
+                        desc:
+                          lang === 'kh'
+                            ? 'ឯកសារតារាង UTF-8 បើកបានលើ Excel និង Google Sheets'
+                            : lang === 'kr'
+                            ? 'Excel · Google Sheets 호환 UTF-8 데이터 표'
+                            : 'UTF-8 spreadsheet format for Excel & Google Sheets',
+                        iconBoxClass:
+                          'border-sky-500/35 bg-sky-500/12 text-sky-700 dark:text-sky-300',
+                        badgeClass:
+                          'bg-sky-500/12 text-sky-700 dark:text-sky-300 border-sky-500/30',
+                        Icon: FileText,
+                      },
+                      {
+                        format: 'pdf' as OrderExportFormat,
+                        title: 'PDF (.pdf)',
+                        badge: 'PDF',
+                        desc:
+                          lang === 'kh'
+                            ? 'របាយការណ៍ PDF ទម្រង់ A4 ផ្តេក មានហាយឡាយស្អាតស្តង់ដារ'
+                            : lang === 'kr'
+                            ? '인쇄 및 공유용 표준 가로 A4 강조 PDF 보고서'
+                            : 'Highlighted standard landscape A4 report for print & share',
+                        iconBoxClass:
+                          'border-rose-500/35 bg-rose-500/12 text-rose-700 dark:text-rose-300',
+                        badgeClass:
+                          'bg-rose-500/12 text-rose-700 dark:text-rose-300 border-rose-500/30',
+                        Icon: FileDown,
+                      },
+                    ] as const
+                  ).map((opt, idx) => {
+                    const isBusy = exportingFormat === opt.format;
+                    const IconComp = opt.Icon;
+                    return (
+                      <motion.button
+                        key={opt.format}
+                        type="button"
+                        disabled={Boolean(exportingFormat)}
+                        initial={{ opacity: 0, y: 14, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{
+                          type: 'spring',
+                          stiffness: 420,
+                          damping: 28,
+                          delay: idx * 0.055,
+                        }}
+                        whileTap={exportingFormat ? undefined : { scale: 0.97 }}
+                        onClick={async () => {
+                          if (exportingFormat) return;
+                          setExportingFormat(opt.format);
+                          try {
+                            if (opt.format === 'excel') {
+                              await exportOrdersToExcel(filteredOrders, currency);
+                            } else if (opt.format === 'csv') {
+                              await exportOrdersToCsv(filteredOrders, currency);
+                            } else {
+                              await exportOrdersToPdf(filteredOrders, currency);
+                            }
+                            setExportModalOpen(false);
+                            setStatusMessage(
+                              lang === 'kh'
+                                ? `បានទាញយករបាយការណ៍ ${opt.title} (${filteredOrders.length} Orders) ជោគជ័យ!`
+                                : lang === 'kr'
+                                ? `${opt.title} 보고서 (${filteredOrders.length}건) 내보내기 완료!`
+                                : `Exported ${opt.title} (${filteredOrders.length} orders) successfully!`
+                            );
+                          } finally {
+                            setExportingFormat(null);
+                          }
+                        }}
+                        className="w-full flex items-center justify-between gap-3 rounded-card border border-border/80 bg-background/50 hover:border-primary/50 hover:bg-background p-3.5 text-left transition-colors cursor-pointer disabled:opacity-60"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`inline-flex h-11 w-11 items-center justify-center rounded-control border shrink-0 ${opt.iconBoxClass}`}
+                          >
+                            {isBusy ? (
+                              <Loader2 className="h-5 w-5 animate-spin" />
+                            ) : (
+                              <IconComp className="h-5 w-5" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm sm:text-base font-bold text-foreground leading-tight">
+                              {opt.title}
+                            </p>
+                            <p className="text-xs text-muted line-clamp-1 mt-0.5">{opt.desc}</p>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`rounded-control border px-2 py-0.5 text-[11px] font-extrabold tracking-wide shrink-0 ${opt.badgeClass}`}
+                        >
+                          {opt.badge}
+                        </span>
                       </motion.button>
                     );
                   })}
