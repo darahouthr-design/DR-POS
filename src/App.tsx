@@ -130,6 +130,7 @@ import {
   formatMoney,
   normalizeSaleKey,
   playNewOrderNotification,
+  primeNewOrderNotificationAudio,
   todayLocalISO,
 } from './utils/helpers';
 import { TRANSLATIONS } from './utils/i18n';
@@ -429,6 +430,27 @@ export function App() {
   useEffect(() => {
     latestWorkspaceRef.current = workspace;
   }, [workspace]);
+
+  // Unlock & preload custom new-order voice audio on first user gesture (required by iOS/Android autoplay policies)
+  useEffect(() => {
+    let unlocked = false;
+    const handleFirstGesture = () => {
+      if (unlocked) return;
+      unlocked = true;
+      primeNewOrderNotificationAudio();
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('touchstart', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+    window.addEventListener('pointerdown', handleFirstGesture, { passive: true });
+    window.addEventListener('touchstart', handleFirstGesture, { passive: true });
+    window.addEventListener('keydown', handleFirstGesture, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('touchstart', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+  }, []);
 
   const isSaleMobileMode = roleState.role === 'sale' && !isDesktop;
 

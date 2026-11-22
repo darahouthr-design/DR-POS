@@ -308,21 +308,34 @@ function compressImageLocally(file: File): Promise<string> {
 }
 
 /**
- * Plays a pleasant multi-tone cash register chime + voice notification when a new order arrives.
+ * Custom voice notification played when a new order arrives from Sale or any device.
+ * Uses a dual-engine (Web Audio API AudioBuffer + HTMLAudioElement fallback) with
+ * first-gesture audio unlocking so realtime Firestore order alerts play reliably on
+ * iOS Safari, Android, and Desktop browsers.
  */
+export const NEW_ORDER_VOICE_URL = '/assets/aistudio/khmervoice_Kore__1__359e4228.mp3';
+
 let sharedAudioCtx: AudioContext | null = null;
+let orderVoiceRawBytes: ArrayBuffer | null = null;
+let orderVoiceFetchPromise: Promise<ArrayBuffer | null> | null = null;
+let decodedOrderVoiceBuffer: AudioBuffer | null = null;
+let decodedForCtx: AudioContext | null = null;
+let activeVoiceSource: AudioBufferSourceNode | null = null;
+let sharedOrderAudioEl: HTMLAudioElement | null = null;
+let orderAudioElUnlocked = false;
+let lastOrderNotificationPlayAt = 0;
 
 function getSharedAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
   try {
     const AudioCtx =
       window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtx) return null;
     if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
       sharedAudioCtx = new AudioCtx();
-    }
-    if (sharedAudioCtx.state === 'suspended') {
-      sharedAudioCtx.resume().catch(() => {});
+      decodedOrderVoiceBuffer = null;
+      decodedForCtx = null;
     }
     return sharedAudioCtx;
   } catch {
@@ -330,53 +343,184 @@ function getSharedAudioContext(): AudioContext | null {
   }
 }
 
+function getSharedOrderAudioElement(): HTMLAudioElement | null {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
+  try {
+    if (!sharedOrderAudioEl) {
+      const audio = new Audio(NEW_ORDER_VOICE_URL);
+      audio.preload = 'auto';
+      audio.setAttribute('playsinline', 'true');
+      sharedOrderAudioEl = audio;
+    }
+    return sharedOrderAudioEl;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOrderVoiceBytes(): Promise<ArrayBuffer | null> {
+  if (orderVoiceRawBytes) return orderVoiceRawBytes;
+  if (!orderVoiceFetchPromise) {
+    orderVoiceFetchPromise = fetch(NEW_ORDER_VOICE_URL, { cache: 'force-cache' })
+      .then((res) => (res.ok ? res.arrayBuffer() : null))
+      .then((buf) => {
+        if (buf && buf.byteLength > 0) {
+          orderVoiceRawBytes = buf;
+          return buf;
+        }
+        orderVoiceFetchPromise = null;
+        return null;
+      })
+      .catch(() => {
+        orderVoiceFetchPromise = null;
+        return null;
+      });
+  }
+  return orderVoiceFetchPromise;
+}
+
+async function ensureDecodedOrderVoiceBuffer(ctx: AudioContext): Promise<AudioBuffer | null> {
+  if (decodedOrderVoiceBuffer && decodedForCtx === ctx) {
+    return decodedOrderVoiceBuffer;
+  }
+  const bytes = await fetchOrderVoiceBytes();
+  if (!bytes) return null;
+  try {
+    const copy = bytes.slice(0);
+    const decoded = await new Promise<AudioBuffer>((resolve, reject) => {
+      const maybePromise = ctx.decodeAudioData(copy, resolve, reject);
+      if (maybePromise && typeof (maybePromise as Promise<AudioBuffer>).then === 'function') {
+        (maybePromise as Promise<AudioBuffer>).then(resolve, reject);
+      }
+    });
+    decodedOrderVoiceBuffer = decoded;
+    decodedForCtx = ctx;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Unlocks Web Audio & preloads the new-order voice asset during a user interaction
+ * so subsequent realtime Firestore new-order alerts can play without autoplay blocks.
+ */
+export function primeNewOrderNotificationAudio(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const ctx = getSharedAudioContext();
+    if (ctx) {
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => {});
+      }
+      // Play a 1-sample silent buffer to unlock iOS Safari Web Audio output
+      const silent = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = silent;
+      src.connect(ctx.destination);
+      src.start(0);
+      void ensureDecodedOrderVoiceBuffer(ctx);
+    }
+  } catch {
+    // Ignore unlock errors
+  }
+
+  try {
+    const audio = getSharedOrderAudioElement();
+    if (audio && !orderAudioElUnlocked) {
+      audio.muted = true;
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+            orderAudioElUnlocked = true;
+          })
+          .catch(() => {
+            audio.muted = false;
+          });
+      } else {
+        audio.muted = false;
+      }
+    }
+  } catch {
+    // Ignore audio element preload errors
+  }
+}
+
+function playFallbackAudioElement(): void {
+  try {
+    const audio = getSharedOrderAudioElement();
+    if (!audio) return;
+    audio.muted = false;
+    audio.volume = 1;
+    audio.pause();
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        // Fallback fresh Audio instance if shared element is busy
+        try {
+          const fresh = new Audio(NEW_ORDER_VOICE_URL);
+          fresh.volume = 1;
+          void fresh.play().catch(() => {});
+        } catch {
+          // Ignore autoplay restriction before first user gesture
+        }
+      });
+    }
+  } catch {
+    // Ignore HTMLAudio playback errors
+  }
+}
+
 export function playNewOrderNotification(
   enabled: boolean,
-  orderNumber?: string,
-  lang: LanguageCode = 'kh'
+  _orderNumber?: string,
+  _lang: LanguageCode = 'kh'
 ): void {
-  if (!enabled) return;
-  window.setTimeout(() => {
+  if (!enabled || typeof window === 'undefined') return;
+  const now = Date.now();
+  if (now - lastOrderNotificationPlayAt < 280) return;
+  lastOrderNotificationPlayAt = now;
+
+  void (async () => {
     try {
       const ctx = getSharedAudioContext();
       if (ctx) {
-        const notes = [523.25, 659.25, 783.99, 1046.5];
-        notes.forEach((freq, idx) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.1);
-          gain.gain.setValueAtTime(0.001, ctx.currentTime + idx * 0.1);
-          gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + idx * 0.1 + 0.03);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.1 + 0.36);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(ctx.currentTime + idx * 0.1);
-          osc.stop(ctx.currentTime + idx * 0.1 + 0.38);
-        });
+        if (ctx.state === 'suspended') {
+          await ctx.resume().catch(() => {});
+        }
+        if (ctx.state === 'running') {
+          const buffer = await ensureDecodedOrderVoiceBuffer(ctx);
+          if (buffer) {
+            try {
+              activeVoiceSource?.stop();
+            } catch {
+              // Previous source already ended
+            }
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            activeVoiceSource = source;
+            source.onended = () => {
+              if (activeVoiceSource === source) {
+                activeVoiceSource = null;
+              }
+            };
+            source.start(0);
+            return;
+          }
+        }
       }
     } catch {
-      // AudioContext blocked before user interaction
+      // Fall through to HTMLAudioElement playback
     }
 
-    try {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const text =
-          lang === 'kr'
-            ? `새 주문이 접수되었습니다. ${orderNumber || ''}`
-            : lang === 'en'
-            ? `New order received ${orderNumber || ''}`
-            : `មានការបញ្ជាទិញថ្មី ${orderNumber || ''}`;
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = lang === 'kr' ? 'ko-KR' : lang === 'en' ? 'en-US' : 'km-KH';
-        utter.rate = 1.0;
-        window.speechSynthesis.speak(utter);
-      }
-    } catch {
-      // Ignore speech synthesis errors
-    }
-  }, 0);
+    playFallbackAudioElement();
+  })();
 }
 
 export {

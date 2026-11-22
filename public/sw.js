@@ -1,10 +1,11 @@
-const CACHE_NAME = 'drpos-shell-v3';
+const CACHE_NAME = 'drpos-shell-v4';
 const FONT_CACHE_NAME = 'drpos-fonts-v1';
 
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.webmanifest',
   '/assets/aistudio/Modern_DR-POS_Retail_Logo_d82ce2c2.png',
+  '/assets/aistudio/khmervoice_Kore__1__359e4228.mp3',
 ];
 
 self.addEventListener('install', (event) => {
@@ -60,6 +61,7 @@ function shouldBypass(url) {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+  if (req.headers.has('range')) return;
 
   let url;
   try {
