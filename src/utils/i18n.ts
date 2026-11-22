@@ -942,8 +942,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       colInvoiceDate: 'វិក្កយបត្រ / កាលបរិច្ឆេទ',
       colStatus: 'ស្ថានភាព',
       noFilteredOrders: 'មិនមានការបញ្ជាទិញតាមស្ថានភាពដែលបានជ្រើសរើសទេ។',
-      salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់',
-      salePresenceSubtitle: 'បង្ហាញការចូលប្រើប្រាស់ Web App របស់បុគ្គលិក Sale ម្នាក់ៗក្នុងពេលជាក់ស្ដែង (សម្រាប់តែ Master Admin)',
+      salePresenceTitle: 'ស្ថានភាពការចូលប្រើប្រាស់របស់ Sale',
+      
       onlineCountSummary: 'កំពុង Online',
       statusOnline: 'Online',
       statusOffline: 'Offline',
@@ -962,7 +962,7 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       deviceDesktop: 'កុំព្យូទ័រ',
       manageSalesBtn: 'គ្រប់គ្រង Sale',
       activityLogTitle: 'កំណត់ត្រាសកម្មភាពបុគ្គលិក Sale',
-      activityLogSubtitle: 'តាមដានសកម្មភាពសំខាន់ៗរបស់ Sale តាមលំដាប់ពេលវេលាជាក់ស្ដែង (សម្រាប់តែ Master Admin)',
+      
       activityEventsUnit: 'សកម្មភាព',
       activityFilterAll: 'ទាំងអស់',
       activityActionCreated: 'បង្កើតការបញ្ជាទិញ',

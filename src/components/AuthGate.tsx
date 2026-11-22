@@ -1399,10 +1399,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-foreground leading-snug">
                   {activeMode === 'create-admin'
-                    ? '១. បង្កើតគណនី Master Admin (សាកល្បង Free ១ ខែ)'
+                    ? '១. បង្កើតគណនី Master Admin (Free ១ ខែ)'
                     : activeMode === 'admin-signin'
-                    ? 'ចូលគណនី Master Admin (Sign In)'
-                    : 'ចូលគណនី Sale (Sale Sign In)'}
+                    ? 'ចូលគណនី Master Admin'
+                    : 'ចូលគណនី Sale'}
                 </h2>
                 {activeMode !== 'create-admin' && (
                   <p className="text-xs text-muted mt-1 leading-relaxed">
@@ -1482,7 +1482,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         transition={{ duration: 0.24, ease: 'easeOut' }}
                         className="space-y-4"
                       >
-                        <Field label="១. New Master Admin">
+                        <Field label="១. New Name Master Admin">
                           <input
                             type="text"
                             required
@@ -1491,7 +1491,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               setDisplayName(e.target.value);
                               setError('');
                             }}
-                            placeholder="ឧ. Admin ភ្នំពេញ / ហាង DR-POS"
+                           
                             autoComplete="name"
                             className={inputClass}
                           />
@@ -1519,7 +1519,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               setOtpErrorMsg('');
                               setOtpTelegramFallbackUrl('');
                             }}
-                            placeholder="admin@gmail.com"
+                            
                             autoComplete="email"
                             className={inputClass}
                           />
@@ -1806,8 +1806,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   <Field
                     label={
                       activeMode === 'sale-signin'
-                        ? 'អាសយដ្ឋាន Gmail របស់ Admin (Admin Gmail)'
-                        : 'អាសយដ្ឋាន Gmail របស់ Admin'
+                        ? 'Gmail របស់ Admin'
+                        : 'Gmail របស់ Admin'
                     }
                   >
                     <input
@@ -1815,7 +1815,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="admin@gmail.com"
+                     
                       autoComplete="email"
                       className={inputClass}
                     />
@@ -1823,15 +1823,15 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
                   {activeMode === 'sale-signin' && (
                     <Field
-                      label="ឈ្មោះ Sale (ដែល Admin បានកំណត់)"
-                      hint="បញ្ចូលឈ្មោះ Sale អោយត្រូវគ្នានឹងឈ្មោះដែល Admin បានបង្កើតក្នុងប្រព័ន្ធ"
+                      label="ឈ្មោះ Sale"
+                     
                     >
                       <input
                         type="text"
                         required
                         value={saleName}
                         onChange={(e) => setSaleName(e.target.value)}
-                        placeholder="ឧ. សុខ ចាន់ណា / Sale A"
+                    
                         autoComplete="username"
                         className={inputClass}
                       />
