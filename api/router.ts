@@ -14,7 +14,9 @@ import {
 } from '../lib/developerRegistry.js';
 import {
   runDeveloperIssueMasterOtp,
+  runGetDeveloperEmailConfig,
   runRequestMasterOtp,
+  runSaveDeveloperEmailConfig,
   runVerifyMasterOtp,
 } from '../lib/masterOtp.js';
 import {
@@ -101,6 +103,13 @@ export default async function handler(
       return;
     }
 
+    if (route === 'developer/email-config' && method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store');
+      const result = await runGetDeveloperEmailConfig(headers);
+      sendJson(res, result.status, result.body);
+      return;
+    }
+
     if (route === 'auth/pending-password-sync') {
       if (method !== 'GET') {
         sendJson(res, 405, { error: 'Method Not Allowed' });
@@ -167,6 +176,12 @@ export default async function handler(
       }
       case 'developer/master-otp': {
         const result = await runDeveloperIssueMasterOtp(headers, body);
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      case 'developer/email-config': {
+        res.setHeader('Cache-Control', 'no-store');
+        const result = await runSaveDeveloperEmailConfig(headers, body);
         sendJson(res, result.status, result.body);
         return;
       }

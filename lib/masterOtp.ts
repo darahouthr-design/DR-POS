@@ -1,4 +1,7 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { getMongoDb } from './mongoPartition.js';
 import {
   DEFAULT_TELEGRAM_URL,
   getDeveloperAccessKey,
@@ -44,6 +47,16 @@ export function maskEmailAddress(email: string): string {
 
 function isValidEmailFormat(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function normalizeOtpDigits(raw: unknown): string {
+  const mapped = String(raw || '').replace(/[\u17E0-\u17E9\uFF10-\uFF19]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x17e0 && code <= 0x17e9) return String(code - 0x17e0);
+    if (code >= 0xff10 && code <= 0xff19) return String(code - 0xff10);
+    return ch;
+  });
+  return mapped.replace(/\D+/g, '').trim();
 }
 
 function generateSixDigitOtp(): string {
@@ -152,20 +165,277 @@ export function verifyMasterOtpVerifiedToken(rawToken: unknown, email: string): 
   }
 }
 
-export function isEmailDeliveryConfigured(): boolean {
-  const smtpHost = String(process.env.SMTP_HOST || '').trim();
-  const smtpUser = String(process.env.SMTP_USER || '').trim();
-  const smtpPass = String(process.env.SMTP_PASS || '').trim();
-  if (smtpHost && smtpUser && smtpPass) return true;
-  const gmailUser = String(process.env.GMAIL_USER || '').trim();
-  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').trim();
-  return Boolean(gmailUser && gmailPass);
+export type EmailDeliveryMode = 'gmail' | 'smtp' | 'resend';
+
+export interface ResolvedEmailDeliveryConfig {
+  source: 'console' | 'env';
+  mode: EmailDeliveryMode;
+  gmailUser?: string;
+  gmailAppPassword?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  resendApiKey?: string;
+  fromEmail?: string;
+  updatedAt?: string;
 }
 
-async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
-  const subject = 'DR-POS: លេខកូដ OTP បង្កើតគណនី Master Admin ថ្មី';
+interface StoredEncryptedEmailDoc {
+  secretId: string;
+  payloadEnc: string;
+  updatedAt: string;
+}
+
+const EMAIL_SECRET_COLLECTION = 'drpos_server_secrets';
+const EMAIL_SECRET_DOC_ID = 'master_otp_email_delivery_v1';
+const LOCAL_EMAIL_SECRET_FILE = path.resolve(process.cwd(), 'data', 'email_delivery.enc.json');
+const EMAIL_ENC_PREFIX = 'gcm1:';
+
+let cachedEmailConfig: { loaded: boolean; value: ResolvedEmailDeliveryConfig | null } = {
+  loaded: false,
+  value: null,
+};
+
+function getEmailSecretEncryptionKey(): Buffer {
+  const secret = String(
+    process.env.DEVELOPER_VAULT_ENCRYPTION_KEY ||
+      process.env.DEVELOPER_TOKEN_SECRET ||
+      getDeveloperAccessKey()
+  ).trim();
+  return crypto.createHash('sha256').update(`drpos_email_secret_aes256_v1:${secret}`).digest();
+}
+
+function encryptEmailPayload(plaintext: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getEmailSecretEncryptionKey(), iv);
+  const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${EMAIL_ENC_PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${enc.toString('base64url')}`;
+}
+
+function decryptEmailPayload(encoded: string): string {
+  if (!encoded || !encoded.startsWith(EMAIL_ENC_PREFIX)) return '';
+  const parts = encoded.slice(EMAIL_ENC_PREFIX.length).split('.');
+  if (parts.length !== 3) return '';
+  try {
+    const iv = Buffer.from(parts[0], 'base64url');
+    const tag = Buffer.from(parts[1], 'base64url');
+    const ciphertext = Buffer.from(parts[2], 'base64url');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getEmailSecretEncryptionKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function parseSavedEmailConfig(rawJson: string): ResolvedEmailDeliveryConfig | null {
+  if (!rawJson) return null;
+  try {
+    const parsed = JSON.parse(rawJson) as Partial<ResolvedEmailDeliveryConfig>;
+    if (parsed.mode === 'gmail' && parsed.gmailUser && parsed.gmailAppPassword) {
+      return {
+        source: 'console',
+        mode: 'gmail',
+        gmailUser: normalizeEmail(parsed.gmailUser),
+        gmailAppPassword: String(parsed.gmailAppPassword).replace(/\s+/g, ''),
+        fromEmail: String(parsed.fromEmail || '').trim(),
+        updatedAt: String(parsed.updatedAt || ''),
+      };
+    }
+    if (parsed.mode === 'smtp' && parsed.smtpHost && parsed.smtpUser && parsed.smtpPass) {
+      return {
+        source: 'console',
+        mode: 'smtp',
+        smtpHost: String(parsed.smtpHost).trim(),
+        smtpPort: Number(parsed.smtpPort) || 587,
+        smtpUser: String(parsed.smtpUser).trim(),
+        smtpPass: String(parsed.smtpPass),
+        fromEmail: String(parsed.fromEmail || '').trim(),
+        updatedAt: String(parsed.updatedAt || ''),
+      };
+    }
+    if (parsed.mode === 'resend' && parsed.resendApiKey && parsed.fromEmail) {
+      return {
+        source: 'console',
+        mode: 'resend',
+        resendApiKey: String(parsed.resendApiKey).trim(),
+        fromEmail: String(parsed.fromEmail).trim(),
+        updatedAt: String(parsed.updatedAt || ''),
+      };
+    }
+  } catch {
+    // Ignore malformed config payload
+  }
+  return null;
+}
+
+function readLocalEncryptedEmailDoc(): StoredEncryptedEmailDoc | null {
+  try {
+    if (!fs.existsSync(LOCAL_EMAIL_SECRET_FILE)) return null;
+    const raw = fs.readFileSync(LOCAL_EMAIL_SECRET_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<StoredEncryptedEmailDoc>;
+    if (parsed && parsed.secretId === EMAIL_SECRET_DOC_ID && typeof parsed.payloadEnc === 'string') {
+      return {
+        secretId: EMAIL_SECRET_DOC_ID,
+        payloadEnc: parsed.payloadEnc,
+        updatedAt: String(parsed.updatedAt || ''),
+      };
+    }
+  } catch {
+    // Ignore local file read failure
+  }
+  return null;
+}
+
+function writeLocalEncryptedEmailDoc(doc: StoredEncryptedEmailDoc | null): boolean {
+  try {
+    if (!doc) {
+      if (fs.existsSync(LOCAL_EMAIL_SECRET_FILE)) {
+        fs.unlinkSync(LOCAL_EMAIL_SECRET_FILE);
+      }
+      return true;
+    }
+    const dir = path.dirname(LOCAL_EMAIL_SECRET_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(LOCAL_EMAIL_SECRET_FILE, JSON.stringify(doc, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readConsoleEmailConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
+  if (cachedEmailConfig.loaded) {
+    return cachedEmailConfig.value;
+  }
+
+  let latestDoc: StoredEncryptedEmailDoc | null = readLocalEncryptedEmailDoc();
+  try {
+    const db = await getMongoDb();
+    if (db) {
+      const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
+      const found = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
+      if (found && typeof found.payloadEnc === 'string') {
+        if (!latestDoc || String(found.updatedAt || '') >= String(latestDoc.updatedAt || '')) {
+          latestDoc = {
+            secretId: EMAIL_SECRET_DOC_ID,
+            payloadEnc: found.payloadEnc,
+            updatedAt: String(found.updatedAt || ''),
+          };
+        }
+      }
+    }
+  } catch {
+    // Continue with local file fallback
+  }
+
+  const parsed = latestDoc ? parseSavedEmailConfig(decryptEmailPayload(latestDoc.payloadEnc)) : null;
+  cachedEmailConfig = { loaded: true, value: parsed };
+  return parsed;
+}
+
+function readEnvEmailConfig(): ResolvedEmailDeliveryConfig | null {
+  const smtpHost = String(process.env.SMTP_HOST || '').trim();
+  const smtpUser = String(process.env.SMTP_USER || '').trim();
+  let smtpPass = String(process.env.SMTP_PASS || '').trim();
+  if (smtpHost.toLowerCase().includes('gmail') && /^[a-z0-9]{4}(?:\s+[a-z0-9]{4}){3}$/i.test(smtpPass)) {
+    smtpPass = smtpPass.replace(/\s+/g, '');
+  }
+  if (smtpHost && smtpUser && smtpPass) {
+    return {
+      source: 'env',
+      mode: 'smtp',
+      smtpHost,
+      smtpPort: Number(process.env.SMTP_PORT || 587) || 587,
+      smtpUser,
+      smtpPass,
+      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim(),
+    };
+  }
+
+  const gmailUser = normalizeEmail(process.env.GMAIL_USER || '');
+  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '').trim();
+  if (gmailUser && gmailPass) {
+    return {
+      source: 'env',
+      mode: 'gmail',
+      gmailUser,
+      gmailAppPassword: gmailPass,
+      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim(),
+    };
+  }
+
+  const resendKey = String(process.env.RESEND_API_KEY || '').trim();
+  if (resendKey) {
+    return {
+      source: 'env',
+      mode: 'resend',
+      resendApiKey: resendKey,
+      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim() || 'DR-POS <onboarding@resend.dev>',
+    };
+  }
+
+  return null;
+}
+
+export async function resolveEmailDeliveryConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
+  const fromConsole = await readConsoleEmailConfig();
+  if (fromConsole) return fromConsole;
+  return readEnvEmailConfig();
+}
+
+export async function isEmailDeliveryConfigured(): Promise<boolean> {
+  const cfg = await resolveEmailDeliveryConfig();
+  return Boolean(cfg);
+}
+
+function summarizeEmailConfig(cfg: ResolvedEmailDeliveryConfig | null) {
+  if (!cfg) {
+    return {
+      configured: false,
+      source: 'none' as const,
+      mode: null,
+      maskedAccount: '',
+      smtpHost: '',
+      smtpPort: 587,
+      fromEmail: '',
+      updatedAt: '',
+    };
+  }
+  const rawAccount =
+    cfg.mode === 'gmail'
+      ? cfg.gmailUser || ''
+      : cfg.mode === 'smtp'
+      ? cfg.smtpUser || ''
+      : cfg.fromEmail || 'Resend API';
+  const maskedAccount = rawAccount.includes('@') ? maskEmailAddress(rawAccount) : rawAccount;
+  return {
+    configured: true,
+    source: cfg.source,
+    mode: cfg.mode,
+    maskedAccount,
+    smtpHost: cfg.smtpHost || '',
+    smtpPort: cfg.smtpPort || 587,
+    fromEmail: cfg.fromEmail || '',
+    updatedAt: cfg.updatedAt || '',
+  };
+}
+
+function buildOtpEmailContent(toEmail: string, otpCode: string, isTest = false) {
+  const subject = isTest
+    ? 'DR-POS: សាកល្បងសេវាផ្ញើ Email OTP ជោគជ័យ'
+    : 'DR-POS: លេខកូដ OTP បង្កើតគណនី Master Admin ថ្មី';
   const textBody = [
-    `DR-POS - ការផ្ទៀងផ្ទាត់បង្កើតគណនី Master Admin ថ្មី`,
+    isTest
+      ? `DR-POS - ការសាកល្បងផ្ញើ Email OTP ដោយស្វ័យប្រវត្តិជោគជ័យ!`
+      : `DR-POS - ការផ្ទៀងផ្ទាត់បង្កើតគណនី Master Admin ថ្មី`,
     ``,
     `លេខកូដ OTP ៦ ខ្ទង់របស់អ្នកគឺ: ${otpCode}`,
     `អ៊ីមែល: ${toEmail}`,
@@ -176,9 +446,13 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
 
   const htmlBody = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; color: #111827;">
-      <h2 style="margin: 0 0 8px; font-size: 18px; color: #0f766e;">DR-POS · ផ្ទៀងផ្ទាត់ OTP</h2>
+      <h2 style="margin: 0 0 8px; font-size: 18px; color: #0f766e;">DR-POS · ${isTest ? 'Test Email Delivery' : 'ផ្ទៀងផ្ទាត់ OTP'}</h2>
       <p style="margin: 0 0 16px; font-size: 14px; color: #4b5563;">
-        សូមប្រើលេខកូដ OTP ៦ ខ្ទង់ខាងក្រោម ដើម្បីបញ្ជាក់ការបង្កើតគណនី <strong>Master Admin ថ្មី</strong> សម្រាប់ <strong>${toEmail}</strong>៖
+        ${
+          isTest
+            ? `សេវាផ្ញើ Email OTP ត្រូវបានភ្ជាប់ដោយជោគជ័យសម្រាប់ <strong>${toEmail}</strong>៖`
+            : `សូមប្រើលេខកូដ OTP ៦ ខ្ទង់ខាងក្រោម ដើម្បីបញ្ជាក់ការបង្កើតគណនី <strong>Master Admin ថ្មី</strong> សម្រាប់ <strong>${toEmail}</strong>៖`
+        }
       </p>
       <div style="margin: 20px 0; padding: 16px; text-align: center; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px;">
         <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #0f766e; font-family: monospace;">${otpCode}</span>
@@ -189,19 +463,55 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
     </div>
   `.trim();
 
-  const smtpHost = String(process.env.SMTP_HOST || '').trim();
-  const smtpUser = String(process.env.SMTP_USER || '').trim();
-  const smtpPass = String(process.env.SMTP_PASS || '').trim();
-  if (smtpHost && smtpUser && smtpPass) {
-    const nodemailer = await import('nodemailer');
-    const port = Number(process.env.SMTP_PORT || 587);
+  return { subject, textBody, htmlBody };
+}
+
+async function sendOtpEmailWithConfig(
+  cfg: ResolvedEmailDeliveryConfig,
+  toEmail: string,
+  otpCode: string,
+  isTest = false
+): Promise<void> {
+  const { subject, textBody, htmlBody } = buildOtpEmailContent(toEmail, otpCode, isTest);
+
+  if (cfg.mode === 'resend' && cfg.resendApiKey) {
+    const fromAddr = cfg.fromEmail || 'DR-POS <onboarding@resend.dev>';
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: [toEmail],
+        subject,
+        text: textBody,
+        html: htmlBody,
+      }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`Resend API error (${res.status}): ${errBody.slice(0, 220)}`);
+    }
+    return;
+  }
+
+  const nodemailer = await import('nodemailer');
+
+  if (cfg.mode === 'smtp' && cfg.smtpHost && cfg.smtpUser && cfg.smtpPass) {
+    const port = Number(cfg.smtpPort || 587);
     const transporter = nodemailer.default.createTransport({
-      host: smtpHost,
+      host: cfg.smtpHost,
       port,
       secure: port === 465,
-      auth: { user: smtpUser, pass: smtpPass },
+      auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
-    const fromAddr = String(process.env.OTP_FROM_EMAIL || '').trim() || smtpUser;
+    const rawFrom = cfg.fromEmail || cfg.smtpUser;
+    const fromAddr = rawFrom.includes('<') ? rawFrom : `DR-POS <${rawFrom}>`;
     await transporter.sendMail({
       from: fromAddr,
       to: toEmail,
@@ -212,15 +522,16 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
     return;
   }
 
-  const gmailUser = String(process.env.GMAIL_USER || '').trim();
-  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').trim();
-  if (gmailUser && gmailPass) {
-    const nodemailer = await import('nodemailer');
+  if (cfg.mode === 'gmail' && cfg.gmailUser && cfg.gmailAppPassword) {
     const transporter = nodemailer.default.createTransport({
       service: 'gmail',
-      auth: { user: gmailUser, pass: gmailPass },
+      auth: { user: cfg.gmailUser, pass: cfg.gmailAppPassword },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
-    const fromAddr = String(process.env.OTP_FROM_EMAIL || '').trim() || `DR-POS <${gmailUser}>`;
+    const rawFrom = cfg.fromEmail || cfg.gmailUser;
+    const fromAddr = rawFrom.includes('<') ? rawFrom : `DR-POS <${rawFrom}>`;
     await transporter.sendMail({
       from: fromAddr,
       to: toEmail,
@@ -232,6 +543,259 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
   }
 
   throw new Error('OTP_EMAIL_NOT_CONFIGURED');
+}
+
+async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
+  const cfg = await resolveEmailDeliveryConfig();
+  if (!cfg) {
+    throw new Error('OTP_EMAIL_NOT_CONFIGURED');
+  }
+  await sendOtpEmailWithConfig(cfg, toEmail, otpCode, false);
+}
+
+export async function runGetDeveloperEmailConfig(
+  headers: Record<string, string | string[] | undefined>
+): Promise<ApiResult> {
+  const token = getDeveloperTokenFromHeaders(headers);
+  if (!verifyDeveloperToken(token)) {
+    return { status: 401, body: { error: 'Developer session expired or invalid' } };
+  }
+  const cfg = await resolveEmailDeliveryConfig();
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      ...summarizeEmailConfig(cfg),
+    },
+  };
+}
+
+export async function runSaveDeveloperEmailConfig(
+  headers: Record<string, string | string[] | undefined>,
+  payload: Record<string, unknown>
+): Promise<ApiResult> {
+  const token = getDeveloperTokenFromHeaders(headers);
+  if (!verifyDeveloperToken(token)) {
+    return { status: 401, body: { error: 'Developer session expired or invalid' } };
+  }
+
+  const action = String(payload?.action || 'save').trim().toLowerCase();
+  if (action === 'test') {
+    const activeCfg = await resolveEmailDeliveryConfig();
+    if (!activeCfg) {
+      return {
+        status: 400,
+        body: { error: 'ម៉ាស៊ីនមេមិនទាន់មានការកំណត់សេវាផ្ញើ Email នៅឡើយទេ។ សូមបំពេញព័ត៌មានជាមុនសិន។' },
+      };
+    }
+    const testToEmail = normalizeEmail(payload?.testToEmail || '');
+    try {
+      if (testToEmail && isValidEmailFormat(testToEmail)) {
+        await sendOtpEmailWithConfig(activeCfg, testToEmail, '123456', true);
+      } else if (activeCfg.mode !== 'resend') {
+        const nodemailer = await import('nodemailer');
+        const transporter =
+          activeCfg.mode === 'gmail'
+            ? nodemailer.default.createTransport({
+                service: 'gmail',
+                auth: { user: activeCfg.gmailUser, pass: activeCfg.gmailAppPassword },
+                connectionTimeout: 10_000,
+                greetingTimeout: 10_000,
+                socketTimeout: 15_000,
+              })
+            : nodemailer.default.createTransport({
+                host: activeCfg.smtpHost,
+                port: Number(activeCfg.smtpPort || 587),
+                secure: Number(activeCfg.smtpPort || 587) === 465,
+                auth: { user: activeCfg.smtpUser, pass: activeCfg.smtpPass },
+                connectionTimeout: 10_000,
+                greetingTimeout: 10_000,
+                socketTimeout: 15_000,
+              });
+        await transporter.verify();
+      } else {
+        return {
+          status: 400,
+          body: { error: 'សូមបញ្ចូល Gmail ទទួល Email សាកល្បង ដើម្បីផ្ទៀងផ្ទាត់ Resend API។' },
+        };
+      }
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          testedEmail: testToEmail && isValidEmailFormat(testToEmail) ? testToEmail : undefined,
+          ...summarizeEmailConfig(activeCfg),
+        },
+      };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Connection failed';
+      return {
+        status: 400,
+        body: {
+          error: `ការសាកល្បងសេវា Email មិនជោគជ័យទេ (${detail.slice(0, 180)})`,
+        },
+      };
+    }
+  }
+
+  if (action === 'clear') {
+    let persisted = false;
+    try {
+      const db = await getMongoDb();
+      if (db) {
+        await db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION).deleteOne({
+          secretId: EMAIL_SECRET_DOC_ID,
+        });
+        persisted = true;
+      }
+    } catch {
+      // Ignore Mongo clear errors
+    }
+    const localCleared = writeLocalEncryptedEmailDoc(null);
+    cachedEmailConfig = { loaded: true, value: null };
+    const envCfg = await resolveEmailDeliveryConfig();
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        cleared: true,
+        persisted,
+        localCleared,
+        ...summarizeEmailConfig(envCfg),
+      },
+    };
+  }
+
+  const mode = String(payload?.mode || 'gmail').trim().toLowerCase() as EmailDeliveryMode;
+  const fromEmail = String(payload?.fromEmail || '').trim();
+  const testToEmail = normalizeEmail(payload?.testToEmail || '');
+  const nowIso = new Date().toISOString();
+
+  let candidate: ResolvedEmailDeliveryConfig;
+  if (mode === 'gmail') {
+    const gmailUser = normalizeEmail(payload?.gmailUser || '');
+    const gmailAppPassword = String(payload?.gmailAppPassword || '').replace(/\s+/g, '').trim();
+    if (!isValidEmailFormat(gmailUser)) {
+      return { status: 400, body: { error: 'សូមបញ្ចូលអាសយដ្ឋាន Gmail អ្នកផ្ញើ (Sender Gmail) អោយបានត្រឹមត្រូវ។' } };
+    }
+    if (gmailAppPassword.length < 8) {
+      return {
+        status: 400,
+        body: { error: 'សូមបញ្ចូល Gmail App Password ១៦ ខ្ទង់ (បង្កើតពី Google Account → App Passwords)។' },
+      };
+    }
+    candidate = {
+      source: 'console',
+      mode: 'gmail',
+      gmailUser,
+      gmailAppPassword,
+      fromEmail,
+      updatedAt: nowIso,
+    };
+  } else if (mode === 'smtp') {
+    const smtpHost = String(payload?.smtpHost || '').trim();
+    const smtpPort = Number(payload?.smtpPort || 587) || 587;
+    const smtpUser = String(payload?.smtpUser || '').trim();
+    const smtpPass = String(payload?.smtpPass || '').trim();
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      return { status: 400, body: { error: 'សូមបំពេញ SMTP Host, SMTP Username និង SMTP Password អោយបានគ្រប់គ្រាន់។' } };
+    }
+    candidate = {
+      source: 'console',
+      mode: 'smtp',
+      smtpHost,
+      smtpPort,
+      smtpUser,
+      smtpPass,
+      fromEmail,
+      updatedAt: nowIso,
+    };
+  } else if (mode === 'resend') {
+    const resendApiKey = String(payload?.resendApiKey || '').trim();
+    if (!resendApiKey) {
+      return { status: 400, body: { error: 'សូមបញ្ចូល Resend API Key (ចាប់ផ្ដើមដោយ re_...) ជាមុនសិន។' } };
+    }
+    candidate = {
+      source: 'console',
+      mode: 'resend',
+      resendApiKey,
+      fromEmail: fromEmail || 'DR-POS <onboarding@resend.dev>',
+      updatedAt: nowIso,
+    };
+  } else {
+    return { status: 400, body: { error: 'ប្រភេទសេវាផ្ញើ Email មិនត្រឹមត្រូវទេ។' } };
+  }
+
+  // Verify credentials live before persisting so invalid passwords are caught immediately
+  try {
+    if (testToEmail && isValidEmailFormat(testToEmail)) {
+      await sendOtpEmailWithConfig(candidate, testToEmail, '123456', true);
+    } else if (candidate.mode !== 'resend') {
+      const nodemailer = await import('nodemailer');
+      const transporter =
+        candidate.mode === 'gmail'
+          ? nodemailer.default.createTransport({
+              service: 'gmail',
+              auth: { user: candidate.gmailUser, pass: candidate.gmailAppPassword },
+              connectionTimeout: 10_000,
+              greetingTimeout: 10_000,
+              socketTimeout: 15_000,
+            })
+          : nodemailer.default.createTransport({
+              host: candidate.smtpHost,
+              port: Number(candidate.smtpPort || 587),
+              secure: Number(candidate.smtpPort || 587) === 465,
+              auth: { user: candidate.smtpUser, pass: candidate.smtpPass },
+              connectionTimeout: 10_000,
+              greetingTimeout: 10_000,
+              socketTimeout: 15_000,
+            });
+      await transporter.verify();
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Connection failed';
+    return {
+      status: 400,
+      body: {
+        error: `មិនអាចភ្ជាប់សេវាផ្ញើ Email បានទេ! សូមពិនិត្យ Gmail App Password ឬ SMTP ម្ដងទៀត (${detail})`,
+      },
+    };
+  }
+
+  const encryptedDoc: StoredEncryptedEmailDoc = {
+    secretId: EMAIL_SECRET_DOC_ID,
+    payloadEnc: encryptEmailPayload(JSON.stringify(candidate)),
+    updatedAt: nowIso,
+  };
+
+  let persistedIn: 'mongodb' | 'local-file' | 'memory' = 'memory';
+  try {
+    const db = await getMongoDb();
+    if (db) {
+      await db
+        .collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION)
+        .updateOne({ secretId: EMAIL_SECRET_DOC_ID }, { $set: encryptedDoc }, { upsert: true });
+      persistedIn = 'mongodb';
+    }
+  } catch {
+    // Fallback to local encrypted file
+  }
+
+  if (writeLocalEncryptedEmailDoc(encryptedDoc) && persistedIn === 'memory') {
+    persistedIn = 'local-file';
+  }
+
+  cachedEmailConfig = { loaded: true, value: candidate };
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      persistedIn,
+      testedEmail: testToEmail && isValidEmailFormat(testToEmail) ? testToEmail : undefined,
+      ...summarizeEmailConfig(candidate),
+    },
+  };
 }
 
 export async function runRequestMasterOtp(
@@ -269,7 +833,7 @@ export async function runRequestMasterOtp(
     };
   }
 
-  if (!isEmailDeliveryConfigured()) {
+  if (!(await isEmailDeliveryConfigured())) {
     return {
       status: 503,
       body: {
@@ -277,7 +841,7 @@ export async function runRequestMasterOtp(
         emailDeliveryConfigured: false,
         telegramUrl,
         error:
-          'ម៉ាស៊ីនមេមិនទាន់ភ្ជាប់សេវាផ្ញើ Email (SMTP / Gmail App Password) ដោយស្វ័យប្រវត្តិទេ! សូមទាក់ទង Developer តាម Telegram ឬឱ្យ Developer បង្កើតលេខកូដ OTP ៦ ខ្ទង់នៅក្នុង Key Developer Console សម្រាប់ Gmail របស់អ្នក។',
+          'ម៉ាស៊ីនមេមិនទាន់ភ្ជាប់សេវាផ្ញើ Email (SMTP / Gmail App Password) ដោយស្វ័យប្រវត្តិទេ! សូមទាក់ទង Developer តាម Telegram ឬឱ្យ Developer ភ្ជាប់ Gmail App Password / បង្កើតលេខកូដ OTP ៦ ខ្ទង់នៅក្នុង Key Developer Console។',
       },
     };
   }
@@ -310,6 +874,25 @@ export async function runRequestMasterOtp(
   const expMs = nowMs + OTP_TTL_MS;
   const expiresAt = new Date(expMs).toISOString();
 
+  // Send OTP email first so failed SMTP delivery does not lock the user in a 30s cooldown
+  try {
+    await sendOtpEmail(email, otpCode);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message.slice(0, 180) : 'Email delivery error';
+    console.error('Failed to send Master Admin OTP email:', err);
+    return {
+      status: 502,
+      body: {
+        code: 'OTP_EMAIL_SEND_FAILED',
+        emailDeliveryConfigured: true,
+        telegramUrl,
+        detail,
+        error:
+          `មិនអាចផ្ញើ Email OTP បានទេនៅពេលនេះ (${detail})។ សូមពិនិត្យការកំណត់ Email Server ក្នុង Key Developer Console ឬស្នើសុំ OTP ពី Developer តាម Telegram។`,
+      },
+    };
+  }
+
   const challengeRecord: OtpChallengeRecord = {
     emailHash,
     maskedEmail: maskEmailAddress(email),
@@ -330,21 +913,6 @@ export async function runRequestMasterOtp(
     };
     return { changed: true, result: true };
   }, onMirrorLocal);
-
-  try {
-    await sendOtpEmail(email, otpCode);
-  } catch (err) {
-    console.error('Failed to send Master Admin OTP email:', err);
-    return {
-      status: 502,
-      body: {
-        emailDeliveryConfigured: true,
-        telegramUrl,
-        error:
-          'មិនអាចផ្ញើ Email OTP បានទេនៅពេលនេះ។ សូមពិនិត្យការកំណត់ Email Server ឬស្នើសុំ OTP ពី Developer តាម Telegram។',
-      },
-    };
-  }
 
   const challengeToken = signChallengeToken({
     v: 1,
@@ -443,12 +1011,14 @@ export async function runDeveloperIssueMasterOtp(
   }, onMirrorLocal);
 
   let emailedToUser = false;
-  if (alsoSendEmail && isEmailDeliveryConfigured()) {
+  let emailError = '';
+  if (alsoSendEmail && (await isEmailDeliveryConfigured())) {
     try {
       await sendOtpEmail(email, otpCode);
       emailedToUser = true;
-    } catch {
+    } catch (err) {
       emailedToUser = false;
+      emailError = err instanceof Error ? err.message.slice(0, 180) : 'Email delivery failed';
     }
   }
 
@@ -462,6 +1032,7 @@ export async function runDeveloperIssueMasterOtp(
       expiresAt,
       expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
       emailedToUser,
+      ...(emailError ? { emailError } : {}),
     },
   };
 }
@@ -471,7 +1042,7 @@ export async function runVerifyMasterOtp(
   onMirrorLocal?: (state: DeveloperVaultState) => void
 ): Promise<ApiResult> {
   const email = normalizeEmail(payload?.email);
-  const otp = String(payload?.otp || '').replace(/\D+/g, '').trim();
+  const otp = normalizeOtpDigits(payload?.otp);
   const rawChallengeToken = String(payload?.challengeToken || '').trim();
 
   if (!isValidEmailFormat(email)) {

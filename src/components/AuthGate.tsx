@@ -19,8 +19,10 @@ import {
   RefreshCw,
   Search,
   Send,
+  Server,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UserPlus,
   Users,
   X,
@@ -41,10 +43,12 @@ import {
   checkEmailAuthGate,
   DEFAULT_TELEGRAM_URL,
   fetchDeveloperOverviewApi,
+  getDeveloperEmailConfigApi,
   getLicenseRemainingSummary,
   issueDeveloperMasterOtpApi,
   requestMasterAdminOtpApi,
   resolveDeveloperPasswordLoginApi,
+  saveDeveloperEmailConfigApi,
   subscribeToDeveloperVault,
   syncMasterPasswordToVaultApi,
   updateDeveloperTelegramApi,
@@ -52,6 +56,8 @@ import {
   updateMasterAdminPasswordByDeveloperApi,
   verifyDeveloperKeyApi,
   verifyMasterAdminOtpApi,
+  type DeveloperEmailConfigStatus,
+  type DeveloperEmailDeliveryMode,
   type MasterAdminLicenseRecord,
 } from '../services/developerLicense';
 import { useIsDesktopDevice } from '../utils/device';
@@ -95,6 +101,13 @@ export {
 
 const LEGACY_KNOWN_EMAILS_KEY = 'drpos_known_emails_v1';
 const LEGACY_KNOWN_ADMINS_KEY = 'drpos_known_admins_v1';
+
+function normalizeOtpDigits(raw: string): string {
+  return String(raw || '')
+    .replace(/[\u17E0-\u17E9]/g, (ch) => String(ch.charCodeAt(0) - 0x17e0))
+    .replace(/[\uFF10-\uFF19]/g, (ch) => String(ch.charCodeAt(0) - 0xff10))
+    .replace(/\D+/g, '');
+}
 
 function mapFirebaseAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
@@ -218,6 +231,21 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     emailedToUser?: boolean;
   } | null>(null);
 
+  // Developer Console: Automatic Email OTP Delivery Config (Gmail / SMTP / Resend)
+  const [devEmailStatus, setDevEmailStatus] = useState<DeveloperEmailConfigStatus | null>(null);
+  const [devEmailMode, setDevEmailMode] = useState<DeveloperEmailDeliveryMode>('gmail');
+  const [devGmailUser, setDevGmailUser] = useState('');
+  const [devGmailAppPass, setDevGmailAppPass] = useState('');
+  const [devShowEmailSecret, setDevShowEmailSecret] = useState(false);
+  const [devSmtpHost, setDevSmtpHost] = useState('');
+  const [devSmtpPort, setDevSmtpPort] = useState('587');
+  const [devSmtpUser, setDevSmtpUser] = useState('');
+  const [devSmtpPass, setDevSmtpPass] = useState('');
+  const [devResendApiKey, setDevResendApiKey] = useState('');
+  const [devFromEmail, setDevFromEmail] = useState('');
+  const [devTestToEmail, setDevTestToEmail] = useState('');
+  const [devEmailBusy, setDevEmailBusy] = useState(false);
+
   const firebaseProvidersUrl = `https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`;
 
   useEffect(() => {
@@ -258,6 +286,19 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       })
       .finally(() => {
         if (!cancelled) setDevRefreshing(false);
+      });
+
+    getDeveloperEmailConfigApi(devToken)
+      .then((cfg) => {
+        if (cancelled || !cfg) return;
+        setDevEmailStatus(cfg);
+        if (cfg.mode) setDevEmailMode(cfg.mode);
+        if (cfg.smtpHost) setDevSmtpHost(cfg.smtpHost);
+        if (cfg.smtpPort) setDevSmtpPort(String(cfg.smtpPort));
+        if (cfg.fromEmail) setDevFromEmail(cfg.fromEmail);
+      })
+      .catch(() => {
+        // Ignore silent status load error
       });
 
     const unsubVault = subscribeToDeveloperVault(
@@ -340,12 +381,17 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         if (typeof res.retryAfterSeconds === 'number' && res.retryAfterSeconds > 0) {
           setOtpCooldownSec(res.retryAfterSeconds);
         }
-        if (res.code === 'OTP_EMAIL_NOT_CONFIGURED') {
+        if (
+          res.telegramUrl ||
+          res.code === 'OTP_EMAIL_NOT_CONFIGURED' ||
+          res.code === 'OTP_EMAIL_SEND_FAILED'
+        ) {
           setOtpTelegramFallbackUrl(res.telegramUrl || DEFAULT_TELEGRAM_URL);
         }
         setOtpErrorMsg(res.error || 'មិនអាចផ្ញើលេខកូដ OTP បានទេ។');
       }
     } catch {
+      setOtpTelegramFallbackUrl(DEFAULT_TELEGRAM_URL);
       setOtpErrorMsg('មិនអាចភ្ជាប់ទៅសេវាផ្ញើ OTP បានទេនៅពេលនេះ។ សូមព្យាយាមម្ដងទៀត។');
     } finally {
       setOtpRequestBusy(false);
@@ -356,7 +402,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     if (otpVerifiedEmail === cleanEmail && otpVerifiedToken) {
       return true;
     }
-    const cleanOtp = otpCodeInput.replace(/\D+/g, '').trim();
+    const cleanOtp = normalizeOtpDigits(otpCodeInput).slice(0, 6);
     if (!/^\d{6}$/.test(cleanOtp)) {
       setOtpErrorMsg('សូមបញ្ចូលលេខកូដ OTP ៦ ខ្ទង់ជាមុនសិន មុនពេលបង្កើតគណនី Master Admin ថ្មី។');
       return false;
@@ -802,6 +848,16 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         setDevSelectedName(res.masterAdmins[0].displayName);
       }
       setDevKeyInput('');
+      getDeveloperEmailConfigApi(res.devToken)
+        .then((cfg) => {
+          if (!cfg) return;
+          setDevEmailStatus(cfg);
+          if (cfg.mode) setDevEmailMode(cfg.mode);
+          if (cfg.smtpHost) setDevSmtpHost(cfg.smtpHost);
+          if (cfg.smtpPort) setDevSmtpPort(String(cfg.smtpPort));
+          if (cfg.fromEmail) setDevFromEmail(cfg.fromEmail);
+        })
+        .catch(() => {});
     } catch (err) {
       setDevAuthError(err instanceof Error ? err.message : 'លេខ Key Developer មិនត្រឹមត្រូវទេ!');
     } finally {
@@ -831,14 +887,117 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     }
   };
 
+  const handleSaveDevEmailConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!devToken) return;
+    setDevEmailBusy(true);
+    setDevFeedback(null);
+    try {
+      const saved = await saveDeveloperEmailConfigApi(devToken, {
+        action: 'save',
+        mode: devEmailMode,
+        gmailUser: devGmailUser.trim(),
+        gmailAppPassword: devGmailAppPass.replace(/\s+/g, '').trim(),
+        smtpHost: devSmtpHost.trim(),
+        smtpPort: Number(devSmtpPort) || 587,
+        smtpUser: devSmtpUser.trim(),
+        smtpPass: devSmtpPass,
+        resendApiKey: devResendApiKey.trim(),
+        fromEmail: devFromEmail.trim(),
+        testToEmail: devTestToEmail.trim(),
+      });
+      setDevEmailStatus(saved);
+      setDevGmailAppPass('');
+      setDevSmtpPass('');
+      setDevResendApiKey('');
+      const storageNote =
+        saved.persistedIn === 'memory'
+          ? ' (ចំណាំ៖ រក្សាទុកក្នុង RAM បណ្ដោះអាសន្ន — សូមកំណត់ Env Vars លើ Host ប្រសិនបើត្រូវការរក្សាទុកជាអចិន្ត្រៃយ៍)'
+          : '';
+      const testNote = saved.testedEmail
+        ? ` និងបានផ្ញើ Email សាកល្បងទៅ ${saved.testedEmail} ជោគជ័យ!`
+        : ' (បានផ្ទៀងផ្ទាត់ការតភ្ជាប់ជោគជ័យ!)';
+      setDevFeedback({
+        type: 'success',
+        message: `បានភ្ជាប់សេវាផ្ញើ Email OTP ដោយស្វ័យប្រវត្តិ (${saved.maskedAccount || saved.mode})${testNote}${storageNote}`,
+      });
+    } catch (err) {
+      setDevFeedback({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'មិនអាចភ្ជាប់សេវាផ្ញើ Email OTP បានទេ។ សូមពិនិត្យព័ត៌មានឡើងវិញ។',
+      });
+    } finally {
+      setDevEmailBusy(false);
+    }
+  };
+
+  const handleTestExistingDevEmailConfig = async () => {
+    if (!devToken) return;
+    setDevEmailBusy(true);
+    setDevFeedback(null);
+    try {
+      const res = await saveDeveloperEmailConfigApi(devToken, {
+        action: 'test',
+        testToEmail: devTestToEmail.trim(),
+      });
+      setDevEmailStatus(res);
+      setDevFeedback({
+        type: 'success',
+        message: `បានផ្ទៀងផ្ទាត់សេវាផ្ញើ Email (${res.maskedAccount || res.mode}) និងផ្ញើ Email សាកល្បងទៅ ${res.testedEmail || 'គណនីគោលដៅ'} ដោយជោគជ័យ!`,
+      });
+    } catch (err) {
+      setDevFeedback({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'ការសាកល្បងផ្ញើ Email បច្ចុប្បន្នមិនជោគជ័យទេ។ សូមពិនិត្យការកំណត់ម្ដងទៀត។',
+      });
+    } finally {
+      setDevEmailBusy(false);
+    }
+  };
+
+  const handleClearDevEmailConfig = async () => {
+    if (!devToken) return;
+    setDevEmailBusy(true);
+    setDevFeedback(null);
+    try {
+      const res = await saveDeveloperEmailConfigApi(devToken, { action: 'clear' });
+      setDevEmailStatus(res);
+      setDevFeedback({
+        type: 'success',
+        message: res.configured
+          ? 'បានលុបការកំណត់ពី Console ហើយ (បច្ចុប្បន្នប្រើ Env Vars របស់ Server)។'
+          : 'បានផ្ដាច់សេវាផ្ញើ Email OTP ពី Console រួចរាល់។',
+      });
+    } catch (err) {
+      setDevFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'មិនអាចលុបការកំណត់ Email បានទេ។',
+      });
+    } finally {
+      setDevEmailBusy(false);
+    }
+  };
+
   const handleRefreshDevOverview = async () => {
     if (!devToken) return;
     setDevRefreshing(true);
     setDevFeedback(null);
     try {
-      const res = await fetchDeveloperOverviewApi(devToken);
+      const [res, emailCfg] = await Promise.all([
+        fetchDeveloperOverviewApi(devToken),
+        getDeveloperEmailConfigApi(devToken),
+      ]);
       setDevMasterAdmins(res.masterAdmins);
       setDevTelegramInput(res.telegramUrl || DEFAULT_TELEGRAM_URL);
+      if (emailCfg) {
+        setDevEmailStatus(emailCfg);
+      }
     } catch (err) {
       setDevFeedback({
         type: 'error',
@@ -973,6 +1132,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
           type: 'success',
           message: res.emailedToUser
             ? `បានបង្កើតលេខកូដ OTP (${res.otpCode}) និងផ្ញើទៅ ${res.email || targetEmail} ដោយជោគជ័យ!`
+            : res.emailError
+            ? `បានបង្កើតលេខកូដ OTP (${res.otpCode}) សម្រាប់ ${res.email || targetEmail} (អាចចម្លងផ្ញើដោយផ្ទាល់) — ការផ្ញើ Email ស្វ័យប្រវត្តិមិនជោគជ័យ៖ ${res.emailError}`
             : `បានបង្កើតលេខកូដ OTP ៦ ខ្ទង់សម្រាប់ ${res.email || targetEmail} ដោយជោគជ័យ!`,
         });
       }
@@ -1165,7 +1326,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     otpVerifiedEmail === cleanEmailLower &&
     Boolean(otpVerifiedToken);
   const canAdvanceStep3Otp =
-    isOtpVerifiedForCurrentEmail || otpCodeInput.replace(/\D+/g, '').length === 6;
+    isOtpVerifiedForCurrentEmail || normalizeOtpDigits(otpCodeInput).length === 6;
   const canSubmitFinalCreateAdmin = isOtpVerifiedForCurrentEmail && captchaVerified;
 
   const anyBusy = busy || creatingAdditionalBusy || otpVerifyBusy || stepCheckingBusy;
@@ -1686,7 +1847,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 autoFocus
                                 value={otpCodeInput}
                                 onChange={(e) => {
-                                  const digits = e.target.value.replace(/\D+/g, '').slice(0, 6);
+                                  const digits = normalizeOtpDigits(e.target.value).slice(0, 6);
                                   setOtpCodeInput(digits);
                                   setOtpErrorMsg('');
                                   setError('');
@@ -1702,7 +1863,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                                 disabled={
                                   isOtpVerifiedForCurrentEmail ||
                                   otpVerifyBusy ||
-                                  otpCodeInput.replace(/\D+/g, '').length !== 6
+                                  normalizeOtpDigits(otpCodeInput).length !== 6
                                 }
                                 onClick={handleVerifyOtpClick}
                                 className="min-h-10 px-3 text-xs font-semibold shrink-0 whitespace-nowrap"
@@ -1739,17 +1900,36 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               <p className="text-xs font-medium text-danger leading-relaxed">
                                 {otpErrorMsg}
                               </p>
-                              {otpTelegramFallbackUrl && (
-                                <a
-                                  href={otpTelegramFallbackUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
-                                >
-                                  <Send className="h-3.5 w-3.5 shrink-0" />
-                                  <span>ទាក់ទង Developer តាម Telegram ដើម្បីទទួល OTP</span>
-                                  <ExternalLink className="h-3 w-3 shrink-0" />
-                                </a>
+                              {(otpTelegramFallbackUrl || isDesktop) && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {otpTelegramFallbackUrl && (
+                                    <a
+                                      href={otpTelegramFallbackUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground transition-colors"
+                                    >
+                                      <Send className="h-3.5 w-3.5 shrink-0" />
+                                      <span>ទាក់ទង Developer តាម Telegram ដើម្បីទទួល OTP</span>
+                                      <ExternalLink className="h-3 w-3 shrink-0" />
+                                    </a>
+                                  )}
+                                  {isDesktop && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (cleanEmailLower && !devOtpEmail) {
+                                          setDevOtpEmail(cleanEmailLower);
+                                        }
+                                        setDevModalOpen(true);
+                                      }}
+                                      className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:border-primary/50 hover:text-primary transition-colors cursor-pointer"
+                                    >
+                                      <KeyRound className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      <span>បើក Key Developer Console</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
                           )}
@@ -2280,6 +2460,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                               <p className="text-xs text-muted truncate">
                                 សម្រាប់ Gmail៖{' '}
                                 <strong className="text-foreground">{devGeneratedOtp.email}</strong>
+                                <span className="ml-2 text-[11px] font-semibold text-primary">
+                                  ({devGeneratedOtp.emailedToUser ? 'បានផ្ញើទៅ Gmail រួច' : 'សូមចម្លង OTP ផ្ញើឱ្យអតិថិជន'})
+                                </span>
                               </p>
                               <p className="text-lg sm:text-xl font-bold font-mono tracking-[0.25em] text-primary tabular-nums">
                                 {devGeneratedOtp.otpCode}
@@ -2308,6 +2491,211 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                             </button>
                           </div>
                         )}
+                      </form>
+
+                      {/* 1C. Automatic Email OTP Delivery Setup (Gmail App Password / SMTP / Resend) */}
+                      <form
+                        onSubmit={handleSaveDevEmailConfig}
+                        className="rounded-card border border-border/80 bg-background/60 p-4 space-y-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold text-foreground">
+                            <Mail className="h-4 w-4 text-primary shrink-0" />
+                            <span>ភ្ជាប់សេវាផ្ញើ Email OTP ស្វ័យប្រវត្តិ (Gmail App Password / SMTP / Resend)</span>
+                          </div>
+                          {devEmailStatus?.configured ? (
+                            <span className="inline-flex items-center gap-1 rounded-control border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                              <span>
+                                បានភ្ជាប់ ({devEmailStatus.mode?.toUpperCase()} · {devEmailStatus.maskedAccount} ·{' '}
+                                {devEmailStatus.source === 'env' ? 'Env' : 'Console'})
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-control border border-danger/35 bg-danger/10 px-2.5 py-1 text-[11px] font-semibold text-danger">
+                              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                              <span>មិនទាន់ភ្ជាប់សេវា Email ទេ</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {(
+                            [
+                              { id: 'gmail', label: 'Gmail App Password' },
+                              { id: 'smtp', label: 'Custom SMTP' },
+                              { id: 'resend', label: 'Resend API' },
+                            ] as const
+                          ).map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setDevEmailMode(tab.id)}
+                              className={`min-h-9 rounded-control border px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                                devEmailMode === tab.id
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-border bg-surface text-foreground hover:border-primary/45'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {devEmailMode === 'gmail' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <input
+                              type="email"
+                              value={devGmailUser}
+                              onChange={(e) => setDevGmailUser(e.target.value)}
+                              placeholder="Sender Gmail (ឧ. yourshop@gmail.com)"
+                              className={`${inputClass} text-xs sm:text-sm`}
+                            />
+                            <div className="relative">
+                              <input
+                                type={devShowEmailSecret ? 'text' : 'password'}
+                                value={devGmailAppPass}
+                                onChange={(e) => setDevGmailAppPass(e.target.value)}
+                                placeholder="Gmail App Password ១៦ ខ្ទង់"
+                                className={`${inputClass} pr-10 font-mono text-xs sm:text-sm`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setDevShowEmailSecret((v) => !v)}
+                                aria-label={devShowEmailSecret ? 'លាក់ពាក្យសម្ងាត់' : 'មើលពាក្យសម្ងាត់'}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
+                              >
+                                {devShowEmailSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {devEmailMode === 'smtp' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                            <input
+                              type="text"
+                              value={devSmtpHost}
+                              onChange={(e) => setDevSmtpHost(e.target.value)}
+                              placeholder="SMTP Host (ឧ. smtp.gmail.com)"
+                              className={`${inputClass} text-xs sm:text-sm`}
+                            />
+                            <input
+                              type="number"
+                              value={devSmtpPort}
+                              onChange={(e) => setDevSmtpPort(e.target.value)}
+                              placeholder="Port (587 / 465)"
+                              className={`${inputClass} text-xs sm:text-sm`}
+                            />
+                            <input
+                              type="text"
+                              value={devSmtpUser}
+                              onChange={(e) => setDevSmtpUser(e.target.value)}
+                              placeholder="SMTP Username"
+                              className={`${inputClass} text-xs sm:text-sm`}
+                            />
+                            <div className="relative">
+                              <input
+                                type={devShowEmailSecret ? 'text' : 'password'}
+                                value={devSmtpPass}
+                                onChange={(e) => setDevSmtpPass(e.target.value)}
+                                placeholder="SMTP Password"
+                                className={`${inputClass} pr-10 font-mono text-xs sm:text-sm`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setDevShowEmailSecret((v) => !v)}
+                                aria-label={devShowEmailSecret ? 'លាក់ពាក្យសម្ងាត់' : 'មើលពាក្យសម្ងាត់'}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
+                              >
+                                {devShowEmailSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {devEmailMode === 'resend' && (
+                          <div className="relative">
+                            <input
+                              type={devShowEmailSecret ? 'text' : 'password'}
+                              value={devResendApiKey}
+                              onChange={(e) => setDevResendApiKey(e.target.value)}
+                              placeholder="Resend API Key (re_...)"
+                              className={`${inputClass} pr-10 font-mono text-xs sm:text-sm`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setDevShowEmailSecret((v) => !v)}
+                              aria-label={devShowEmailSecret ? 'លាក់ API Key' : 'មើល API Key'}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
+                            >
+                              {devShowEmailSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <input
+                            type="text"
+                            value={devFromEmail}
+                            onChange={(e) => setDevFromEmail(e.target.value)}
+                            placeholder="From Email (ស្រេចចិត្ត ឧ. DR-POS <noreply@domain.com>)"
+                            className={`${inputClass} text-xs sm:text-sm`}
+                          />
+                          <input
+                            type="email"
+                            value={devTestToEmail}
+                            onChange={(e) => setDevTestToEmail(e.target.value)}
+                            placeholder="Gmail ទទួល Email សាកល្បង (ស្រេចចិត្ត)"
+                            className={`${inputClass} text-xs sm:text-sm`}
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-[11px] text-muted leading-relaxed">
+                            {devEmailMode === 'gmail'
+                              ? 'ប្រើ Google Account → Security → 2-Step Verification → App Passwords (១៦ ខ្ទង់)។ ព័ត៌មានត្រូវបានអ៊ីនគ្រីបទុកលើ Server ប៉ុណ្ណោះ។'
+                              : devEmailMode === 'resend'
+                              ? 'ប្រើ HTTPS API របស់ Resend (មិនបាច់បើក SMTP Port)។'
+                              : 'បញ្ចូល SMTP Host, Port, Username និង Password របស់ម៉ាស៊ីនមេ Email របស់អ្នក។'}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {devEmailStatus?.configured && (
+                              <Button
+                                type="button"
+                                tone="quiet"
+                                disabled={devEmailBusy}
+                                onClick={handleTestExistingDevEmailConfig}
+                                className="border-primary/40 text-primary hover:bg-primary/10"
+                              >
+                                <Send className="h-3.5 w-3.5 shrink-0" />
+                                <span>សាកល្បងផ្ញើ Email បច្ចុប្បន្ន</span>
+                              </Button>
+                            )}
+                            {devEmailStatus?.source === 'console' && (
+                              <Button
+                                type="button"
+                                tone="quiet"
+                                disabled={devEmailBusy}
+                                onClick={handleClearDevEmailConfig}
+                                className="text-danger border-danger/35 hover:bg-danger/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                                <span>ផ្ដាច់ការកំណត់</span>
+                              </Button>
+                            )}
+                            <Button type="submit" tone="primary" disabled={devEmailBusy}>
+                              <Server className="h-4 w-4 shrink-0" />
+                              <span>
+                                {devEmailBusy
+                                  ? 'កំពុងផ្ទៀងផ្ទាត់...'
+                                  : devTestToEmail.trim()
+                                  ? 'រក្សាទុក និងផ្ញើសាកល្បង'
+                                  : 'រក្សាទុក និងភ្ជាប់សេវា Email'}
+                              </span>
+                            </Button>
+                          </div>
+                        </div>
                       </form>
 
                       {/* 2. Master Admins Separated Directory + Expire Adjustment Control */}

@@ -1140,6 +1140,7 @@ export interface RequestMasterOtpResponse {
   emailDeliveryConfigured?: boolean;
   code?: string;
   retryAfterSeconds?: number;
+  detail?: string;
   error?: string;
 }
 
@@ -1234,7 +1235,15 @@ export async function verifyMasterAdminOtpApi(payload: {
   challengeToken?: string;
 }): Promise<VerifyMasterOtpResponse> {
   const cleanEmail = payload.email.trim().toLowerCase();
-  const cleanOtp = payload.otp.replace(/\D+/g, '').trim();
+  const cleanOtp = payload.otp
+    .replace(/[\u17E0-\u17E9\uFF10-\uFF19]/g, (ch) => {
+      const code = ch.charCodeAt(0);
+      if (code >= 0x17e0 && code <= 0x17e9) return String(code - 0x17e0);
+      if (code >= 0xff10 && code <= 0xff19) return String(code - 0xff10);
+      return ch;
+    })
+    .replace(/\D+/g, '')
+    .trim();
 
   if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     return {
@@ -1376,6 +1385,7 @@ export interface DeveloperIssueOtpResponse {
   expiresAt?: string;
   expiresInSeconds?: number;
   emailedToUser?: boolean;
+  emailError?: string;
   error?: string;
 }
 
@@ -1628,5 +1638,92 @@ export async function updateMasterAdminPasswordByDeveloperApi(
     passwordPendingSync: Boolean(parsed.data.passwordPendingSync),
     hasFirebaseSyncBridge: Boolean(parsed.data.hasFirebaseSyncBridge),
   };
+}
+
+export type DeveloperEmailDeliveryMode = 'gmail' | 'smtp' | 'resend';
+
+export interface DeveloperEmailConfigStatus {
+  ok?: boolean;
+  configured: boolean;
+  source: 'console' | 'env' | 'none';
+  mode: DeveloperEmailDeliveryMode | null;
+  maskedAccount: string;
+  smtpHost: string;
+  smtpPort: number;
+  fromEmail: string;
+  updatedAt: string;
+  persistedIn?: 'mongodb' | 'local-file' | 'memory';
+  testedEmail?: string;
+  cleared?: boolean;
+}
+
+export async function getDeveloperEmailConfigApi(
+  devToken: string
+): Promise<DeveloperEmailConfigStatus | null> {
+  if (!devToken || devToken.startsWith(CLIENT_DEV_TOKEN_PREFIX)) {
+    return null;
+  }
+  try {
+    const res = await fetch('/api/developer/email-config', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        'x-developer-token': devToken,
+        'Cache-Control': 'no-cache',
+      },
+    });
+    const parsed = await tryJson<DeveloperEmailConfigStatus & { error?: string }>(res);
+    if (res.ok && parsed.isJson && parsed.data) {
+      return parsed.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveDeveloperEmailConfigApi(
+  devToken: string,
+  payload:
+    | {
+        action: 'clear';
+      }
+    | {
+        action: 'test';
+        testToEmail?: string;
+      }
+    | {
+        action?: 'save';
+        mode: DeveloperEmailDeliveryMode;
+        gmailUser?: string;
+        gmailAppPassword?: string;
+        smtpHost?: string;
+        smtpPort?: number;
+        smtpUser?: string;
+        smtpPass?: string;
+        resendApiKey?: string;
+        fromEmail?: string;
+        testToEmail?: string;
+      }
+): Promise<DeveloperEmailConfigStatus> {
+  if (!devToken || devToken.startsWith(CLIENT_DEV_TOKEN_PREFIX)) {
+    throw new Error(
+      'សូមផ្ទៀងផ្ទាត់ Key Developer តាមម៉ាស៊ីនមេ (Server) ជាមុនសិន ដើម្បីរក្សាទុកការកំណត់ Email OTP។'
+    );
+  }
+  const res = await fetch('/api/developer/email-config', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-developer-token': devToken,
+    },
+    body: JSON.stringify(payload),
+  });
+  const parsed = await tryJson<DeveloperEmailConfigStatus & { error?: string }>(res);
+  if (!res.ok || !parsed.isJson || !parsed.data?.ok) {
+    throw new Error(parsed.data?.error || 'មិនអាចរក្សាទុកការកំណត់សេវាផ្ញើ Email OTP បានទេ។');
+  }
+  return parsed.data;
 }
 

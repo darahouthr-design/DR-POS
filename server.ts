@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: false });
+dotenv.config({ override: false });
 import express from 'express';
 import http from 'http';
 import fs from 'fs';
@@ -17,39 +20,12 @@ import type {
   StockLogEntry,
   WorkspaceSettings,
 } from './src/types';
-import {
-  DEFAULT_TELEGRAM_URL,
-  runAuthGateCheck,
-  runDeveloperOverview,
-  runRegisterMaster,
-  runSyncWorkspace,
-  runUnregisterWorkspaceAccount,
-  runUpdateDeveloperTelegram,
-  runUpdateMasterAdminExpire,
-  runVerifyDeveloper,
-  seedMemoryVaultFallback,
-  type DeveloperVaultState,
-  type OtpChallengeRecord,
+import type {
+  DeveloperVaultState,
+  OtpChallengeRecord,
 } from './lib/developerRegistry';
-import {
-  runDeveloperIssueMasterOtp,
-  runRequestMasterOtp,
-  runVerifyMasterOtp,
-} from './lib/masterOtp';
-import {
-  runMongoAnalytics,
-  runMongoChanges,
-  runMongoQueryOrders,
-  runMongoQueryStockLogs,
-  runMongoStatus,
-  runMongoSync,
-} from './lib/mongoPartition';
-import {
-  runDeveloperUpdateMasterPassword,
-  runPendingMasterPasswordSync,
-  runResolveDeveloperPasswordLogin,
-  runSyncMasterPassword,
-} from './lib/masterCredentials';
+
+const FALLBACK_TELEGRAM_URL = 'https://t.me/Hout_Dara_HR';
 
 // Pre-allocated incompressible random payload (512 KB) for accurate internet speed testing
 const SPEED_PROBE_MAX_BYTES = 512 * 1024;
@@ -186,7 +162,7 @@ function createSeedWorkspace(email: string, displayName: string): WorkspaceData 
 
 function createDefaultDeveloperState(): DeveloperLicenseState {
   return {
-    telegramUrl: DEFAULT_TELEGRAM_URL,
+    telegramUrl: FALLBACK_TELEGRAM_URL,
     masterAdmins: {},
     subAdminEmails: {},
     otpChallenges: {},
@@ -220,7 +196,7 @@ function addMonthsOrYearsIso(
 
 function normalizeTelegramUrl(raw: string): string {
   const v = String(raw || '').trim();
-  if (!v) return DEFAULT_TELEGRAM_URL;
+  if (!v) return FALLBACK_TELEGRAM_URL;
   if (v.startsWith('http://') || v.startsWith('https://')) return v;
   if (v.startsWith('@')) return `https://t.me/${v.slice(1)}`;
   if (v.startsWith('t.me/')) return `https://${v}`;
@@ -308,7 +284,7 @@ function loadDb(): DatabaseSchema {
       workspaces: cleanedWorkspaces,
       problemCustomers: cleanedProblems,
       developer: {
-        telegramUrl: devRaw.telegramUrl || DEFAULT_TELEGRAM_URL,
+        telegramUrl: devRaw.telegramUrl || FALLBACK_TELEGRAM_URL,
         masterAdmins: devRaw.masterAdmins || {},
         subAdminEmails: devRaw.subAdminEmails || {},
         otpChallenges: devRaw.otpChallenges || {},
@@ -333,17 +309,9 @@ function ensureDeveloperState(): DeveloperLicenseState {
   return db.developer;
 }
 
-seedMemoryVaultFallback({
-  telegramUrl: db.developer?.telegramUrl || DEFAULT_TELEGRAM_URL,
-  masterAdmins: db.developer?.masterAdmins || {},
-  subAdminEmails: db.developer?.subAdminEmails || {},
-  otpChallenges: db.developer?.otpChallenges || {},
-  updatedAt: '',
-});
-
 function mirrorVaultToLocalDb(state: DeveloperVaultState): void {
   const devState = ensureDeveloperState();
-  devState.telegramUrl = state.telegramUrl || DEFAULT_TELEGRAM_URL;
+  devState.telegramUrl = state.telegramUrl || FALLBACK_TELEGRAM_URL;
   devState.masterAdmins = { ...state.masterAdmins };
   devState.subAdminEmails = { ...state.subAdminEmails };
   devState.otpChallenges = { ...(state.otpChallenges || {}) };
@@ -409,6 +377,63 @@ function broadcastProblemCustomers(eventType: string, payload?: unknown) {
 }
 
 async function startServer() {
+  // Enable TypeScript / .js-mapped ESM resolution when launched directly via `node server.ts`
+  try {
+    const { register } = await import('tsx/esm/api');
+    register();
+  } catch {
+    // Already running under tsx CLI
+  }
+
+  const [
+    {
+      DEFAULT_TELEGRAM_URL,
+      runAuthGateCheck,
+      runDeveloperOverview,
+      runRegisterMaster,
+      runSyncWorkspace,
+      runUnregisterWorkspaceAccount,
+      runUpdateDeveloperTelegram,
+      runUpdateMasterAdminExpire,
+      runVerifyDeveloper,
+      seedMemoryVaultFallback,
+    },
+    {
+      runDeveloperIssueMasterOtp,
+      runGetDeveloperEmailConfig,
+      runRequestMasterOtp,
+      runSaveDeveloperEmailConfig,
+      runVerifyMasterOtp,
+    },
+    {
+      runMongoAnalytics,
+      runMongoChanges,
+      runMongoQueryOrders,
+      runMongoQueryStockLogs,
+      runMongoStatus,
+      runMongoSync,
+    },
+    {
+      runDeveloperUpdateMasterPassword,
+      runPendingMasterPasswordSync,
+      runResolveDeveloperPasswordLogin,
+      runSyncMasterPassword,
+    },
+  ] = await Promise.all([
+    import('./lib/developerRegistry'),
+    import('./lib/masterOtp'),
+    import('./lib/mongoPartition'),
+    import('./lib/masterCredentials'),
+  ]);
+
+  seedMemoryVaultFallback({
+    telegramUrl: db.developer?.telegramUrl || DEFAULT_TELEGRAM_URL,
+    masterAdmins: db.developer?.masterAdmins || {},
+    subAdminEmails: db.developer?.subAdminEmails || {},
+    otpChallenges: db.developer?.otpChallenges || {},
+    updatedAt: '',
+  });
+
   const app = express();
   const server = http.createServer(app);
   app.use(express.json({ limit: '15mb' }));
@@ -439,6 +464,24 @@ async function startServer() {
       req.headers as Record<string, string | string[] | undefined>,
       req.body || {},
       mirrorVaultToLocalDb
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  // Authenticated Developer: Read/Configure Email OTP Delivery (Gmail App Password / SMTP / Resend)
+  app.get('/api/developer/email-config', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runGetDeveloperEmailConfig(
+      req.headers as Record<string, string | string[] | undefined>
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/developer/email-config', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runSaveDeveloperEmailConfig(
+      req.headers as Record<string, string | string[] | undefined>,
+      req.body || {}
     );
     res.status(result.status).json(result.body);
   });
