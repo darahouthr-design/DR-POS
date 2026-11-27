@@ -614,6 +614,7 @@ export interface TranslationDict {
     userRestrictedNotice: string;
     salePersonalPrefsTitle: string;
     salePersonalPrefsNote: string;
+    warehousePersonalPrefsNote: string;
     saleDarkModeLabel: string;
     saleSoundLabel: string;
     saleLanguageLabel: string;
@@ -1417,6 +1418,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       salePersonalPrefsTitle: 'ការកំណត់ផ្ទាល់ខ្លួន',
       salePersonalPrefsNote:
         'ការផ្លាស់ប្ដូរនៅទីនេះអនុវត្តចំពោះតែឈ្មោះ Sale របស់អ្នកម្នាក់ប៉ុណ្ណោះ។',
+      warehousePersonalPrefsNote:
+        'ការផ្លាស់ប្ដូរនៅទីនេះអនុវត្តចំពោះតែគណនីអ្នកគ្រប់គ្រងឃ្លាំងរបស់អ្នកប៉ុណ្ណោះ User ផ្សេងមិនផ្លាស់ប្ដូរតាមឡើយ។',
       saleDarkModeLabel: '🌙Dark Mode ☀️Light Mode',
       saleSoundLabel: 'សម្លេងជូនដំណឹង',
       saleLanguageLabel: 'ភាសា',
@@ -2231,6 +2234,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       salePersonalPrefsTitle: 'Personal Preferences (Dark Mode, Sound & Language)',
       salePersonalPrefsNote:
         'Changes here apply strictly to your own Sale account only — other Sale staff and Admin remain completely unaffected.',
+      warehousePersonalPrefsNote:
+        'Changes here apply strictly to your own Warehouse Manager account only — no other users are affected.',
       saleDarkModeLabel: 'Dark Mode / Light Mode',
       saleSoundLabel: 'Notification Sound',
       saleLanguageLabel: 'Language (KH / EN / KR)',
@@ -3050,6 +3055,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       salePersonalPrefsTitle: '개인 설정 (다크 모드, 알림음 및 언어)',
       salePersonalPrefsNote:
         '여기서 변경한 설정은 본인 Sale 계정에만 적용되며 다른 Sale 직원이나 관리자에게 영향을 주지 않습니다.',
+      warehousePersonalPrefsNote:
+        '여기서 변경한 설정은 본인 창고 관리자 계정에만 적용되며 다른 사용자에게 영향을 주지 않습니다.',
       saleDarkModeLabel: '다크 모드 / 라이트 모드',
       saleSoundLabel: '알림음',
       saleLanguageLabel: '언어 (KH / EN / KR)',

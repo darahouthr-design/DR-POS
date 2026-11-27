@@ -12,6 +12,11 @@ export const DEFAULT_DEVELOPER_KEY = '975596700@houtdara';
 export const DEFAULT_TELEGRAM_URL = 'https://t.me/Hout_Dara_HR';
 export const VAULT_DOC_ID = 'devvault_a882249ff19ca7af4920b868d2613325';
 export const EMAIL_CONFIG_CHALLENGE_KEY = '__sys_email_cfg';
+export const WAREHOUSE_SNAPSHOT_PREFIX = '__wh_snap_';
+
+export function isSystemChallengeKey(key: string): boolean {
+  return key === EMAIL_CONFIG_CHALLENGE_KEY || key.startsWith(WAREHOUSE_SNAPSHOT_PREFIX);
+}
 
 export interface MasterAdminLicenseRecord {
   email: string;
@@ -394,12 +399,18 @@ export function pruneOtpChallenges(
 ): Record<string, OtpChallengeRecord> {
   if (!map) return {};
   const sysEmailCfg = map[EMAIL_CONFIG_CHALLENGE_KEY];
+  const whSnapshots: OtpChallengeRecord[] = [];
   const now = Date.now();
   const GRACE_MS = 60 * 60 * 1000;
   const active: OtpChallengeRecord[] = [];
-  for (const rec of Object.values(map)) {
-    if (!rec || !rec.emailHash || !rec.otpDigest) continue;
-    if (rec.emailHash === EMAIL_CONFIG_CHALLENGE_KEY) continue;
+  for (const [k, rec] of Object.entries(map)) {
+    const key = String(rec?.emailHash || k || '').trim();
+    if (!rec || !key || !rec.otpDigest) continue;
+    if (key === EMAIL_CONFIG_CHALLENGE_KEY) continue;
+    if (key.startsWith(WAREHOUSE_SNAPSHOT_PREFIX)) {
+      whSnapshots.push({ ...rec, emailHash: key });
+      continue;
+    }
     const expMs = new Date(rec.expiresAt).getTime();
     if (!Number.isNaN(expMs) && expMs + GRACE_MS < now) continue;
     if (rec.usedAt) {
@@ -408,10 +419,17 @@ export function pruneOtpChallenges(
     }
     active.push(rec);
   }
+  whSnapshots.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const keptSnapshots = whSnapshots.slice(0, 60);
+  const maxUserChallenges = Math.max(20, 180 - keptSnapshots.length - (sysEmailCfg ? 1 : 0));
+
   active.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const out: Record<string, OtpChallengeRecord> = {};
-  for (const rec of active.slice(0, 100)) {
+  for (const rec of active.slice(0, maxUserChallenges)) {
     out[rec.emailHash] = rec;
+  }
+  for (const snap of keptSnapshots) {
+    out[snap.emailHash] = snap;
   }
   if (sysEmailCfg && sysEmailCfg.otpDigest) {
     out[EMAIL_CONFIG_CHALLENGE_KEY] = {
@@ -1165,10 +1183,21 @@ export async function runUnregisterWorkspaceAccount(
       }
     }
 
-    if (state.otpChallenges && removedEmailHashes.size > 0) {
+    if (state.otpChallenges) {
+      const masterSnapKey = user.uid
+        ? `${WAREHOUSE_SNAPSHOT_PREFIX}${crypto.createHash('sha256').update(user.uid).digest('hex').slice(0, 16)}`
+        : '';
       for (const [hKey, ch] of Object.entries(state.otpChallenges)) {
         if (hKey === EMAIL_CONFIG_CHALLENGE_KEY) continue;
-        if (removedEmailHashes.has(hKey) || removedEmailHashes.has(String(ch?.emailHash || ''))) {
+        if (masterSnapKey && (hKey === masterSnapKey || ch?.emailHash === masterSnapKey)) {
+          delete state.otpChallenges[hKey];
+          changed = true;
+          continue;
+        }
+        if (
+          removedEmailHashes.size > 0 &&
+          (removedEmailHashes.has(hKey) || removedEmailHashes.has(String(ch?.emailHash || '')))
+        ) {
           delete state.otpChallenges[hKey];
           changed = true;
         }

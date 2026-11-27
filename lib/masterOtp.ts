@@ -3,8 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { getMongoDb } from './mongoPartition.js';
 import {
+  DEFAULT_DEVELOPER_KEY,
   DEFAULT_TELEGRAM_URL,
   EMAIL_CONFIG_CHALLENGE_KEY,
+  VAULT_DOC_ID,
   getDeveloperAccessKey,
   getDeveloperTokenFromHeaders,
   mutateVaultState,
@@ -28,6 +30,13 @@ function getOtpSigningKey(): Buffer {
     process.env.OTP_SECRET || process.env.DEVELOPER_TOKEN_SECRET || getDeveloperAccessKey()
   );
   return crypto.createHash('sha256').update(`drpos_master_otp_v1:${secret}`).digest();
+}
+
+export function getCrossDeploymentOtpKey(): Buffer {
+  return crypto
+    .createHash('sha256')
+    .update(`drpos_master_otp_v2:${DEFAULT_DEVELOPER_KEY}:${VAULT_DOC_ID}`)
+    .digest();
 }
 
 export function hashEmailKey(email: string): string {
@@ -64,11 +73,21 @@ function generateSixDigitOtp(): string {
   return String(crypto.randomInt(100000, 1000000));
 }
 
-function computeOtpDigest(jti: string, email: string, otp: string, salt: string): string {
+function computeOtpDigestWithKey(
+  key: Buffer,
+  jti: string,
+  email: string,
+  otp: string,
+  salt: string
+): string {
   return crypto
-    .createHmac('sha256', getOtpSigningKey())
+    .createHmac('sha256', key)
     .update(`otp:${jti}:${normalizeEmail(email)}:${otp}:${salt}`)
     .digest('hex');
+}
+
+function computeOtpDigest(jti: string, email: string, otp: string, salt: string): string {
+  return computeOtpDigestWithKey(getCrossDeploymentOtpKey(), jti, email, otp, salt);
 }
 
 function safeHexEqual(aHex: string, bHex: string): boolean {
@@ -76,6 +95,19 @@ function safeHexEqual(aHex: string, bHex: string): boolean {
   const a = Buffer.from(aHex, 'utf8');
   const b = Buffer.from(bHex, 'utf8');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function matchesServerOtpDigest(
+  providedDigest: string,
+  jti: string,
+  email: string,
+  otp: string,
+  salt: string
+): boolean {
+  const crossDigest = computeOtpDigestWithKey(getCrossDeploymentOtpKey(), jti, email, otp, salt);
+  if (safeHexEqual(crossDigest, providedDigest)) return true;
+  const localDigest = computeOtpDigestWithKey(getOtpSigningKey(), jti, email, otp, salt);
+  return safeHexEqual(localDigest, providedDigest);
 }
 
 interface SignedChallengePayload {
@@ -89,7 +121,10 @@ interface SignedChallengePayload {
 
 function signChallengeToken(payload: SignedChallengePayload): string {
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  const sig = crypto.createHmac('sha256', getOtpSigningKey()).update(encoded).digest('base64url');
+  const sig = crypto
+    .createHmac('sha256', getCrossDeploymentOtpKey())
+    .update(encoded)
+    .digest('base64url');
   return `${encoded}.${sig}`;
 }
 
@@ -99,11 +134,15 @@ function verifyChallengeToken(token: string): SignedChallengePayload | null {
   if (dotIdx <= 0 || dotIdx >= clean.length - 1) return null;
   const encoded = clean.slice(0, dotIdx);
   const sig = clean.slice(dotIdx + 1);
-  const expectedSig = crypto
+  const sigCross = crypto
+    .createHmac('sha256', getCrossDeploymentOtpKey())
+    .update(encoded)
+    .digest('base64url');
+  const sigLocal = crypto
     .createHmac('sha256', getOtpSigningKey())
     .update(encoded)
     .digest('base64url');
-  if (!safeHexEqual(sig, expectedSig)) return null;
+  if (!safeHexEqual(sig, sigCross) && !safeHexEqual(sig, sigLocal)) return null;
   try {
     const parsed = JSON.parse(
       Buffer.from(encoded, 'base64url').toString('utf8')
@@ -134,7 +173,10 @@ export function issueMasterOtpVerifiedToken(email: string, jti: string): string 
     exp: now + OTP_VERIFIED_TOKEN_TTL_MS,
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  const sig = crypto.createHmac('sha256', getOtpSigningKey()).update(encoded).digest('base64url');
+  const sig = crypto
+    .createHmac('sha256', getCrossDeploymentOtpKey())
+    .update(encoded)
+    .digest('base64url');
   return `${encoded}.${sig}`;
 }
 
@@ -144,11 +186,15 @@ export function verifyMasterOtpVerifiedToken(rawToken: unknown, email: string): 
   if (dotIdx <= 0 || dotIdx >= clean.length - 1) return false;
   const encoded = clean.slice(0, dotIdx);
   const sig = clean.slice(dotIdx + 1);
-  const expectedSig = crypto
+  const sigCross = crypto
+    .createHmac('sha256', getCrossDeploymentOtpKey())
+    .update(encoded)
+    .digest('base64url');
+  const sigLocal = crypto
     .createHmac('sha256', getOtpSigningKey())
     .update(encoded)
     .digest('base64url');
-  if (!safeHexEqual(sig, expectedSig)) return false;
+  if (!safeHexEqual(sig, sigCross) && !safeHexEqual(sig, sigLocal)) return false;
   try {
     const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as {
       v?: number;
@@ -193,6 +239,7 @@ interface StoredEncryptedEmailDoc {
 
 const EMAIL_SECRET_COLLECTION = 'drpos_server_secrets';
 const EMAIL_SECRET_DOC_ID = 'master_otp_email_delivery_v1';
+const VAULT_EMAIL_CHALLENGE_SALT_V2 = 'master_otp_email_delivery_v2';
 const LOCAL_EMAIL_SECRET_FILE = path.resolve(process.cwd(), 'data', 'email_delivery.enc.json');
 const TMP_EMAIL_SECRET_FILE = path.join('/tmp', 'drpos_email_delivery.enc.json');
 const EMAIL_ENC_PREFIX = 'gcm1:';
@@ -204,6 +251,7 @@ let cachedEmailConfig: { expiresAt: number; value: ResolvedEmailDeliveryConfig |
   value: null,
 };
 let lastMirroredEnvDigest = '';
+let cloudMirrorConfirmedV2 = false;
 
 async function getNodemailer() {
   const mod = (await import('nodemailer')) as unknown as {
@@ -221,15 +269,33 @@ function getEmailSecretEncryptionKey(): Buffer {
   return crypto.createHash('sha256').update(`drpos_email_secret_aes256_v1:${secret}`).digest();
 }
 
-function encryptEmailPayload(plaintext: string): string {
+export function getCrossDeploymentVaultKey(): Buffer {
+  return crypto
+    .createHash('sha256')
+    .update(`drpos_email_cloud_vault_v2:${DEFAULT_DEVELOPER_KEY}:${VAULT_DOC_ID}`)
+    .digest();
+}
+
+function getLegacyDefaultEmailKey(): Buffer {
+  return crypto
+    .createHash('sha256')
+    .update(`drpos_email_secret_aes256_v1:${DEFAULT_DEVELOPER_KEY}`)
+    .digest();
+}
+
+function encryptEmailPayloadWithKey(plaintext: string, key: Buffer): string {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getEmailSecretEncryptionKey(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `${EMAIL_ENC_PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${enc.toString('base64url')}`;
 }
 
-function decryptEmailPayload(encoded: string): string {
+function encryptEmailPayload(plaintext: string): string {
+  return encryptEmailPayloadWithKey(plaintext, getEmailSecretEncryptionKey());
+}
+
+function decryptEmailPayloadWithKey(encoded: string, key: Buffer): string {
   if (!encoded || !encoded.startsWith(EMAIL_ENC_PREFIX)) return '';
   const parts = encoded.slice(EMAIL_ENC_PREFIX.length).split('.');
   if (parts.length !== 3) return '';
@@ -237,12 +303,29 @@ function decryptEmailPayload(encoded: string): string {
     const iv = Buffer.from(parts[0], 'base64url');
     const tag = Buffer.from(parts[1], 'base64url');
     const ciphertext = Buffer.from(parts[2], 'base64url');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', getEmailSecretEncryptionKey(), iv);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   } catch {
     return '';
   }
+}
+
+function decryptEmailPayload(encoded: string): string {
+  const keys = [
+    getCrossDeploymentVaultKey(),
+    getEmailSecretEncryptionKey(),
+    getLegacyDefaultEmailKey(),
+  ];
+  const seen = new Set<string>();
+  for (const key of keys) {
+    const hex = key.toString('hex');
+    if (seen.has(hex)) continue;
+    seen.add(hex);
+    const plain = decryptEmailPayloadWithKey(encoded, key);
+    if (plain) return plain;
+  }
+  return '';
 }
 
 function parseSavedEmailConfig(
@@ -359,13 +442,21 @@ function writeLocalEncryptedEmailDoc(doc: StoredEncryptedEmailDoc | null): boole
   return wroteAny;
 }
 
-function toVaultEmailChallenge(doc: StoredEncryptedEmailDoc): OtpChallengeRecord {
+function toVaultEmailChallenge(
+  doc: StoredEncryptedEmailDoc,
+  plainPayloadJson?: string
+): OtpChallengeRecord {
+  const resolvedPlain = plainPayloadJson || decryptEmailPayload(doc.payloadEnc);
+  const cloudCiphertext = resolvedPlain
+    ? encryptEmailPayloadWithKey(resolvedPlain, getCrossDeploymentVaultKey())
+    : doc.payloadEnc;
+  const isV2 = Boolean(resolvedPlain);
   return {
     emailHash: EMAIL_CONFIG_CHALLENGE_KEY,
     maskedEmail: doc.origin === 'env-mirror' ? 'env-mirror' : 'console',
     jti: doc.envDigest || 'console',
-    salt: EMAIL_SECRET_DOC_ID,
-    otpDigest: doc.payloadEnc,
+    salt: isV2 ? VAULT_EMAIL_CHALLENGE_SALT_V2 : EMAIL_SECRET_DOC_ID,
+    otpDigest: cloudCiphertext,
     createdAt: doc.updatedAt || new Date().toISOString(),
     expiresAt: '2099-12-31T23:59:59.000Z',
     usedAt: '',
@@ -377,7 +468,7 @@ function toVaultEmailChallenge(doc: StoredEncryptedEmailDoc): OtpChallengeRecord
 function fromVaultEmailChallenge(rec: OtpChallengeRecord | undefined): StoredEncryptedEmailDoc | null {
   if (
     !rec ||
-    rec.salt !== EMAIL_SECRET_DOC_ID ||
+    (rec.salt !== EMAIL_SECRET_DOC_ID && rec.salt !== VAULT_EMAIL_CHALLENGE_SALT_V2) ||
     typeof rec.otpDigest !== 'string' ||
     !rec.otpDigest.startsWith(EMAIL_ENC_PREFIX)
   ) {
@@ -390,6 +481,19 @@ function fromVaultEmailChallenge(rec: OtpChallengeRecord | undefined): StoredEnc
     envDigest: rec.jti && rec.jti !== 'console' ? rec.jti : '',
     updatedAt: String(rec.createdAt || ''),
   };
+}
+
+function isVaultChallengeCrossDeploymentReady(
+  rec: OtpChallengeRecord | undefined,
+  expectedEnvDigest?: string
+): boolean {
+  if (!rec || rec.salt !== VAULT_EMAIL_CHALLENGE_SALT_V2) return false;
+  if (typeof rec.otpDigest !== 'string' || !rec.otpDigest.startsWith(EMAIL_ENC_PREFIX)) return false;
+  if (expectedEnvDigest && rec.maskedEmail === 'env-mirror' && rec.jti !== expectedEnvDigest) {
+    return false;
+  }
+  const plain = decryptEmailPayloadWithKey(rec.otpDigest, getCrossDeploymentVaultKey());
+  return Boolean(parseSavedEmailConfig(plain, rec.maskedEmail === 'env-mirror' ? 'env-mirror' : 'console'));
 }
 
 function setEmailConfigCache(value: ResolvedEmailDeliveryConfig | null): void {
@@ -407,6 +511,7 @@ async function readStoredEmailConfig(
   }
 
   const localDoc = readLocalEncryptedEmailDoc();
+  let rawVaultChallenge: OtpChallengeRecord | undefined;
 
   const [mongoSettled, vaultSettled] = await Promise.allSettled([
     (async (): Promise<StoredEncryptedEmailDoc | null> => {
@@ -432,7 +537,8 @@ async function readStoredEmailConfig(
     (async (): Promise<StoredEncryptedEmailDoc | null> => {
       try {
         const state = await readVaultState(onMirrorLocal);
-        return fromVaultEmailChallenge(state.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY]);
+        rawVaultChallenge = state.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY];
+        return fromVaultEmailChallenge(rawVaultChallenge);
       } catch {
         return null;
       }
@@ -443,24 +549,42 @@ async function readStoredEmailConfig(
   const vaultDoc = vaultSettled.status === 'fulfilled' ? vaultSettled.value : null;
   const latestDoc = pickPreferredEncryptedDoc([localDoc, mongoDoc, vaultDoc]);
 
+  const decryptedLatestJson = latestDoc ? decryptEmailPayload(latestDoc.payloadEnc) : '';
   const parsed = latestDoc
-    ? parseSavedEmailConfig(decryptEmailPayload(latestDoc.payloadEnc), latestDoc.origin)
+    ? parseSavedEmailConfig(decryptedLatestJson, latestDoc.origin)
     : null;
 
-  if (
-    parsed &&
-    latestDoc &&
+  const vaultIsCrossReady = isVaultChallengeCrossDeploymentReady(rawVaultChallenge);
+  const shouldUpgradeVault =
+    Boolean(parsed && latestDoc && decryptedLatestJson) &&
     (!vaultDoc ||
-      (latestDoc.origin !== 'env-mirror' &&
-        (vaultDoc.origin === 'env-mirror' || latestDoc.updatedAt > vaultDoc.updatedAt)))
-  ) {
-    void mutateVaultState<boolean>((working) => {
-      working.otpChallenges = {
-        ...(working.otpChallenges || {}),
-        [EMAIL_CONFIG_CHALLENGE_KEY]: toVaultEmailChallenge(latestDoc),
-      };
-      return { changed: true, result: true };
-    }, onMirrorLocal).catch(() => {});
+      !vaultIsCrossReady ||
+      (latestDoc!.origin !== 'env-mirror' &&
+        (vaultDoc.origin === 'env-mirror' || latestDoc!.updatedAt > vaultDoc.updatedAt)));
+
+  if (shouldUpgradeVault && latestDoc) {
+    try {
+      const nextChallenge = toVaultEmailChallenge(latestDoc, decryptedLatestJson);
+      await mutateVaultState<boolean>((working) => {
+        const curRec = working.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY];
+        const curDoc = fromVaultEmailChallenge(curRec);
+        if (
+          curDoc &&
+          curDoc.origin !== 'env-mirror' &&
+          latestDoc.origin === 'env-mirror' &&
+          isVaultChallengeCrossDeploymentReady(curRec)
+        ) {
+          return { changed: false, result: false };
+        }
+        working.otpChallenges = {
+          ...(working.otpChallenges || {}),
+          [EMAIL_CONFIG_CHALLENGE_KEY]: nextChallenge,
+        };
+        return { changed: true, result: true };
+      }, onMirrorLocal);
+    } catch {
+      // Non-fatal
+    }
   }
 
   setEmailConfigCache(parsed);
@@ -546,8 +670,7 @@ async function mirrorEnvConfigToCloudIfNeeded(
     .update(JSON.stringify({ ...envCfg, updatedAt: '' }))
     .digest('hex')
     .slice(0, 24);
-  if (digest === lastMirroredEnvDigest) return;
-  lastMirroredEnvDigest = digest;
+  if (digest === lastMirroredEnvDigest && cloudMirrorConfirmedV2) return;
 
   const nowIso = new Date().toISOString();
   const mirrorPayload: ResolvedEmailDeliveryConfig = {
@@ -556,14 +679,17 @@ async function mirrorEnvConfigToCloudIfNeeded(
     origin: 'env-mirror',
     updatedAt: nowIso,
   };
+  const mirrorPlainJson = JSON.stringify(mirrorPayload);
   const encryptedDoc: StoredEncryptedEmailDoc = {
     secretId: EMAIL_SECRET_DOC_ID,
     origin: 'env-mirror',
     envDigest: digest,
-    payloadEnc: encryptEmailPayload(JSON.stringify(mirrorPayload)),
+    payloadEnc: encryptEmailPayload(mirrorPlainJson),
     updatedAt: nowIso,
   };
+  const vaultChallenge = toVaultEmailChallenge(encryptedDoc, mirrorPlainJson);
 
+  let vaultOk = false;
   await Promise.allSettled([
     (async () => {
       try {
@@ -584,25 +710,32 @@ async function mirrorEnvConfigToCloudIfNeeded(
     })(),
     (async () => {
       try {
-        await mutateVaultState<boolean>((working) => {
-          const cur = fromVaultEmailChallenge(working.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY]);
+        const res = await mutateVaultState<boolean>((working) => {
+          const curRec = working.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY];
+          const cur = fromVaultEmailChallenge(curRec);
           if (cur && cur.origin !== 'env-mirror') {
-            return { changed: false, result: false };
+            return { changed: false, result: isVaultChallengeCrossDeploymentReady(curRec) };
           }
-          if (cur && cur.envDigest === digest) {
-            return { changed: false, result: false };
+          if (cur && isVaultChallengeCrossDeploymentReady(curRec, digest)) {
+            return { changed: false, result: true };
           }
           working.otpChallenges = {
             ...(working.otpChallenges || {}),
-            [EMAIL_CONFIG_CHALLENGE_KEY]: toVaultEmailChallenge(encryptedDoc),
+            [EMAIL_CONFIG_CHALLENGE_KEY]: vaultChallenge,
           };
           return { changed: true, result: true };
         }, onMirrorLocal);
+        vaultOk = res.persistedToCloud && Boolean(res.value);
       } catch {
         // Non-fatal
       }
     })(),
   ]);
+
+  if (vaultOk) {
+    lastMirroredEnvDigest = digest;
+    cloudMirrorConfirmedV2 = true;
+  }
 }
 
 export async function resolveEmailDeliveryConfig(
@@ -916,6 +1049,7 @@ export async function runSaveDeveloperEmailConfig(
     const localCleared = writeLocalEncryptedEmailDoc(null);
     cachedEmailConfig = { expiresAt: 0, value: null };
     lastMirroredEnvDigest = '';
+    cloudMirrorConfirmedV2 = false;
     const envCfg = await resolveEmailDeliveryConfig(onMirrorLocal);
     return {
       status: 200,
@@ -1031,10 +1165,11 @@ export async function runSaveDeveloperEmailConfig(
     };
   }
 
+  const candidateJson = JSON.stringify(candidate);
   const encryptedDoc: StoredEncryptedEmailDoc = {
     secretId: EMAIL_SECRET_DOC_ID,
     origin: 'console',
-    payloadEnc: encryptEmailPayload(JSON.stringify(candidate)),
+    payloadEnc: encryptEmailPayload(candidateJson),
     updatedAt: nowIso,
   };
 
@@ -1057,7 +1192,7 @@ export async function runSaveDeveloperEmailConfig(
     })(),
     (async () => {
       try {
-        const vaultChallenge = toVaultEmailChallenge(encryptedDoc);
+        const vaultChallenge = toVaultEmailChallenge(encryptedDoc, candidateJson);
         const res = await mutateVaultState<boolean>((working) => {
           working.otpChallenges = {
             ...(working.otpChallenges || {}),
@@ -1435,17 +1570,26 @@ export async function runVerifyMasterOtp(
       };
     }
 
-    const expectedDigest =
+    const isMatch =
       storedChallenge.source === 'client_dev'
-        ? crypto
-            .createHash('sha256')
-            .update(
-              `drpos_client_otp_v1:a882249ff19ca7af4920b868d261332526482edb0454e3e02268fb16e4c532bf:${storedChallenge.jti}:${email}:${otp}:${storedChallenge.salt}`
-            )
-            .digest('hex')
-        : computeOtpDigest(storedChallenge.jti, email, otp, storedChallenge.salt);
+        ? safeHexEqual(
+            crypto
+              .createHash('sha256')
+              .update(
+                `drpos_client_otp_v1:a882249ff19ca7af4920b868d261332526482edb0454e3e02268fb16e4c532bf:${storedChallenge.jti}:${email}:${otp}:${storedChallenge.salt}`
+              )
+              .digest('hex'),
+            storedChallenge.otpDigest
+          )
+        : matchesServerOtpDigest(
+            storedChallenge.otpDigest,
+            storedChallenge.jti,
+            email,
+            otp,
+            storedChallenge.salt
+          );
 
-    if (!safeHexEqual(expectedDigest, storedChallenge.otpDigest)) {
+    if (!isMatch) {
       const nextAttempts = (storedChallenge.attempts || 0) + 1;
       await mutateVaultState<boolean>((working) => {
         const cur = working.otpChallenges?.[emailHash];
@@ -1510,8 +1654,15 @@ export async function runVerifyMasterOtp(
         body: { error: 'លេខកូដ OTP នេះផុតកំណត់ហើយ! សូមស្នើសុំលេខកូដថ្មី។' },
       };
     }
-    const expectedDigest = computeOtpDigest(matchingToken.jti, email, otp, matchingToken.salt);
-    if (!safeHexEqual(expectedDigest, matchingToken.otpDigest)) {
+    if (
+      !matchesServerOtpDigest(
+        matchingToken.otpDigest,
+        matchingToken.jti,
+        email,
+        otp,
+        matchingToken.salt
+      )
+    ) {
       return {
         status: 401,
         body: { error: 'លេខកូដ OTP មិនត្រឹមត្រូវទេ! សូមពិនិត្យលេខកូដ ៦ ខ្ទង់ម្ដងទៀត។' },

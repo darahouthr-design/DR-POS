@@ -1,5 +1,7 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import type {
   Order,
   OrderItem,
@@ -9,12 +11,17 @@ import type {
 } from '../src/types.js';
 import {
   DEFAULT_TELEGRAM_URL,
+  WAREHOUSE_SNAPSHOT_PREFIX,
   getFirebaseConfig,
+  mutateVaultState,
   normalizeEmail,
   readVaultState,
   type ApiResult,
+  type DeveloperVaultState,
+  type OtpChallengeRecord,
   type WarehouseRegistryRecord,
 } from './developerRegistry.js';
+import { getCrossDeploymentVaultKey } from './masterOtp.js';
 import { getMasterPasswordForServerSync } from './masterCredentials.js';
 import { getMongoDb, verifyFirebaseIdToken } from './mongoPartition.js';
 
@@ -22,7 +29,11 @@ const MIRROR_COLLECTION = 'drpos_warehouse_mirrors';
 const LOCAL_MIRROR_FILE = path.resolve(process.cwd(), 'data', 'warehouse_mirrors.json');
 const TMP_MIRROR_FILE = path.join('/tmp', 'drpos_warehouse_mirrors.json');
 const LIVE_REFRESH_INTERVAL_MS = 12 * 1000;
+const LIVE_EMPTY_RETRY_MS = 2500;
 const MASTER_TOKEN_SAFETY_MS = 10 * 60 * 1000;
+const VAULT_WH_SALT = 'warehouse_catalog_snapshot_v1';
+const VAULT_WH_ENC_PREFIX = 'whv1:';
+const MAX_VAULT_SNAPSHOT_CHARS = 68_000;
 
 export interface WarehouseMirrorDoc {
   ownerUid: string;
@@ -40,6 +51,7 @@ interface GlobalWarehouseCache {
   mirrors: Map<string, WarehouseMirrorDoc>;
   masterTokens: Map<string, { idToken: string; expiresAt: number }>;
   liveFetchAt: Map<string, number>;
+  vaultSyncedVersions: Map<string, string>;
 }
 
 const g = globalThis as typeof globalThis & {
@@ -51,7 +63,10 @@ if (!g.__drposWarehouseCache) {
     mirrors: new Map(),
     masterTokens: new Map(),
     liveFetchAt: new Map(),
+    vaultSyncedVersions: new Map(),
   };
+} else if (!g.__drposWarehouseCache.vaultSyncedVersions) {
+  g.__drposWarehouseCache.vaultSyncedVersions = new Map();
 }
 
 interface FsRestValue {
@@ -234,6 +249,145 @@ function computeMirrorVersion(
   return `${masterUid}:${products.length}:${stockSum}:${latestProd}:${orders.length}:${latestOrd}:${whSig}`;
 }
 
+function getWarehouseSnapshotKey(masterUid: string): string {
+  const hash = crypto.createHash('sha256').update(masterUid).digest('hex').slice(0, 16);
+  return `${WAREHOUSE_SNAPSHOT_PREFIX}${hash}`;
+}
+
+function encryptWarehouseSnapshot(rawObj: unknown): string {
+  const json = JSON.stringify(rawObj);
+  const deflated = zlib.deflateRawSync(Buffer.from(json, 'utf8'), { level: 6 });
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getCrossDeploymentVaultKey(), iv);
+  const enc = Buffer.concat([cipher.update(deflated), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${VAULT_WH_ENC_PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${enc.toString('base64url')}`;
+}
+
+function decryptWarehouseSnapshot(encoded: string): WarehouseMirrorDoc | null {
+  if (!encoded || !encoded.startsWith(VAULT_WH_ENC_PREFIX)) return null;
+  const parts = encoded.slice(VAULT_WH_ENC_PREFIX.length).split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const iv = Buffer.from(parts[0], 'base64url');
+    const tag = Buffer.from(parts[1], 'base64url');
+    const ciphertext = Buffer.from(parts[2], 'base64url');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getCrossDeploymentVaultKey(), iv);
+    decipher.setAuthTag(tag);
+    const inflated = zlib.inflateRawSync(Buffer.concat([decipher.update(ciphertext), decipher.final()]));
+    const parsed = JSON.parse(inflated.toString('utf8')) as Partial<WarehouseMirrorDoc>;
+    if (!parsed || !parsed.masterUid) return null;
+    return {
+      ownerUid: String(parsed.ownerUid || parsed.masterUid),
+      masterUid: String(parsed.masterUid),
+      masterEmail: normalizeEmail(parsed.masterEmail || ''),
+      settings: buildSanitizedSettingsInput((parsed.settings || {}) as Record<string, unknown>),
+      products: Array.isArray(parsed.products)
+        ? parsed.products.map((p) => zeroOutProductPrices(sanitizeProductRaw(p as unknown as Record<string, unknown>)))
+        : [],
+      orders: Array.isArray(parsed.orders)
+        ? parsed.orders.map((o) => zeroOutOrderPrices(sanitizeOrderRaw(o as unknown as Record<string, unknown>)))
+        : [],
+      updatedAt: String(parsed.updatedAt || ''),
+      source: parsed.source === 'firestore-rest' ? 'firestore-rest' : 'master-sync',
+      version: String(parsed.version || ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function stripProductForVaultSnapshot(p: Product): Product {
+  const zero = zeroOutProductPrices(p);
+  // Never store large base64 data URIs inside the shared Firestore vault doc
+  const safeImg =
+    zero.imageUrl && zero.imageUrl.startsWith('data:') && zero.imageUrl.length > 512
+      ? ''
+      : (zero.imageUrl || '').slice(0, 600);
+  return {
+    ...zero,
+    imageUrl: safeImg,
+  };
+}
+
+function stripOrderForVaultSnapshot(o: Order): Order {
+  const zero = zeroOutOrderPrices(o);
+  return {
+    ...zero,
+    // Keep PII phone/address out of the Cloud Vault snapshot; Mongo/Firestore REST carry them directly
+    customerPhone: '',
+    customerAddress: '',
+    note: String(zero.note || '').slice(0, 120),
+  };
+}
+
+function buildVaultSnapshotChallenge(doc: WarehouseMirrorDoc): OtpChallengeRecord | null {
+  const snapKey = getWarehouseSnapshotKey(doc.masterUid);
+  const safeProductsAll = (doc.products || []).map(stripProductForVaultSnapshot);
+  const safeOrdersAll = (doc.orders || []).map(stripOrderForVaultSnapshot);
+
+  const attemptLimits: Array<[number, number]> = [
+    [safeProductsAll.length, 100],
+    [safeProductsAll.length, 40],
+    [safeProductsAll.length, 15],
+    [safeProductsAll.length, 0],
+    [Math.min(safeProductsAll.length, 600), 0],
+    [Math.min(safeProductsAll.length, 250), 0],
+  ];
+
+  for (const [prodCap, ordCap] of attemptLimits) {
+    const candidatePayload = {
+      ownerUid: doc.masterUid,
+      masterUid: doc.masterUid,
+      masterEmail: doc.masterEmail,
+      settings: doc.settings,
+      products: safeProductsAll.slice(0, prodCap),
+      orders: safeOrdersAll.slice(0, ordCap),
+      updatedAt: doc.updatedAt,
+      source: doc.source,
+      version: doc.version,
+    };
+    const encoded = encryptWarehouseSnapshot(candidatePayload);
+    if (encoded.length <= MAX_VAULT_SNAPSHOT_CHARS) {
+      return {
+        emailHash: snapKey,
+        maskedEmail: doc.masterEmail || 'warehouse',
+        jti: doc.version || doc.updatedAt || 'v1',
+        salt: VAULT_WH_SALT,
+        otpDigest: encoded,
+        createdAt: doc.updatedAt || new Date().toISOString(),
+        expiresAt: '2099-12-31T23:59:59.000Z',
+        usedAt: '',
+        attempts: 0,
+        source: 'email',
+      };
+    }
+  }
+  return null;
+}
+
+function pickBetterMirror(
+  currentBest: WarehouseMirrorDoc | null,
+  candidate: WarehouseMirrorDoc | null
+): WarehouseMirrorDoc | null {
+  if (!candidate || !candidate.masterUid) return currentBest;
+  if (!currentBest) return candidate;
+  const candEmptyBug =
+    candidate.products.length === 0 &&
+    currentBest.products.length > 0 &&
+    candidate.source === 'firestore-rest';
+  if (candEmptyBug) return currentBest;
+  const bestEmptyBug =
+    currentBest.products.length === 0 &&
+    candidate.products.length > 0 &&
+    currentBest.source === 'firestore-rest';
+  if (bestEmptyBug) return candidate;
+  if (String(candidate.updatedAt || '') >= String(currentBest.updatedAt || '')) {
+    return candidate;
+  }
+  return currentBest;
+}
+
 function readLocalMirrorsMap(): Record<string, WarehouseMirrorDoc> {
   const merged: Record<string, WarehouseMirrorDoc> = {};
   for (const filePath of [LOCAL_MIRROR_FILE, TMP_MIRROR_FILE]) {
@@ -246,10 +400,7 @@ function readLocalMirrorsMap(): Record<string, WarehouseMirrorDoc> {
       if (!raw || typeof raw !== 'object') continue;
       for (const [k, doc] of Object.entries(raw)) {
         if (!doc || typeof doc !== 'object' || !doc.masterUid) continue;
-        const prev = merged[k];
-        if (!prev || String(doc.updatedAt || '') >= String(prev.updatedAt || '')) {
-          merged[k] = doc;
-        }
+        merged[k] = pickBetterMirror(merged[k] || null, doc) || doc;
       }
     } catch {
       // Ignore corrupt mirror cache file
@@ -278,28 +429,57 @@ function writeLocalMirrorDoc(doc: WarehouseMirrorDoc): void {
 async function persistMirrorDoc(doc: WarehouseMirrorDoc): Promise<void> {
   g.__drposWarehouseCache!.mirrors.set(doc.masterUid, doc);
   writeLocalMirrorDoc(doc);
-  try {
-    const db = await getMongoDb();
-    if (db) {
-      await db
-        .collection<WarehouseMirrorDoc>(MIRROR_COLLECTION)
-        .updateOne({ ownerUid: doc.masterUid }, { $set: doc }, { upsert: true });
-    }
-  } catch {
-    // Non-fatal: RAM + file fallback remain active
-  }
+  await Promise.allSettled([
+    (async () => {
+      try {
+        const db = await getMongoDb();
+        if (db) {
+          await db
+            .collection<WarehouseMirrorDoc>(MIRROR_COLLECTION)
+            .updateOne({ ownerUid: doc.masterUid }, { $set: doc }, { upsert: true });
+        }
+      } catch {
+        // Non-fatal: RAM + file fallback remain active
+      }
+    })(),
+    (async () => {
+      try {
+        const syncedVer = g.__drposWarehouseCache!.vaultSyncedVersions.get(doc.masterUid);
+        if (syncedVer && syncedVer === doc.version) return;
+        const challenge = buildVaultSnapshotChallenge(doc);
+        if (!challenge) return;
+        const snapKey = getWarehouseSnapshotKey(doc.masterUid);
+        const res = await mutateVaultState<boolean>((working) => {
+          const prev = working.otpChallenges?.[snapKey];
+          if (prev && prev.jti === challenge.jti && prev.salt === VAULT_WH_SALT) {
+            return { changed: false, result: true };
+          }
+          working.otpChallenges = {
+            ...(working.otpChallenges || {}),
+            [snapKey]: challenge,
+          };
+          return { changed: true, result: true };
+        });
+        if (res.persistedToCloud) {
+          g.__drposWarehouseCache!.vaultSyncedVersions.set(doc.masterUid, doc.version);
+        }
+      } catch {
+        // Non-fatal
+      }
+    })(),
+  ]);
 }
 
-async function readMirrorDoc(masterUid: string): Promise<WarehouseMirrorDoc | null> {
+async function readMirrorDoc(
+  masterUid: string,
+  preloadedVault?: DeveloperVaultState
+): Promise<WarehouseMirrorDoc | null> {
   const cache = g.__drposWarehouseCache!.mirrors;
   let best: WarehouseMirrorDoc | null = cache.get(masterUid) || null;
 
   const localMap = readLocalMirrorsMap();
-  const localDoc = localMap[masterUid];
-  if (localDoc && (!best || String(localDoc.updatedAt || '') > String(best.updatedAt || ''))) {
-    best = localDoc;
-    cache.set(masterUid, localDoc);
-  }
+  const localDoc = localMap[masterUid] || null;
+  best = pickBetterMirror(best, localDoc);
 
   try {
     const db = await getMongoDb();
@@ -307,19 +487,26 @@ async function readMirrorDoc(masterUid: string): Promise<WarehouseMirrorDoc | nu
       const mongoDoc = await db
         .collection<WarehouseMirrorDoc>(MIRROR_COLLECTION)
         .findOne({ ownerUid: masterUid }, { projection: { _id: 0 } });
-      if (
-        mongoDoc &&
-        mongoDoc.masterUid &&
-        (!best || String(mongoDoc.updatedAt || '') >= String(best.updatedAt || ''))
-      ) {
-        best = mongoDoc;
-        cache.set(masterUid, mongoDoc);
-      }
+      best = pickBetterMirror(best, mongoDoc);
     }
   } catch {
     // Non-fatal
   }
 
+  try {
+    const snapKey = getWarehouseSnapshotKey(masterUid);
+    const snapRec = preloadedVault?.otpChallenges?.[snapKey];
+    if (snapRec && snapRec.salt === VAULT_WH_SALT && typeof snapRec.otpDigest === 'string') {
+      const vaultDoc = decryptWarehouseSnapshot(snapRec.otpDigest);
+      best = pickBetterMirror(best, vaultDoc);
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  if (best) {
+    cache.set(masterUid, best);
+  }
   return best;
 }
 
@@ -363,10 +550,17 @@ async function getMasterIdTokenForRest(masterEmail: string): Promise<string | nu
   }
 }
 
+interface LiveFetchResult {
+  mirror: WarehouseMirrorDoc;
+  productsOk: boolean;
+  ordersOk: boolean;
+}
+
 async function fetchFirestoreWorkspaceLive(
   masterUid: string,
-  masterEmail: string
-): Promise<WarehouseMirrorDoc | null> {
+  masterEmail: string,
+  existingMirror?: WarehouseMirrorDoc | null
+): Promise<LiveFetchResult | null> {
   const idToken = await getMasterIdTokenForRest(masterEmail);
   if (!idToken) return null;
 
@@ -395,54 +589,100 @@ async function fetchFirestoreWorkspaceLive(
         : {};
     const settings = buildSanitizedSettingsInput(rawSettings);
 
-    const fetchCollectionPages = async (sub: string, maxPages: number, pageSize: number) => {
-      const items: Record<string, unknown>[] = [];
-      let pageToken = '';
-      for (let page = 0; page < maxPages; page++) {
-        const qp = new URLSearchParams({
-          key: cfg.apiKey,
-          pageSize: String(pageSize),
-          ...(sub === 'orders' ? { orderBy: 'createdAt desc' } : {}),
-          ...(pageToken ? { pageToken } : {}),
-        });
-        const r = await fetch(`${baseUrl}/${sub}?${qp.toString()}`, {
-          method: 'GET',
-          headers: authHeaders,
-        });
-        if (!r.ok) break;
-        const pageJson = (await r.json()) as {
-          documents?: Array<{ fields?: Record<string, FsRestValue> }>;
-          nextPageToken?: string;
+    const runFilteredSubcollectionQuery = async (
+      sub: string,
+      opts: { limit: number; withOrderByCreatedAtDesc?: boolean }
+    ): Promise<{ ok: boolean; items: Record<string, unknown>[] }> => {
+      const runOnce = async (useOrderBy: boolean) => {
+        const structuredQuery: Record<string, unknown> = {
+          from: [{ collectionId: sub }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'ownerUid' },
+              op: 'EQUAL',
+              value: { stringValue: masterUid },
+            },
+          },
+          limit: opts.limit,
         };
-        for (const d of pageJson.documents || []) {
-          items.push(decodeFsRestFields(d.fields));
+        if (useOrderBy) {
+          structuredQuery.orderBy = [
+            { field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' },
+          ];
         }
-        if (!pageJson.nextPageToken) break;
-        pageToken = pageJson.nextPageToken;
+        return fetch(`${baseUrl}:runQuery?key=${encodeURIComponent(cfg.apiKey)}`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ structuredQuery }),
+        });
+      };
+
+      let r = await runOnce(Boolean(opts.withOrderByCreatedAtDesc));
+      if (!r.ok && opts.withOrderByCreatedAtDesc && r.status === 400) {
+        // Fallback without composite index requirement if createdAt index is absent
+        r = await runOnce(false);
       }
-      return items;
+      if (!r.ok) {
+        return { ok: false, items: [] };
+      }
+      const rows = (await r.json()) as Array<{
+        document?: { fields?: Record<string, FsRestValue> };
+      }>;
+      const items: Record<string, unknown>[] = [];
+      for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.document?.fields) {
+          items.push(decodeFsRestFields(row.document.fields));
+        }
+      }
+      return { ok: true, items };
     };
 
-    const [rawProds, rawOrds] = await Promise.all([
-      fetchCollectionPages('products', 4, 250),
-      fetchCollectionPages('orders', 2, 200),
+    const [prodQueryRes, ordQueryRes] = await Promise.all([
+      runFilteredSubcollectionQuery('products', { limit: 1500 }),
+      runFilteredSubcollectionQuery('orders', {
+        limit: 400,
+        withOrderByCreatedAtDesc: true,
+      }),
     ]);
 
-    const products = rawProds.map(sanitizeProductRaw).filter((p) => Boolean(p.id));
-    const orders = rawOrds.map(sanitizeOrderRaw).filter((o) => Boolean(o.id));
+    if (!prodQueryRes.ok && !ordQueryRes.ok) {
+      return null;
+    }
+
+    const products = prodQueryRes.ok
+      ? prodQueryRes.items
+          .map(sanitizeProductRaw)
+          .filter((p) => Boolean(p.id))
+          .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      : existingMirror?.products || [];
+
+    const orders = ordQueryRes.ok
+      ? ordQueryRes.items
+          .map(sanitizeOrderRaw)
+          .filter((o) => Boolean(o.id))
+          .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      : existingMirror?.orders || [];
+
     const nowIso = new Date().toISOString();
     const version = computeMirrorVersion(masterUid, settings, products, orders);
 
     return {
-      ownerUid: masterUid,
-      masterUid,
-      masterEmail: normalizeEmail(rootDecoded.ownerEmail || masterEmail),
-      settings,
-      products,
-      orders,
-      updatedAt: nowIso,
-      source: 'firestore-rest',
-      version,
+      productsOk: prodQueryRes.ok,
+      ordersOk: ordQueryRes.ok,
+      mirror: {
+        ownerUid: masterUid,
+        masterUid,
+        masterEmail: normalizeEmail(rootDecoded.ownerEmail || masterEmail),
+        settings,
+        products,
+        orders,
+        updatedAt: nowIso,
+        source: 'firestore-rest',
+        version,
+      },
     };
   } catch {
     return null;
@@ -614,26 +854,33 @@ export async function runWarehouseFeed(
   const masterEmail = normalizeEmail(matchedEntry.masterEmail);
   const forceRefresh = queryParams?.force === '1' || queryParams?.force === 'true';
 
-  let mirror = await readMirrorDoc(masterUid);
+  let mirror = await readMirrorDoc(masterUid, vault);
   const lastLiveAt = g.__drposWarehouseCache!.liveFetchAt.get(masterUid) || 0;
-  const needsLiveFetch =
-    forceRefresh || !mirror || Date.now() - lastLiveAt > LIVE_REFRESH_INTERVAL_MS;
+  const refreshCooldown =
+    !mirror || mirror.products.length === 0 ? LIVE_EMPTY_RETRY_MS : LIVE_REFRESH_INTERVAL_MS;
+  const needsLiveFetch = forceRefresh || !mirror || Date.now() - lastLiveAt > refreshCooldown;
 
   if (needsLiveFetch) {
     g.__drposWarehouseCache!.liveFetchAt.set(masterUid, Date.now());
-    const liveMirror = await fetchFirestoreWorkspaceLive(masterUid, masterEmail);
-    if (liveMirror) {
-      // Keep newer mirror if a just-committed master sync has strictly newer order count or timestamp
+    const liveRes = await fetchFirestoreWorkspaceLive(masterUid, masterEmail, mirror);
+    if (liveRes && liveRes.productsOk) {
+      const liveMirror = liveRes.mirror;
       if (
         !mirror ||
-        liveMirror.source === 'firestore-rest' &&
-          (liveMirror.products.length > 0 ||
-            liveMirror.orders.length >= mirror.orders.length ||
-            forceRefresh)
+        liveMirror.products.length > 0 ||
+        (liveRes.ordersOk && liveMirror.orders.length >= mirror.orders.length && mirror.products.length === 0)
       ) {
         mirror = liveMirror;
         await persistMirrorDoc(liveMirror);
       }
+    }
+  }
+
+  if (mirror && (mirror.products.length > 0 || mirror.orders.length > 0)) {
+    const snapKey = getWarehouseSnapshotKey(masterUid);
+    const existingVaultSnap = vault.otpChallenges?.[snapKey];
+    if (!existingVaultSnap || existingVaultSnap.jti !== mirror.version) {
+      await persistMirrorDoc(mirror);
     }
   }
 

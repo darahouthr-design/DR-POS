@@ -220,6 +220,36 @@ function saveSalePrefsToStorage(uid: string, saleName: string, prefs: SaleUserPr
   }
 }
 
+const WAREHOUSE_PREFS_STORAGE_PREFIX = 'drpos_wh_prefs_v1_';
+
+function getWarehousePrefsStorageKey(uid: string): string {
+  const cleanUid = String(uid || '').trim();
+  if (!cleanUid) return '';
+  return `${WAREHOUSE_PREFS_STORAGE_PREFIX}${cleanUid}`;
+}
+
+function loadWarehousePrefsFromStorage(uid: string): SaleUserPreferences | null {
+  const key = getWarehousePrefsStorageKey(uid);
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return sanitizeSalePrefs(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function saveWarehousePrefsToStorage(uid: string, prefs: SaleUserPreferences): void {
+  const key = getWarehousePrefsStorageKey(uid);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(prefs));
+  } catch {
+    // Ignore storage access restrictions
+  }
+}
+
 function getOrCreateStableDeviceId(): string {
   const randomId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.replace(
     /[^a-zA-Z0-9]/g,
@@ -305,7 +335,13 @@ const SALE_ALLOWED_PAGES: PageId[] = [
   'about',
 ];
 
-const WAREHOUSE_ALLOWED_PAGES: PageId[] = ['products', 'orders'];
+const WAREHOUSE_ALLOWED_PAGES: PageId[] = [
+  'products',
+  'orders',
+  'settings',
+  'privacy-policy',
+  'about',
+];
 
 const EMPTY_COLLECTION_READINESS: WorkspaceCollectionReadiness = {
   products: false,
@@ -371,6 +407,10 @@ export function App() {
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
   const [salePrefsState, setSalePrefsState] = useState<{
+    key: string;
+    prefs: SaleUserPreferences;
+  } | null>(null);
+  const [warehousePrefsState, setWarehousePrefsState] = useState<{
     key: string;
     prefs: SaleUserPreferences;
   } | null>(null);
@@ -1385,24 +1425,63 @@ export function App() {
     workspace?.settings.saleProfiles,
   ]);
 
+  const activeWarehouseStorageKey = useMemo(() => {
+    if (!firebaseUser?.uid || session?.role !== 'warehouse') return '';
+    return getWarehousePrefsStorageKey(firebaseUser.uid);
+  }, [firebaseUser?.uid, session?.role]);
+
+  const resolvedWarehousePrefs = useMemo<SaleUserPreferences | null>(() => {
+    if (!firebaseUser?.uid || session?.role !== 'warehouse' || !activeWarehouseStorageKey) {
+      return null;
+    }
+    if (warehousePrefsState && warehousePrefsState.key === activeWarehouseStorageKey) {
+      return warehousePrefsState.prefs;
+    }
+    return loadWarehousePrefsFromStorage(firebaseUser.uid);
+  }, [firebaseUser?.uid, session?.role, activeWarehouseStorageKey, warehousePrefsState]);
+
   const effectiveDarkMode = useMemo(() => {
     if (!workspace) return false;
+    if (session?.role === 'warehouse' && typeof resolvedWarehousePrefs?.darkMode === 'boolean') {
+      return resolvedWarehousePrefs.darkMode;
+    }
     if (session?.role === 'sale' && typeof resolvedSalePrefs?.darkMode === 'boolean') {
       return resolvedSalePrefs.darkMode;
     }
     return Boolean(workspace.settings.darkMode);
-  }, [workspace, session?.role, resolvedSalePrefs?.darkMode]);
+  }, [
+    workspace,
+    session?.role,
+    resolvedWarehousePrefs?.darkMode,
+    resolvedSalePrefs?.darkMode,
+  ]);
 
   const effectiveSoundEnabled = useMemo(() => {
     if (!workspace) return true;
+    if (session?.role === 'warehouse' && typeof resolvedWarehousePrefs?.soundEnabled === 'boolean') {
+      return resolvedWarehousePrefs.soundEnabled;
+    }
     if (session?.role === 'sale' && typeof resolvedSalePrefs?.soundEnabled === 'boolean') {
       return resolvedSalePrefs.soundEnabled;
     }
     return workspace.settings.soundEnabled ?? true;
-  }, [workspace, session?.role, resolvedSalePrefs?.soundEnabled]);
+  }, [
+    workspace,
+    session?.role,
+    resolvedWarehousePrefs?.soundEnabled,
+    resolvedSalePrefs?.soundEnabled,
+  ]);
 
   const effectiveLanguage: LanguageCode = useMemo(() => {
     if (!workspace) return 'kh';
+    if (
+      session?.role === 'warehouse' &&
+      (resolvedWarehousePrefs?.language === 'kh' ||
+        resolvedWarehousePrefs?.language === 'en' ||
+        resolvedWarehousePrefs?.language === 'kr')
+    ) {
+      return resolvedWarehousePrefs.language;
+    }
     if (
       session?.role === 'sale' &&
       (resolvedSalePrefs?.language === 'kh' ||
@@ -1412,7 +1491,12 @@ export function App() {
       return resolvedSalePrefs.language;
     }
     return workspace.settings.language || 'kh';
-  }, [workspace, session?.role, resolvedSalePrefs?.language]);
+  }, [
+    workspace,
+    session?.role,
+    resolvedWarehousePrefs?.language,
+    resolvedSalePrefs?.language,
+  ]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -2095,6 +2179,8 @@ export function App() {
     saveOperatorEmailPref(firebaseUser.uid, '');
     clearRolePref(firebaseUser.uid);
     clearWorkspaceBootSnapshot(firebaseUser.uid);
+    setSalePrefsState(null);
+    setWarehousePrefsState(null);
     await signOut(auth);
   };
 
@@ -2541,9 +2627,7 @@ export function App() {
                   type="button"
                   onClick={() =>
                     setActivePage(
-                      isWarehouseRole
-                        ? 'products'
-                        : !isSaleRole && blockedPages.includes('about')
+                      !isSaleRole && !isWarehouseRole && blockedPages.includes('about')
                         ? 'dashboard'
                         : 'about'
                     )
@@ -3020,7 +3104,7 @@ export function App() {
               />
             )}
 
-            {!isWarehouseRole && activePage === 'settings' && scopedSettings && (
+            {activePage === 'settings' && scopedSettings && (
               <SettingsView
                 session={{
                   ...session,
@@ -3125,6 +3209,32 @@ export function App() {
                     } catch {
                       // Local isolated preferences already saved cleanly for this Sale user
                     }
+                  }
+                  return true;
+                }}
+                onSaveWarehousePreferences={async (patch: Partial<SaleUserPreferences>) => {
+                  if (!isWarehouseRole || !firebaseUser?.uid) return false;
+                  const storageKey = getWarehousePrefsStorageKey(firebaseUser.uid);
+                  const base: SaleUserPreferences = resolvedWarehousePrefs || {
+                    darkMode: effectiveDarkMode,
+                    soundEnabled: effectiveSoundEnabled,
+                    language: effectiveLanguage,
+                  };
+                  const nextPrefs: SaleUserPreferences = {
+                    ...base,
+                    ...patch,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  saveWarehousePrefsToStorage(firebaseUser.uid, nextPrefs);
+                  setWarehousePrefsState({ key: storageKey, prefs: nextPrefs });
+                  if (typeof nextPrefs.darkMode === 'boolean') {
+                    document.documentElement.classList.toggle('dark', nextPrefs.darkMode);
+                  }
+                  if (typeof nextPrefs.soundEnabled === 'boolean') {
+                    soundEnabledRef.current = nextPrefs.soundEnabled;
+                  }
+                  if (nextPrefs.language) {
+                    langRef.current = nextPrefs.language;
                   }
                   return true;
                 }}
@@ -3361,12 +3471,10 @@ export function App() {
               />
             )}
 
-            {!isWarehouseRole &&
-              (isSaleRole || !blockedPages.includes('privacy-policy')) &&
+            {(isWarehouseRole || isSaleRole || !blockedPages.includes('privacy-policy')) &&
               activePage === 'privacy-policy' && <PrivacyPolicyView />}
 
-            {!isWarehouseRole &&
-              (isSaleRole || !blockedPages.includes('about')) &&
+            {(isWarehouseRole || isSaleRole || !blockedPages.includes('about')) &&
               activePage === 'about' && <AboutView />}
                 </Suspense>
               </>
@@ -3386,7 +3494,7 @@ export function App() {
           <div
             className={`grid ${
               isWarehouseRole
-                ? 'grid-cols-3'
+                ? 'grid-cols-6 max-w-2xl mx-auto'
                 : isSaleRole
                 ? 'grid-cols-8 max-w-3xl mx-auto'
                 : 'grid-cols-5'
@@ -3406,6 +3514,7 @@ export function App() {
               const isActive = activePage === pid;
               const shortLabel =
                 t.navShort[pid as keyof typeof t.navShort] || t.nav[pid];
+              const isCompactNavRole = isSaleRole || isWarehouseRole;
               return (
                 <button
                   key={pid}
@@ -3419,15 +3528,15 @@ export function App() {
                   <span
                     aria-hidden="true"
                     className={`pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 h-[2px] rounded-full bg-primary transition-opacity duration-150 ${
-                      isSaleRole ? 'w-5 sm:w-7' : 'w-6 sm:w-8'
+                      isCompactNavRole ? 'w-5 sm:w-7' : 'w-6 sm:w-8'
                     } ${isActive ? 'opacity-100' : 'opacity-0'}`}
                   />
                   <span className="inline-flex h-[18px] w-[18px] sm:h-5 sm:w-5 items-center justify-center shrink-0">
                     <Icon3D
                       name={navMeta.icon}
-                      size={isSaleRole ? 17 : 18}
+                      size={isCompactNavRole ? 17 : 18}
                       className={
-                        isSaleRole
+                        isCompactNavRole
                           ? 'h-[17px] w-[17px] sm:h-[19px] sm:w-[19px]'
                           : 'h-[18px] w-[18px] sm:h-5 sm:w-5'
                       }
@@ -3435,7 +3544,7 @@ export function App() {
                   </span>
                   <span
                     className={`block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] truncate whitespace-nowrap font-medium ${
-                      isSaleRole
+                      isCompactNavRole
                         ? 'text-[9px] sm:text-[10.5px]'
                         : 'text-[9.5px] sm:text-[10.5px]'
                     }`}
@@ -3453,9 +3562,9 @@ export function App() {
                 className="relative flex flex-col items-center justify-center gap-0.5 h-full w-full min-w-0 px-0.5 pt-1 pb-0.5 select-none text-danger hover:text-danger/80 transition-colors cursor-pointer"
               >
                 <span className="inline-flex h-[18px] w-[18px] sm:h-5 sm:w-5 items-center justify-center shrink-0">
-                  <LogOut className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
+                  <LogOut className="h-[17px] w-[17px] sm:h-[19px] sm:w-[19px]" />
                 </span>
-                <span className="block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] text-[9.5px] sm:text-[10.5px] font-medium truncate whitespace-nowrap">
+                <span className="block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] text-[9px] sm:text-[10.5px] font-medium truncate whitespace-nowrap">
                   {t.common.signOut}
                 </span>
               </button>
