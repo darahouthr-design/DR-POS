@@ -2,6 +2,7 @@ import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
+  deleteUser,
   EmailAuthProvider,
   fetchSignInMethodsForEmail,
   getAuth,
@@ -11,12 +12,15 @@ import {
   linkWithCredential,
   sendEmailVerification,
   setPersistence,
+  signInWithEmailAndPassword,
   signOut,
   updatePassword,
   updateProfile,
+  type User,
 } from 'firebase/auth';
 import {
   doc,
+  getDoc,
   getDocFromServer,
   getFirestore,
   type Firestore,
@@ -92,6 +96,88 @@ export async function createSecondaryAdminUser(
 
     return {
       uid: cred.user.uid,
+      email,
+      displayName: cleanName,
+    };
+  } finally {
+    await signOut(secondaryAuth).catch(() => {});
+  }
+}
+
+export async function createOrRecoverWarehouseAuthUser(
+  rawEmail: string,
+  password: string,
+  displayName: string,
+  onPersist: (user: {
+    uid: string;
+    email: string;
+    displayName: string;
+  }) => Promise<{ ok: boolean; error?: string }>
+): Promise<{ ok: boolean; uid: string; email: string; displayName: string; error?: string }> {
+  const email = rawEmail.trim().toLowerCase();
+  const cleanName = displayName.trim() || email.split('@')[0] || 'Warehouse';
+  const { secondaryAuth, secondaryDb } = getOrCreateSecondaryFirebase();
+
+  let targetUser: User | null = null;
+  let newlyCreated = false;
+
+  try {
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      targetUser = cred.user;
+      newlyCreated = true;
+      await updateProfile(cred.user, { displayName: cleanName }).catch(() => {});
+    } catch (createErr) {
+      const code = (createErr as { code?: string })?.code || '';
+      if (code !== 'auth/email-already-in-use') {
+        throw createErr;
+      }
+
+      // Recover an uninitialized orphaned Auth user left by a previously failed creation,
+      // strictly only if the caller proves knowledge of the password AND no workspace exists.
+      let recoveredUser: User | null = null;
+      try {
+        const signInCred = await signInWithEmailAndPassword(secondaryAuth, email, password);
+        recoveredUser = signInCred.user;
+      } catch {
+        throw createErr;
+      }
+
+      const wsRef = doc(secondaryDb, 'workspaces', recoveredUser.uid);
+      const wsSnap = await getDocFromServer(wsRef).catch(() => getDoc(wsRef));
+      if (wsSnap.exists()) {
+        throw createErr;
+      }
+
+      targetUser = recoveredUser;
+      newlyCreated = false;
+      if (recoveredUser.displayName !== cleanName) {
+        await updateProfile(recoveredUser, { displayName: cleanName }).catch(() => {});
+      }
+    }
+
+    const persistRes = await onPersist({
+      uid: targetUser.uid,
+      email,
+      displayName: cleanName,
+    });
+
+    if (!persistRes.ok) {
+      if (newlyCreated && targetUser) {
+        await deleteUser(targetUser).catch(() => {});
+      }
+      return {
+        ok: false,
+        uid: targetUser.uid,
+        email,
+        displayName: cleanName,
+        error: persistRes.error,
+      };
+    }
+
+    return {
+      ok: true,
+      uid: targetUser.uid,
       email,
       displayName: cleanName,
     };

@@ -17,19 +17,19 @@ export const Surface: React.FC<
 );
 
 const buttonTones = {
-  primary: 'bg-primary text-primary-foreground btn-3d-primary btn-animated-sheen',
-  quiet: 'border border-border bg-surface text-foreground btn-3d-quiet hover:bg-background/80',
-  danger: 'bg-danger text-danger-foreground btn-3d-danger btn-animated-sheen',
-  accent: 'bg-accent text-accent-foreground btn-3d-primary btn-animated-sheen',
+  primary: 'bg-primary text-primary-foreground btn-3d-primary btn-animated-sheen btn-tactile',
+  quiet: 'border border-border bg-surface text-foreground btn-3d-quiet btn-animated-sheen-subtle btn-tactile hover:bg-background/80',
+  danger: 'bg-danger text-danger-foreground btn-3d-danger btn-animated-sheen btn-tactile',
+  accent: 'bg-accent text-accent-foreground btn-3d-primary btn-animated-sheen btn-tactile',
 };
 
 export const Button: React.FC<
   React.ComponentProps<'button'> & { tone?: keyof typeof buttonTones }
 > = ({ tone = 'primary', type = 'button', className = '', children, disabled, ...props }) => (
   <motion.button
-    whileHover={disabled ? undefined : { y: -1.5 }}
-    whileTap={disabled ? undefined : { scale: 0.965, y: 1 }}
-    transition={{ type: 'spring', stiffness: 460, damping: 28 }}
+    whileHover={disabled ? undefined : { y: -2, scale: 1.015 }}
+    whileTap={disabled ? undefined : { scale: 0.955, y: 1.5 }}
+    transition={{ type: 'spring', stiffness: 520, damping: 26, mass: 0.8 }}
     type={type}
     disabled={disabled}
     className={`inline-flex min-h-11 items-center justify-center gap-1.5 sm:gap-2 rounded-control px-3 sm:px-4 py-2 text-[13px] sm:text-sm font-medium leading-snug focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${buttonTones[tone]} ${className}`}

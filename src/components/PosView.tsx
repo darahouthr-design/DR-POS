@@ -1256,32 +1256,38 @@ export const PosView: React.FC<PosViewProps> = ({
       )}
 
       {/* Mobile Floating Quick Checkout Bar when Cart has items */}
-      {cart.length > 0 && !cartDrawerOpen && (
-        <div
-          style={{
-            bottom:
-              'calc(var(--mobile-nav-height, calc(3.625rem + max(0.625rem, env(safe-area-inset-bottom, 0px)))) + 0.625rem)',
-          }}
-          className="md:hidden fixed inset-x-3 z-30"
-        >
-          <Button
-            tone="primary"
-            onClick={() => {
-              setCartDrawerOpen(true);
-              setCheckoutStep('items');
+      <AnimatePresence>
+        {cart.length > 0 && !cartDrawerOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 440, damping: 30 }}
+            style={{
+              bottom:
+                'calc(var(--mobile-nav-height, calc(3.625rem + max(0.625rem, env(safe-area-inset-bottom, 0px)))) + 0.625rem)',
             }}
-            className="w-full min-h-12 justify-between px-4 py-2.5 shadow-float"
+            className="md:hidden fixed inset-x-3 z-30"
           >
-            <span className="flex items-center gap-2 text-xs font-semibold tabular-nums">
-              <Icon3D name="cart" size={20} />
-              <span>
-                {totalItems} {t.pos.mobileItemsUnit} · {formatMoney(cartFinalTotal, currency)}
+            <Button
+              tone="primary"
+              onClick={() => {
+                setCartDrawerOpen(true);
+                setCheckoutStep('items');
+              }}
+              className="w-full min-h-12 justify-between px-4 py-2.5 shadow-float"
+            >
+              <span className="flex items-center gap-2 text-xs font-semibold tabular-nums">
+                <Icon3D name="cart" size={20} />
+                <span>
+                  {totalItems} {t.pos.mobileItemsUnit} · {formatMoney(cartFinalTotal, currency)}
+                </span>
               </span>
-            </span>
-            <span className="text-xs font-bold shrink-0">{t.pos.openCartCheckout}</span>
-          </Button>
-        </div>
-      )}
+              <span className="text-xs font-bold shrink-0">{t.pos.openCartCheckout}</span>
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Cart & Checkout Modal Form Card */}
       <AnimatePresence>
@@ -1487,6 +1493,7 @@ export const PosView: React.FC<PosViewProps> = ({
                             </button>
                           </div>
                           <div className="divide-y divide-border/50">
+                            <AnimatePresence initial={false}>
                               {liveCart.map((item) => {
                                 const catalogUnit = getCatalogUnitPrice(item.product);
                                 const unit = getEffectiveUnitPrice(item);
@@ -1503,8 +1510,13 @@ export const PosView: React.FC<PosViewProps> = ({
                                   item.quantity > item.product.stock;
 
                                 return (
-                                  <div
+                                  <motion.div
                                     key={item.product.id}
+                                    layout
+                                    initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, x: -24, scale: 0.95 }}
+                                    transition={{ type: 'spring', stiffness: 420, damping: 30 }}
                                     className={`py-3 space-y-2.5 ${
                                       itemStockBlocked ? 'bg-danger/5 -mx-2 px-2 rounded-control' : ''
                                     }`}
@@ -1550,9 +1562,15 @@ export const PosView: React.FC<PosViewProps> = ({
                                         >
                                           <Minus className="h-4 w-4" />
                                         </Button>
-                                        <span className="min-w-8 text-center font-bold tabular-nums text-sm">
+                                        <motion.span
+                                          key={item.quantity}
+                                          initial={{ scale: 0.78, opacity: 0.6 }}
+                                          animate={{ scale: 1, opacity: 1 }}
+                                          transition={{ type: 'spring', stiffness: 520, damping: 22 }}
+                                          className="min-w-8 text-center font-bold tabular-nums text-sm inline-block"
+                                        >
                                           {item.quantity}
-                                        </span>
+                                        </motion.span>
                                         <Button
                                           tone="quiet"
                                           onClick={() => updateCartQty(item.product.id, 1)}
@@ -1612,16 +1630,17 @@ export const PosView: React.FC<PosViewProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => resetManualPrice(item.product.id)}
-                                            className="min-h-9 rounded-control border border-border px-2.5 text-[11px] font-medium text-muted hover:text-foreground cursor-pointer"
+                                            className="min-h-9 rounded-control border border-border px-2.5 text-[11px] font-medium text-muted hover:text-foreground cursor-pointer transition-transform active:scale-95"
                                           >
                                             {t.pos.resetOriginalPrice}
                                           </button>
                                         )}
                                       </div>
                                     </div>
-                                  </div>
+                                  </motion.div>
                                 );
                               })}
+                            </AnimatePresence>
                           </div>
                         </>
                       )}
@@ -2031,79 +2050,86 @@ export const PosView: React.FC<PosViewProps> = ({
                             {t.pos.manualPriceItemLabel} ({currencyMeta.inputLabel} {t.pos.perUnitSuffix})
                           </span>
                           <div className="divide-y divide-border/45 rounded-control border border-border/60 bg-surface px-3">
-                            {cart.map((item) => {
-                              const catalogUnit = getCatalogUnitPrice(item.product);
-                              const unit = getEffectiveUnitPrice(item);
-                              const isEdited =
-                                item.customUnitPrice !== undefined &&
-                                Math.abs(item.customUnitPrice - catalogUnit) > 0.0001;
-                              const draftVal =
-                                priceDrafts[item.product.id] !== undefined
-                                  ? priceDrafts[item.product.id]
-                                  : String(usdToInputAmount(unit, currency));
+                            <AnimatePresence initial={false}>
+                              {cart.map((item) => {
+                                const catalogUnit = getCatalogUnitPrice(item.product);
+                                const unit = getEffectiveUnitPrice(item);
+                                const isEdited =
+                                  item.customUnitPrice !== undefined &&
+                                  Math.abs(item.customUnitPrice - catalogUnit) > 0.0001;
+                                const draftVal =
+                                  priceDrafts[item.product.id] !== undefined
+                                    ? priceDrafts[item.product.id]
+                                    : String(usdToInputAmount(unit, currency));
 
-                              return (
-                                <div
-                                  key={item.product.id}
-                                  className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-xs sm:text-sm font-semibold text-foreground break-words leading-snug">
-                                      {item.product.name}{' '}
-                                      <span className="text-primary font-bold tabular-nums">
-                                        × {item.quantity}
-                                      </span>
-                                    </p>
-                                    <p className="text-[11px] text-muted tabular-nums">
-                                      {t.pos.originalPriceLabel}: {formatMoney(catalogUnit, currency)}
-                                      {isEdited && (
-                                        <span className="ml-1.5 font-semibold text-primary">
-                                          {t.pos.newEditedPricePrefix} {formatMoney(unit, currency)}
+                                return (
+                                  <motion.div
+                                    key={item.product.id}
+                                    layout
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, x: -18 }}
+                                    transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                                    className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs sm:text-sm font-semibold text-foreground break-words leading-snug">
+                                        {item.product.name}{' '}
+                                        <span className="text-primary font-bold tabular-nums">
+                                          × {item.quantity}
                                         </span>
-                                      )}
-                                    </p>
-                                  </div>
-
-                                  <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="relative w-32">
-                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted font-semibold">
-                                          {currencyMeta.symbol}
-                                        </span>
-                                        <input
-                                          type="number"
-                                          step={currencyMeta.step}
-                                          min="0"
-                                          value={draftVal}
-                                          onChange={(e) =>
-                                            handleManualPriceChange(
-                                              item.product.id,
-                                              e.target.value
-                                            )
-                                          }
-                                          onBlur={() => handleManualPriceBlur(item.product.id)}
-                                          aria-label={`${t.pos.editUnitPriceLabel} ${item.product.name}`}
-                                          className="min-h-11 sm:min-h-9 w-full rounded-control border border-border bg-background pl-7 pr-2 py-1.5 text-base sm:text-sm font-semibold tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary/35"
-                                        />
-                                      </div>
-                                      {isEdited && (
-                                        <button
-                                          type="button"
-                                          onClick={() => resetManualPrice(item.product.id)}
-                                          className="min-h-11 sm:min-h-9 rounded-control border border-border bg-background px-2.5 text-[11px] font-medium text-muted hover:text-foreground cursor-pointer shrink-0"
-                                        >
-                                          {t.pos.resetOriginalPrice}
-                                        </button>
-                                      )}
+                                      </p>
+                                      <p className="text-[11px] text-muted tabular-nums">
+                                        {t.pos.originalPriceLabel}: {formatMoney(catalogUnit, currency)}
+                                        {isEdited && (
+                                          <span className="ml-1.5 font-semibold text-primary">
+                                            {t.pos.newEditedPricePrefix} {formatMoney(unit, currency)}
+                                          </span>
+                                        )}
+                                      </p>
                                     </div>
 
-                                    <span className="min-w-20 text-right text-xs sm:text-sm font-bold tabular-nums text-foreground">
-                                      {formatMoney(unit * item.quantity, currency)}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                    <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="relative w-32">
+                                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted font-semibold">
+                                            {currencyMeta.symbol}
+                                          </span>
+                                          <input
+                                            type="number"
+                                            step={currencyMeta.step}
+                                            min="0"
+                                            value={draftVal}
+                                            onChange={(e) =>
+                                              handleManualPriceChange(
+                                                item.product.id,
+                                                e.target.value
+                                              )
+                                            }
+                                            onBlur={() => handleManualPriceBlur(item.product.id)}
+                                            aria-label={`${t.pos.editUnitPriceLabel} ${item.product.name}`}
+                                            className="min-h-11 sm:min-h-9 w-full rounded-control border border-border bg-background pl-7 pr-2 py-1.5 text-base sm:text-sm font-semibold tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary/35"
+                                          />
+                                        </div>
+                                        {isEdited && (
+                                          <button
+                                            type="button"
+                                            onClick={() => resetManualPrice(item.product.id)}
+                                            className="min-h-11 sm:min-h-9 rounded-control border border-border bg-background px-2.5 text-[11px] font-medium text-muted hover:text-foreground cursor-pointer shrink-0 transition-transform active:scale-95"
+                                          >
+                                            {t.pos.resetOriginalPrice}
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      <span className="min-w-20 text-right text-xs sm:text-sm font-bold tabular-nums text-foreground">
+                                        {formatMoney(unit * item.quantity, currency)}
+                                      </span>
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </AnimatePresence>
                           </div>
                         </div>
 

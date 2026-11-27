@@ -19,7 +19,7 @@
         },
         "settings": {
           "type": "object",
-          "description": "Workspace preferences, warehouses, stores, groups, categories, access rules, adminProfiles, and saleProfiles."
+          "description": "Workspace preferences, warehouses, stores, groups, categories, access rules, adminProfiles, saleProfiles, and warehouseProfiles."
         },
         "license": {
           "type": "object",
@@ -57,6 +57,7 @@
         "sortOrder": { "type": "number" },
         "updatedAt": { "type": "string", "maxLength": 64 },
         "operatorEmail": { "type": "string", "maxLength": 200 },
+        "warehouseUids": { "type": "array", "description": "Bounded list (<= 50) of Warehouse Manager UIDs authorized to view this product." },
         "serverUpdatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "ownerUid", "name", "costPrice", "sellingPrice", "promotion", "stock", "sortOrder", "updatedAt", "serverUpdatedAt"]
@@ -91,6 +92,7 @@
         "totalCost": { "type": "number" },
         "createdByEmail": { "type": "string", "maxLength": 200 },
         "operatorEmail": { "type": "string", "maxLength": 200 },
+        "warehouseUids": { "type": "array", "description": "Bounded list (<= 50) of Warehouse Manager UIDs authorized to view this order." },
         "serverCreatedAt": { "type": "string", "format": "date-time" },
         "serverUpdatedAt": { "type": "string", "format": "date-time" }
       },
@@ -176,6 +178,10 @@
         "telegramUrl": { "type": "string", "maxLength": 500 },
         "masterAdmins": { "type": "object" },
         "subAdminEmails": { "type": "object" },
+        "warehouseEmails": {
+          "type": "object",
+          "description": "Uniqueness registry and sign-in metadata for Warehouse Manager accounts created by Master Admin."
+        },
         "otpChallenges": {
           "type": "object",
           "description": "Server-managed HMAC-hashed OTP challenge records for Master Admin registration (no plaintext OTPs stored)."
@@ -184,6 +190,39 @@
         "serverUpdatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["vaultId", "telegramUrl", "masterAdmins", "subAdminEmails", "updatedAt", "serverUpdatedAt"]
+    },
+    "WarehouseMember": {
+      "title": "WarehouseMember",
+      "description": "Warehouse manager authorization record stored inside the Master Admin workspace.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "name": { "type": "string", "maxLength": 200 },
+        "assignedAdminEmail": { "type": "string", "maxLength": 200 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "ownerUid", "email", "name", "assignedAdminEmail", "active", "createdAt", "serverUpdatedAt"]
+    },
+    "WarehouseDirectory": {
+      "title": "WarehouseDirectory",
+      "description": "Self-lookup pointer document keyed by Warehouse Manager Firebase UID to resolve Master Workspace UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "masterEmail": { "type": "string", "format": "email", "maxLength": 200 },
+        "warehouseEmail": { "type": "string", "format": "email", "maxLength": 200 },
+        "name": { "type": "string", "maxLength": 200 },
+        "assignedAdminEmail": { "type": "string", "maxLength": 200 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "serverUpdatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "ownerUid", "masterEmail", "warehouseEmail", "name", "assignedAdminEmail", "active", "createdAt", "serverUpdatedAt"]
     },
     "SalePresence": {
       "title": "SalePresence",
@@ -282,6 +321,14 @@
     "/workspaces/{workspaceId}/activityLogs/{activityId}": {
       "schema": { "$ref": "#/entities/SaleActivityLog" },
       "description": "Chronological Sale staff activity logs scoped to workspaceId."
+    },
+    "/workspaces/{workspaceId}/warehouseMembers/{warehouseUid}": {
+      "schema": { "$ref": "#/entities/WarehouseMember" },
+      "description": "Warehouse manager authorizations scoped to Master workspace."
+    },
+    "/warehouseDirectory/{warehouseUid}": {
+      "schema": { "$ref": "#/entities/WarehouseDirectory" },
+      "description": "Self-lookup directory document for Warehouse Manager accounts."
     },
     "/developerVault/{vaultId}": {
       "schema": { "$ref": "#/entities/DeveloperVault" },

@@ -22,9 +22,13 @@ import {
   VolumeX,
   Camera,
   ChevronRight,
+  Eye,
+  EyeOff,
   Loader2,
   X,
 } from 'lucide-react';
+import { createOrRecoverWarehouseAuthUser } from '../firebase';
+import { WAREHOUSE_MANAGER_DUPLICATE_GMAIL_ERROR } from '../utils/authPrefs';
 import {
   checkEmailAuthGate,
   DEFAULT_TELEGRAM_URL,
@@ -51,6 +55,7 @@ import type {
   SaleUserPreferences,
   StaffMember,
   UserAccessRule,
+  WarehouseManagerProfile,
   WorkspaceLicense,
   WorkspaceSettings,
 } from '../types';
@@ -85,6 +90,19 @@ interface SettingsViewProps {
   onSaveStaff: (payload: Partial<StaffMember>) => Promise<boolean>;
   onDeleteStaff: (id: string) => Promise<boolean>;
   onSetAdminPassword: (password: string) => Promise<{ ok: boolean; message: string }>;
+  onCreateWarehouseManager?: (payload: {
+    uid: string;
+    name: string;
+    email: string;
+    assignedAdminEmail: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  onUpdateWarehouseManager?: (
+    id: string,
+    patch: { assignedAdminEmail?: string; active?: boolean }
+  ) => Promise<{ ok: boolean; error?: string }>;
+  onDeleteWarehouseManager?: (
+    profile: WarehouseManagerProfile
+  ) => Promise<{ ok: boolean; error?: string }>;
   onSwitchOperatorEmail: (email: string) => Promise<void>;
   onLogout: () => Promise<void>;
   onDeleteAccount: () => Promise<void>;
@@ -105,6 +123,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onSaveStaff,
   onDeleteStaff,
   onSetAdminPassword,
+  onCreateWarehouseManager,
+  onUpdateWarehouseManager,
+  onDeleteWarehouseManager,
   onSwitchOperatorEmail,
   onLogout,
   onDeleteAccount,
@@ -124,6 +145,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [creatingAdminBusy, setCreatingAdminBusy] = useState(false);
   const [adminActionFeedback, setAdminActionFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  // Warehouse Manager Creation & Assignment (Desktop Master Admin ONLY)
+  const [whName, setWhName] = useState('');
+  const [whEmail, setWhEmail] = useState('');
+  const [whPassword, setWhPassword] = useState('');
+  const [whConfirmPassword, setWhConfirmPassword] = useState('');
+  const [showWhPw, setShowWhPw] = useState(false);
+  const [showWhConfirmPw, setShowWhConfirmPw] = useState(false);
+  const [whAssignedAdminEmail, setWhAssignedAdminEmail] = useState('');
+  const [creatingWhBusy, setCreatingWhBusy] = useState(false);
+  const [whActionBusyId, setWhActionBusyId] = useState<string | null>(null);
+  const [whFeedback, setWhFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
@@ -174,6 +210,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Active Form Cart Pop-Up Modal
   type SettingsModalId =
     | 'sub-admin'
+    | 'warehouse-managers'
     | 'sale-profiles'
     | 'personal-general'
     | 'access-control'
@@ -295,6 +332,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
+    const existingWarehouses = settings.warehouseProfiles || [];
+    if (existingWarehouses.some((w) => w.email.trim().toLowerCase() === cleanEmail)) {
+      setAdminActionFeedback({
+        type: 'error',
+        message: t.settings.errWarehouseGmailDuplicate,
+      });
+      return;
+    }
+
     setCreatingAdminBusy(true);
     try {
       const gate = await checkEmailAuthGate(cleanEmail);
@@ -302,6 +348,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         setAdminActionFeedback({
           type: 'error',
           message: t.settings.errRegisteredMaster,
+        });
+        return;
+      }
+      if (gate.isWarehouseManager) {
+        setAdminActionFeedback({
+          type: 'error',
+          message: t.settings.errWarehouseGmailDuplicate,
         });
         return;
       }
@@ -461,6 +514,123 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const activeOperatorClean = (session.operatorEmail || session.email).trim().toLowerCase();
   const isMasterAdmin = isAdminRole && activeOperatorClean === masterEmailClean;
+  const canManageWarehouse = isDesktop && isMasterAdmin;
+  const warehouseProfilesList = settings.warehouseProfiles || [];
+  const defaultWhAssignEmail =
+    adminProfilesList.find((a) => !a.isMaster && a.email.trim().toLowerCase() !== masterEmailClean)
+      ?.email ||
+    adminProfilesList[0]?.email ||
+    masterEmailClean;
+
+  const handleCreateWarehouseManagerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canManageWarehouse || isExpired) return;
+    setWhFeedback(null);
+
+    const cleanName = cleanSaleNameDisplay(whName);
+    if (!cleanName) {
+      setWhFeedback({ type: 'error', message: t.settings.errWarehouseNameRequired });
+      return;
+    }
+
+    const cleanEmail = whEmail.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setWhFeedback({ type: 'error', message: t.settings.errWarehouseGmailInvalid });
+      return;
+    }
+
+    if (!whPassword || whPassword.length < 6) {
+      setWhFeedback({ type: 'error', message: t.settings.errPasswordMin });
+      return;
+    }
+
+    if (whPassword !== whConfirmPassword) {
+      setWhFeedback({ type: 'error', message: t.settings.errPasswordMismatch });
+      return;
+    }
+
+    if (
+      cleanEmail === masterEmailClean ||
+      adminProfilesList.some((a) => a.email.trim().toLowerCase() === cleanEmail) ||
+      warehouseProfilesList.some((w) => w.email.trim().toLowerCase() === cleanEmail)
+    ) {
+      setWhFeedback({ type: 'error', message: t.settings.errWarehouseGmailDuplicate });
+      return;
+    }
+
+    setCreatingWhBusy(true);
+    try {
+      const gate = await checkEmailAuthGate(cleanEmail);
+      if (gate.isRegisteredMaster || gate.isSubAdmin || gate.isWarehouseManager) {
+        setWhFeedback({ type: 'error', message: WAREHOUSE_MANAGER_DUPLICATE_GMAIL_ERROR });
+        return;
+      }
+
+      const targetAssigned =
+        (whAssignedAdminEmail || defaultWhAssignEmail).trim().toLowerCase() || masterEmailClean;
+
+      const result = await createOrRecoverWarehouseAuthUser(
+        cleanEmail,
+        whPassword,
+        cleanName,
+        async (created) => {
+          if (!onCreateWarehouseManager) {
+            return {
+              ok: false,
+              error: 'មុខងារបង្កើតអ្នកគ្រប់គ្រងឃ្លាំងមិនទាន់រួចរាល់ទេ។',
+            };
+          }
+          return onCreateWarehouseManager({
+            uid: created.uid,
+            name: cleanName,
+            email: created.email,
+            assignedAdminEmail: targetAssigned,
+          });
+        }
+      );
+
+      if (!result.ok) {
+        setWhFeedback({
+          type: 'error',
+          message:
+            result.error ||
+            'មិនអាចរក្សាទុកអ្នកគ្រប់គ្រងឃ្លាំងទៅកាន់ Cloud Firestore បានទេ! សូមព្យាយាមម្ដងទៀត។',
+        });
+        return;
+      }
+
+      setWhName('');
+      setWhEmail('');
+      setWhPassword('');
+      setWhConfirmPassword('');
+      setWhFeedback({
+        type: 'success',
+        message: t.settings.warehouseCreatedMsg
+          .replace('{name}', cleanName)
+          .replace('{email}', result.email),
+      });
+    } catch (err) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        setWhFeedback({ type: 'error', message: WAREHOUSE_MANAGER_DUPLICATE_GMAIL_ERROR });
+      } else if (code === 'auth/invalid-email') {
+        setWhFeedback({ type: 'error', message: t.settings.errWarehouseGmailInvalid });
+      } else if (code === 'auth/weak-password') {
+        setWhFeedback({ type: 'error', message: t.settings.errPasswordMin });
+      } else {
+        setWhFeedback({
+          type: 'error',
+          message:
+            err instanceof Error && err.message
+              ? err.message
+              : 'មិនអាចបង្កើតគណនីអ្នកគ្រប់គ្រងឃ្លាំងបានទេ! សូមព្យាយាមម្ដងទៀត។',
+        });
+      }
+    } finally {
+      setCreatingWhBusy(false);
+    }
+  };
+
   const activeAdminEntry =
     adminProfilesList.find((a) => a.email.trim().toLowerCase() === activeOperatorClean) ||
     adminProfilesList[0];
@@ -831,6 +1001,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   },
                 ]
               : []),
+            ...(canManageWarehouse
+              ? [
+                  {
+                    id: 'warehouse-managers' as SettingsModalId,
+                    icon: 'warehouse' as const,
+                    title: t.settings.warehouseMgmtHeading,
+                    summary: `${t.settings.warehouseCountLabel} ${warehouseProfilesList.length}`,
+                  },
+                ]
+              : []),
             {
               id: 'sale-profiles' as SettingsModalId,
               icon: 'user' as const,
@@ -930,6 +1110,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             aria-label={
               activeModal === 'sub-admin'
                 ? t.settings.subAdminHeading
+                : activeModal === 'warehouse-managers'
+                ? t.settings.warehouseMgmtHeading
                 : activeModal === 'sale-profiles'
                 ? t.settings.saleMgmtHeading
                 : activeModal === 'personal-general'
@@ -983,12 +1165,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       name={
                         activeModal === 'sub-admin' || activeModal === 'access-control'
                           ? 'shield'
+                          : activeModal === 'warehouse-managers' || activeModal === 'warehouses'
+                          ? 'warehouse'
                           : activeModal === 'sale-profiles'
                           ? 'user'
                           : activeModal === 'personal-general'
                           ? 'settings'
-                          : activeModal === 'warehouses'
-                          ? 'warehouse'
                           : activeModal === 'stores'
                           ? 'store'
                           : activeModal === 'groups'
@@ -1002,6 +1184,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <div className="min-w-0">
                       <h2 className="text-sm sm:text-base font-semibold text-foreground leading-snug">
                         {activeModal === 'sub-admin' && t.settings.subAdminHeading}
+                        {activeModal === 'warehouse-managers' && t.settings.warehouseMgmtHeading}
                         {activeModal === 'sale-profiles' && t.settings.saleMgmtHeading}
                         {activeModal === 'personal-general' && t.settings.personalInfoTitle}
                         {activeModal === 'access-control' && t.settings.accessControlTitle}
@@ -1014,6 +1197,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <p className="mt-0.5 text-xs text-muted truncate">
                         {activeModal === 'sub-admin' &&
                           `${t.settings.masterPrefix} ${session.email} · ${t.settings.activePrefix} ${activeOperatorClean}`}
+                        {activeModal === 'warehouse-managers' &&
+                          `${t.settings.warehouseCountLabel} ${warehouseProfilesList.length}`}
                         {activeModal === 'sale-profiles' &&
                           `${t.settings.saleMgmtHint.replace('{email}', session.email)}`}
                         {activeModal === 'personal-general' &&
@@ -1245,6 +1430,309 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           </p>
                         )}
                       </form>
+                    </>
+                  )}
+
+                  {activeModal === 'warehouse-managers' && canManageWarehouse && (
+                    <>
+                      <div className="flex items-center justify-between gap-2 text-xs text-muted">
+                        <p className="leading-relaxed">{t.settings.warehouseMgmtHint}</p>
+                        <span className="font-semibold text-foreground tabular-nums whitespace-nowrap shrink-0">
+                          {t.settings.warehouseCountLabel} {warehouseProfilesList.length}
+                        </span>
+                      </div>
+
+                      <form
+                        onSubmit={handleCreateWarehouseManagerSubmit}
+                        className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end"
+                      >
+                        <Field label={t.settings.warehouseNameLabel} className="md:col-span-6">
+                          <input
+                            type="text"
+                            required
+                            disabled={isExpired || creatingWhBusy}
+                            value={whName}
+                            onChange={(e) => {
+                              setWhName(e.target.value);
+                              setWhFeedback(null);
+                            }}
+                            placeholder={t.settings.warehouseNamePlaceholder}
+                            className={inputClass}
+                          />
+                        </Field>
+
+                        <Field label={t.settings.warehouseGmailLabel} className="md:col-span-6">
+                          <input
+                            type="email"
+                            required
+                            disabled={isExpired || creatingWhBusy}
+                            value={whEmail}
+                            onChange={(e) => {
+                              setWhEmail(e.target.value);
+                              setWhFeedback(null);
+                            }}
+                            placeholder={t.settings.warehouseGmailPlaceholder}
+                            className={inputClass}
+                          />
+                        </Field>
+
+                        <Field label={t.settings.warehousePasswordLabel} className="md:col-span-4">
+                          <div className="relative flex items-center">
+                            <input
+                              type={showWhPw ? 'text' : 'password'}
+                              required
+                              minLength={6}
+                              disabled={isExpired || creatingWhBusy}
+                              value={whPassword}
+                              onChange={(e) => {
+                                setWhPassword(e.target.value);
+                                setWhFeedback(null);
+                              }}
+                              placeholder="••••••••"
+                              autoComplete="new-password"
+                              className={`${inputClass} pr-11`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowWhPw((v) => !v)}
+                              aria-label={showWhPw ? t.common.close : 'Show'}
+                              className="absolute right-0.5 inline-flex h-10 w-10 items-center justify-center rounded-control text-muted hover:text-foreground cursor-pointer"
+                            >
+                              {showWhPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </Field>
+
+                        <Field label={t.settings.warehouseConfirmPasswordLabel} className="md:col-span-4">
+                          <div className="relative flex items-center">
+                            <input
+                              type={showWhConfirmPw ? 'text' : 'password'}
+                              required
+                              minLength={6}
+                              disabled={isExpired || creatingWhBusy}
+                              value={whConfirmPassword}
+                              onChange={(e) => {
+                                setWhConfirmPassword(e.target.value);
+                                setWhFeedback(null);
+                              }}
+                              placeholder="••••••••"
+                              autoComplete="new-password"
+                              className={`${inputClass} pr-11`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowWhConfirmPw((v) => !v)}
+                              aria-label={showWhConfirmPw ? t.common.close : 'Show'}
+                              className="absolute right-0.5 inline-flex h-10 w-10 items-center justify-center rounded-control text-muted hover:text-foreground cursor-pointer"
+                            >
+                              {showWhConfirmPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </Field>
+
+                        <Field label={t.settings.warehouseAssignAdminLabel} className="md:col-span-4">
+                          <select
+                            disabled={isExpired || creatingWhBusy}
+                            value={whAssignedAdminEmail || defaultWhAssignEmail}
+                            onChange={(e) => setWhAssignedAdminEmail(e.target.value)}
+                            className={inputClass}
+                          >
+                            {adminProfilesList.map((adm) => {
+                              const admEmail = adm.email.trim().toLowerCase();
+                              const isM = adm.isMaster || admEmail === masterEmailClean;
+                              return (
+                                <option key={adm.id || admEmail} value={admEmail}>
+                                  {adm.name} ({isM ? t.common.masterAdmin : t.common.subAdmin}) · {admEmail}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </Field>
+
+                        <div className="md:col-span-12">
+                          <Button
+                            type="submit"
+                            tone="primary"
+                            disabled={isExpired || creatingWhBusy}
+                            className="w-full sm:w-auto whitespace-nowrap"
+                          >
+                            {creatingWhBusy ? (
+                              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                            ) : (
+                              <UserPlus className="h-4 w-4 shrink-0" />
+                            )}
+                            <span>
+                              {creatingWhBusy ? t.settings.creatingBtn : t.settings.createWarehouseBtn}
+                            </span>
+                          </Button>
+                        </div>
+                      </form>
+
+                      {whFeedback && (
+                        <div
+                          role={whFeedback.type === 'error' ? 'alert' : 'status'}
+                          className={`rounded-control border px-3.5 py-2.5 text-xs font-medium flex items-center gap-2 ${
+                            whFeedback.type === 'error'
+                              ? 'border-danger/45 bg-danger/10 text-danger'
+                              : 'border-primary/40 bg-primary/10 text-foreground'
+                          }`}
+                        >
+                          {whFeedback.type === 'error' ? (
+                            <AlertTriangle className="h-4 w-4 text-danger shrink-0" />
+                          ) : (
+                            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                          )}
+                          <span>{whFeedback.message}</span>
+                        </div>
+                      )}
+
+                      <div className="space-y-2.5 border-t border-border/60 pt-5">
+                        {warehouseProfilesList.length === 0 ? (
+                          <p className="text-xs text-muted">{t.settings.emptyWarehouseManagers}</p>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-3">
+                            {warehouseProfilesList.map((wh) => {
+                              const isActive = wh.active !== false;
+                              const isBusy = whActionBusyId === wh.id;
+                              const assignedValue = (wh.assignedAdminEmail || masterEmailClean)
+                                .trim()
+                                .toLowerCase();
+                              return (
+                                <motion.div
+                                  key={wh.id || wh.uid}
+                                  layout
+                                  initial={{ opacity: 0, y: 8 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="rounded-control border border-border/75 bg-background/55 p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+                                >
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-sm font-semibold text-foreground truncate">
+                                        {wh.name}
+                                      </span>
+                                      <span
+                                        className={`inline-flex items-center rounded-sm px-2 py-0.5 text-[11px] font-semibold ${
+                                          isActive
+                                            ? 'bg-primary/12 text-primary'
+                                            : 'bg-danger/12 text-danger'
+                                        }`}
+                                      >
+                                        {isActive
+                                          ? t.settings.warehouseStatusActive
+                                          : t.settings.warehouseStatusDisabled}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted truncate">{wh.email}</p>
+                                  </div>
+
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="text-[11px] font-semibold text-muted whitespace-nowrap">
+                                        {t.settings.warehouseAssignedPrefix}
+                                      </span>
+                                      <select
+                                        disabled={isExpired || isBusy}
+                                        value={assignedValue}
+                                        onChange={async (e) => {
+                                          const nextAssigned = e.target.value.trim().toLowerCase();
+                                          setWhActionBusyId(wh.id);
+                                          setWhFeedback(null);
+                                          try {
+                                            const res = await onUpdateWarehouseManager?.(wh.id, {
+                                              assignedAdminEmail: nextAssigned,
+                                            });
+                                            if (res && !res.ok) {
+                                              setWhFeedback({
+                                                type: 'error',
+                                                message:
+                                                  res.error ||
+                                                  'មិនអាចកែប្រែ Admin ដែលត្រូវមើលឃ្លាំងបានទេ។',
+                                              });
+                                            }
+                                          } finally {
+                                            setWhActionBusyId(null);
+                                          }
+                                        }}
+                                        className="rounded-control border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/35 cursor-pointer max-w-[230px]"
+                                      >
+                                        {adminProfilesList.map((adm) => {
+                                          const admEmail = adm.email.trim().toLowerCase();
+                                          const isM = adm.isMaster || admEmail === masterEmailClean;
+                                          return (
+                                            <option key={adm.id || admEmail} value={admEmail}>
+                                              {adm.name} ({isM ? t.common.masterAdmin : t.common.subAdmin})
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <Button
+                                        type="button"
+                                        tone="quiet"
+                                        disabled={isExpired || isBusy}
+                                        onClick={async () => {
+                                          setWhActionBusyId(wh.id);
+                                          setWhFeedback(null);
+                                          try {
+                                            const res = await onUpdateWarehouseManager?.(wh.id, {
+                                              active: !isActive,
+                                            });
+                                            if (res && !res.ok) {
+                                              setWhFeedback({
+                                                type: 'error',
+                                                message:
+                                                  res.error ||
+                                                  'មិនអាចកែប្រែស្ថានភាពអ្នកគ្រប់គ្រងឃ្លាំងបានទេ។',
+                                              });
+                                            }
+                                          } finally {
+                                            setWhActionBusyId(null);
+                                          }
+                                        }}
+                                        className="min-h-9 px-3 text-xs whitespace-nowrap"
+                                      >
+                                        <span>
+                                          {isActive
+                                            ? t.settings.warehouseDisableBtn
+                                            : t.settings.warehouseEnableBtn}
+                                        </span>
+                                      </Button>
+
+                                      <button
+                                        type="button"
+                                        disabled={isExpired || isBusy}
+                                        onClick={async () => {
+                                          setWhActionBusyId(wh.id);
+                                          setWhFeedback(null);
+                                          try {
+                                            const res = await onDeleteWarehouseManager?.(wh);
+                                            if (res && !res.ok) {
+                                              setWhFeedback({
+                                                type: 'error',
+                                                message:
+                                                  res.error ||
+                                                  'មិនអាចលុបអ្នកគ្រប់គ្រងឃ្លាំងបានទេ។',
+                                              });
+                                            }
+                                          } finally {
+                                            setWhActionBusyId(null);
+                                          }
+                                        }}
+                                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-control text-danger hover:bg-danger/10 cursor-pointer disabled:opacity-50"
+                                        aria-label={`${t.common.delete} ${wh.name}`}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
 

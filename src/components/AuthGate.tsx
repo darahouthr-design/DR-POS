@@ -64,7 +64,7 @@ import { useIsDesktopDevice } from '../utils/device';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { APP_LOGO_URL, DrPosLogo, Icon3D } from './Icon3D';
 import { PosSliderCaptcha } from './PosSliderCaptcha';
-import { cleanSaleNameDisplay } from '../utils/helpers';
+import { cleanSaleNameDisplay, normalizeSaleKey } from '../utils/helpers';
 import { Button, Field, Surface, inputClass } from './ui';
 import type { UserRole } from '../types';
 import {
@@ -81,6 +81,7 @@ import {
   setPendingOperatorEmail,
   setPendingRolePref,
   SUB_ADMIN_EXTERNAL_BLOCK_ERROR,
+  WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR,
   type StoredRolePref,
 } from '../utils/authPrefs';
 
@@ -96,6 +97,7 @@ export {
   setExternalAuthError,
   setPendingRolePref,
   SUB_ADMIN_EXTERNAL_BLOCK_ERROR,
+  WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR,
   type StoredRolePref,
 };
 
@@ -471,6 +473,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         setError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
         return;
       }
+      if (gate.isWarehouseManager) {
+        setError(WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR);
+        return;
+      }
       if (gate.isRegisteredMaster) {
         setError(DUPLICATE_GMAIL_KHMER_ERROR);
         return;
@@ -541,6 +547,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         const gate = await checkEmailAuthGate(cleanEmail);
         if (gate.isSubAdmin) {
           setError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
+          return;
+        }
+        if (gate.isWarehouseManager) {
+          setError(WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR);
           return;
         }
         if (gate.isRegisteredMaster) {
@@ -635,6 +645,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         if (gate.isSubAdmin) {
           setPendingRolePref(null);
           setError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
+          return;
+        }
+        if (gate.isWarehouseManager) {
+          setPendingRolePref(null);
+          setError(WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR);
           return;
         }
         if (gate.isRegisteredMaster) {
@@ -777,6 +792,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({
           setError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
           return;
         }
+        if (gate.isWarehouseManager) {
+          setPendingRolePref(null);
+          setError(WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR);
+          return;
+        }
 
         const cred = await signInWithDevPasswordSync(cleanEmail, password);
         saveRolePref(cred.user.uid, adminRolePref);
@@ -794,10 +814,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       return;
     }
 
-    // 3. Sale Sign In (Mandatory on Phone & Tablet, optional tab on Desktop)
+    // 3. Sale / Warehouse Manager Sign In (Mandatory on Phone & Tablet, optional tab on Desktop)
     const cleanSaleName = cleanSaleNameDisplay(saleName);
     if (!cleanSaleName) {
-      setError('សូមបញ្ចូលឈ្មោះ Sale ដែល Admin បានកំណត់នៅក្នុងប្រព័ន្ធ!');
+      setError('សូមបញ្ចូលឈ្មោះ Sale ឬ អ្នកគ្រប់គ្រងឃ្លាំង ដែល Admin បានកំណត់នៅក្នុងប្រព័ន្ធ!');
       return;
     }
 
@@ -810,6 +830,45 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       if (gate.isSubAdmin) {
         setPendingRolePref(null);
         setError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
+        return;
+      }
+
+      if (gate.isWarehouseManager) {
+        if (gate.warehouseActive === false) {
+          setPendingRolePref(null);
+          setError(
+            'គណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមទាក់ទង Master Admin។'
+          );
+          return;
+        }
+        const expectedWhName = cleanSaleNameDisplay(gate.warehouseName || '');
+        if (expectedWhName && normalizeSaleKey(cleanSaleName) !== normalizeSaleKey(expectedWhName)) {
+          setPendingRolePref(null);
+          setError(
+            'ឈ្មោះអ្នកគ្រប់គ្រងឃ្លាំងមិនត្រឹមត្រូវតាមដែល Master Admin បានបង្កើតទេ! សូមពិនិត្យឈ្មោះឡើងវិញ។'
+          );
+          return;
+        }
+
+        const resolvedWhName = expectedWhName || cleanSaleName;
+        const resolvedAssigned =
+          (gate.assignedAdminEmail || gate.warehouseMasterEmail || '').trim().toLowerCase() ||
+          undefined;
+        const whRolePref: StoredRolePref = {
+          role: 'warehouse',
+          saleName: resolvedWhName,
+          warehouseName: resolvedWhName,
+          masterUid: gate.warehouseMasterUid || undefined,
+          assignedAdminEmail: resolvedAssigned,
+        };
+        setPendingRolePref(whRolePref);
+        setPendingOperatorEmail(resolvedAssigned || '');
+
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+        saveRolePref(cred.user.uid, whRolePref);
+        onSaveRolePref?.(cred.user.uid, whRolePref);
+        saveOperatorEmailPref(cred.user.uid, resolvedAssigned || '');
+        onSaveOperatorPref?.(cred.user.uid, resolvedAssigned || '');
         return;
       }
 
@@ -1569,7 +1628,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   <p className="text-xs text-muted mt-1 leading-relaxed">
                     {activeMode === 'admin-signin'
                       ? 'ចូលប្រើដោយប្រើ Gmail របស់ «Master Admin» ដើម្បីគ្រប់គ្រងទំនិញ កំណត់ឈ្មោះ Sale និងមើលរបាយការណ៍ Orders។'
-                      : 'បញ្ចូល Gmail របស់ Master Admin, លេខសម្ងាត់ និងឈ្មោះ Sale ដែល Admin បានកំណត់ ដើម្បីចូលប្រើប្រាស់។'}
+                      : 'បញ្ចូល Gmail របស់ Master Admin ឬ អ្នកគ្រប់គ្រងឃ្លាំង, លេខសម្ងាត់ និងឈ្មោះ Sale ឬ អ្នកគ្រប់គ្រងឃ្លាំង ដើម្បីចូលប្រើប្រាស់។'}
                   </p>
                 )}
               </div>
@@ -1986,7 +2045,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   <Field
                     label={
                       activeMode === 'sale-signin'
-                        ? 'Gmail របស់ Admin'
+                        ? 'Gmail របស់ Admin ឬ អ្នកគ្រប់គ្រងឃ្លាំង'
                         : 'Gmail របស់ Admin'
                     }
                   >
@@ -2003,7 +2062,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
                   {activeMode === 'sale-signin' && (
                     <Field
-                      label="ឈ្មោះ Sale"
+                      label="ឈ្មោះ Sale ឬ អ្នកគ្រប់គ្រងឃ្លាំង"
                      
                     >
                       <input
@@ -2518,6 +2577,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                             </span>
                           )}
                         </div>
+
+                        {devEmailStatus && !devEmailStatus.configured && (
+                          <p className="rounded-control border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] text-foreground leading-relaxed">
+                            ម៉ាស៊ីនមេ (ឬ Shared / Deploy URL) នេះមិនទាន់មាន Env Vars (SMTP / Gmail) ទេ។ សូមបញ្ចូល Sender Gmail + Gmail App Password នៅខាងក្រោមម្ដង ដើម្បីបើកការផ្ញើ OTP ដោយស្វ័យប្រវត្តិ។
+                          </p>
+                        )}
 
                         <div className="grid grid-cols-3 gap-2">
                           {(

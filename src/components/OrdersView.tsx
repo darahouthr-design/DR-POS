@@ -260,6 +260,7 @@ interface OrderCardProps {
   order: Order;
   currency: CurrencyCode;
   hideWarehouse: boolean;
+  hidePrices?: boolean;
   readOnly: boolean;
   bluetoothSize: '58mm' | '70mm' | '80mm';
   isDownloading: boolean;
@@ -278,6 +279,7 @@ const OrderCard = React.memo<OrderCardProps>(
     order,
     currency,
     hideWarehouse,
+    hidePrices = false,
     readOnly,
     bluetoothSize,
     isDownloading,
@@ -369,14 +371,16 @@ const OrderCard = React.memo<OrderCardProps>(
           </div>
 
           {/* Total Amount */}
-          <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2.5">
-            <span className="text-xs sm:text-[13px] font-medium text-muted">
-              {tOrders.totalAmountLabel}
-            </span>
-            <strong className="text-base sm:text-lg font-bold tabular-nums text-primary">
-              {formatMoney(order.totalAmount, currency)}
-            </strong>
-          </div>
+          {!hidePrices && (
+            <div className="flex items-center justify-between gap-2 border-t border-border/50 pt-2.5">
+              <span className="text-xs sm:text-[13px] font-medium text-muted">
+                {tOrders.totalAmountLabel}
+              </span>
+              <strong className="text-base sm:text-lg font-bold tabular-nums text-primary">
+                {formatMoney(order.totalAmount, currency)}
+              </strong>
+            </div>
+          )}
         </div>
 
         {/* 4 Action Buttons: Invoice (PNG), Bluetooth, Standard Print, Edit */}
@@ -445,6 +449,7 @@ interface OrdersViewProps {
   settings: WorkspaceSettings;
   currency: CurrencyCode;
   hideWarehouse: boolean;
+  hidePrices?: boolean;
   lockedSaleName?: string;
   readOnly?: boolean;
   hasMoreOrders?: boolean;
@@ -467,6 +472,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   settings,
   currency,
   hideWarehouse,
+  hidePrices = false,
   lockedSaleName,
   readOnly = false,
   hasMoreOrders = false,
@@ -816,7 +822,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   };
 
   const handleBluetoothPrint = async (order: Order) => {
-    const res = await tryBluetoothPrintKoreanReceipt(order, bluetoothSize, currency, lang);
+    const res = await tryBluetoothPrintKoreanReceipt(order, bluetoothSize, currency, lang, {
+      hidePrices,
+    });
     setPrintPreviewOrder({
       order,
       mode: bluetoothSize,
@@ -833,7 +841,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
         : bluetoothSize;
     try {
       setDownloadingId(order.id);
-      await downloadOrderInvoiceAsPng(order, currency, activePaperWidth, bluetoothOnly);
+      await downloadOrderInvoiceAsPng(order, currency, activePaperWidth, bluetoothOnly, {
+        hidePrices,
+      });
     } finally {
       setDownloadingId(null);
     }
@@ -866,17 +876,23 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     ? `${t.orders.saleTitlePrefix} ${lockedSaleName} (${filteredOrders.length})`
                     : `${t.orders.allTitlePrefix} (${filteredOrders.length})`}
                 </h2>
-                <p className="text-xs text-muted">
-                  {t.orders.totalAmountLabel}{' '}
-                  <strong className="text-primary tabular-nums">
-                    {formatMoney(filteredOrdersTotal, currency)}
-                  </strong>
-                  {lockedSaleName && (
-                    <span className="ml-2 text-primary font-medium">
-                      {t.orders.saleOnlyHint}
-                    </span>
-                  )}
-                </p>
+                {(!hidePrices || lockedSaleName) && (
+                  <p className="text-xs text-muted">
+                    {!hidePrices && (
+                      <>
+                        {t.orders.totalAmountLabel}{' '}
+                        <strong className="text-primary tabular-nums">
+                          {formatMoney(filteredOrdersTotal, currency)}
+                        </strong>
+                      </>
+                    )}
+                    {lockedSaleName && (
+                      <span className={`${!hidePrices ? 'ml-2 ' : ''}text-primary font-medium`}>
+                        {t.orders.saleOnlyHint}
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1069,6 +1085,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 order={order}
                 currency={currency}
                 hideWarehouse={hideWarehouse}
+                hidePrices={hidePrices}
                 readOnly={readOnly}
                 bluetoothSize={bluetoothSize}
                 isDownloading={downloadingId === order.id}
@@ -1233,16 +1250,18 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                     <div className="border-y border-dashed border-neutral-400 py-2 space-y-1.5 text-[11px]">
                       <div className="flex justify-between font-bold">
                         <span>품목명 / 수량</span>
-                        <span>금액</span>
+                        {!hidePrices && <span>금액</span>}
                       </div>
                       {printPreviewOrder.order.items.map((it, idx) => (
                         <div key={idx} className="flex justify-between gap-2">
                           <span>
                             {it.productName} × {it.quantity}
                           </span>
-                          <span className="tabular-nums font-medium">
-                            {formatMoney(it.unitPrice * it.quantity, currency)}
-                          </span>
+                          {!hidePrices && (
+                            <span className="tabular-nums font-medium">
+                              {formatMoney(it.unitPrice * it.quantity, currency)}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1255,7 +1274,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         : ''
                     }`}
                   >
-                    {printPreviewOrder.mode === 'standard' &&
+                    {!hidePrices &&
+                      printPreviewOrder.mode === 'standard' &&
                       (printPreviewOrder.order.discountAmount || 0) > 0 && (
                         <>
                           <div className="flex justify-between text-neutral-600">
@@ -1286,12 +1306,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                           </div>
                         </>
                       )}
-                    <div className="flex justify-between text-sm font-bold">
-                      <span>총 합계금액:</span>
-                      <span className="tabular-nums">
-                        {formatMoney(printPreviewOrder.order.totalAmount, currency)}
-                      </span>
-                    </div>
+                    {!hidePrices && (
+                      <div className="flex justify-between text-sm font-bold">
+                        <span>총 합계금액:</span>
+                        <span className="tabular-nums">
+                          {formatMoney(printPreviewOrder.order.totalAmount, currency)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="font-semibold">결제상태:</span>
                       <span className="font-bold">
@@ -1425,95 +1447,110 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 )}
 
                 <div className="divide-y divide-border/40 mt-2">
-                  {editItems.map((it) => (
-                    <div
-                      key={it.productId}
-                      className="py-2.5 space-y-2 text-sm"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <span className="font-medium truncate">{it.productName}</span>
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="relative w-28">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted font-semibold">
-                              {currencyMeta.symbol}
-                            </span>
-                            <input
-                              type="number"
-                              step={currencyMeta.step}
-                              min="0"
-                              value={it.unitPrice}
-                              onChange={(e) => {
-                                const val = Math.max(0, Number(e.target.value) || 0);
+                  <AnimatePresence initial={false}>
+                    {editItems.map((it) => (
+                      <motion.div
+                        key={it.productId}
+                        layout
+                        initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: -20, scale: 0.95 }}
+                        transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+                        className="py-2.5 space-y-2 text-sm"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <span className="font-medium truncate">{it.productName}</span>
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="relative w-28">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted font-semibold">
+                                {currencyMeta.symbol}
+                              </span>
+                              <input
+                                type="number"
+                                step={currencyMeta.step}
+                                min="0"
+                                value={it.unitPrice}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setEditItems((prev) =>
+                                    prev.map((x) =>
+                                      x.productId === it.productId ? { ...x, unitPrice: val } : x
+                                    )
+                                  );
+                                }}
+                                aria-label={`${t.pos.editUnitPriceLabel} ${it.productName}`}
+                                className="min-h-11 sm:min-h-9 w-full rounded-control border border-border bg-background pl-7 pr-2 py-1 text-xs font-semibold tabular-nums"
+                              />
+                            </div>
+                            <Button
+                              tone="quiet"
+                              onClick={() =>
+                                setEditItems((prev) =>
+                                  prev
+                                    .map((x) =>
+                                      x.productId === it.productId
+                                        ? { ...x, quantity: x.quantity - 1 }
+                                        : x
+                                    )
+                                    .filter((x) => x.quantity > 0)
+                                )
+                              }
+                              className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
+                              aria-label="Decrease quantity"
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <motion.span
+                              key={it.quantity}
+                              initial={{ scale: 0.78, opacity: 0.6 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              transition={{ type: 'spring', stiffness: 520, damping: 22 }}
+                              className="min-w-7 text-center font-bold tabular-nums inline-block"
+                            >
+                              {it.quantity}
+                            </motion.span>
+                            <Button
+                              tone="quiet"
+                              disabled={it.quantity >= getMaxEditableQty(it.productId)}
+                              onClick={() => {
+                                const maxAvail = getMaxEditableQty(it.productId);
+                                if (it.quantity >= maxAvail) {
+                                  setEditStockError(
+                                    t.orders.maxAvailableStockError
+                                      .replace('{name}', it.productName)
+                                      .replace('{max}', String(maxAvail))
+                                  );
+                                  return;
+                                }
+                                setEditStockError('');
                                 setEditItems((prev) =>
                                   prev.map((x) =>
-                                    x.productId === it.productId ? { ...x, unitPrice: val } : x
+                                    x.productId === it.productId
+                                      ? { ...x, quantity: x.quantity + 1 }
+                                      : x
                                   )
                                 );
                               }}
-                              aria-label={`${t.pos.editUnitPriceLabel} ${it.productName}`}
-                              className="min-h-11 sm:min-h-9 w-full rounded-control border border-border bg-background pl-7 pr-2 py-1 text-xs font-semibold tabular-nums"
-                            />
-                          </div>
-                          <Button
-                            tone="quiet"
-                            onClick={() =>
-                              setEditItems((prev) =>
-                                prev
-                                  .map((x) =>
-                                    x.productId === it.productId
-                                      ? { ...x, quantity: x.quantity - 1 }
-                                      : x
-                                  )
-                                  .filter((x) => x.quantity > 0)
-                              )
-                            }
-                            className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
-                            aria-label="Decrease quantity"
-                          >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                          <span className="min-w-7 text-center font-bold tabular-nums">{it.quantity}</span>
-                          <Button
-                            tone="quiet"
-                            disabled={it.quantity >= getMaxEditableQty(it.productId)}
-                            onClick={() => {
-                              const maxAvail = getMaxEditableQty(it.productId);
-                              if (it.quantity >= maxAvail) {
-                                setEditStockError(
-                                  t.orders.maxAvailableStockError
-                                    .replace('{name}', it.productName)
-                                    .replace('{max}', String(maxAvail))
-                                );
-                                return;
+                              className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
+                              aria-label="Increase quantity"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              tone="danger"
+                              onClick={() =>
+                                setEditItems((prev) => prev.filter((x) => x.productId !== it.productId))
                               }
-                              setEditStockError('');
-                              setEditItems((prev) =>
-                                prev.map((x) =>
-                                  x.productId === it.productId
-                                    ? { ...x, quantity: x.quantity + 1 }
-                                    : x
-                                )
-                              );
-                            }}
-                            className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
-                            aria-label="Increase quantity"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            tone="danger"
-                            onClick={() =>
-                              setEditItems((prev) => prev.filter((x) => x.productId !== it.productId))
-                            }
-                            className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
-                            aria-label="Remove item"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                              className="min-h-11 min-w-11 sm:min-h-9 sm:min-w-9 px-2.5"
+                              aria-label="Remove item"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ))}
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
                 </div>
 
                 {/* Edit Order Discount Controls */}
@@ -2154,7 +2191,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                                   <h5 className="text-sm font-semibold text-foreground break-words leading-snug">
                                     {it.productName}
                                   </h5>
-                                  {it.catalogUnitPrice !== undefined &&
+                                  {!hidePrices &&
+                                    it.catalogUnitPrice !== undefined &&
                                     Math.abs(it.catalogUnitPrice - it.unitPrice) > 0.001 && (
                                       <span className="text-[11px] text-primary font-medium">
                                         {t.orders.priceEditedTag}
@@ -2162,12 +2200,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                                     )}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted tabular-nums">
-                                  <span>
-                                    {t.orders.unitPriceLabel}{' '}
-                                    <strong className="text-foreground">
-                                      {formatMoney(it.unitPrice, currency)}
-                                    </strong>
-                                  </span>
+                                  {!hidePrices && (
+                                    <span>
+                                      {t.orders.unitPriceLabel}{' '}
+                                      <strong className="text-foreground">
+                                        {formatMoney(it.unitPrice, currency)}
+                                      </strong>
+                                    </span>
+                                  )}
                                   <span>
                                     {t.orders.quantityLabel}{' '}
                                     <strong className="text-foreground">× {it.quantity}</strong>
@@ -2181,11 +2221,13 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                               </div>
                             </div>
 
-                            <div className="text-right shrink-0">
-                              <p className="text-sm font-bold tabular-nums text-primary">
-                                {formatMoney(it.unitPrice * it.quantity, currency)}
-                              </p>
-                            </div>
+                            {!hidePrices && (
+                              <div className="text-right shrink-0">
+                                <p className="text-sm font-bold tabular-nums text-primary">
+                                  {formatMoney(it.unitPrice * it.quantity, currency)}
+                                </p>
+                              </div>
+                            )}
                           </motion.div>
                         );
                       })}
@@ -2193,41 +2235,43 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                   </div>
 
                   {/* Financial Totals Summary */}
-                  <div className="rounded-control bg-primary/5 border border-primary/20 p-3.5 sm:p-4 space-y-1.5 text-xs sm:text-sm tabular-nums">
-                    {(reportOrder.discountAmount || 0) > 0 && (
-                      <>
-                        <div className="flex justify-between gap-2 text-muted">
-                          <span>{t.orders.subtotalLabel}</span>
-                          <span>
-                            {formatMoney(
-                              reportOrder.subtotalAmount ??
-                                reportOrder.items.reduce(
-                                  (sum, it) => sum + it.unitPrice * it.quantity,
-                                  0
-                                ),
-                              currency
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-2 text-danger font-medium">
-                          <span>
-                            {t.orders.discountLabel}
-                            {reportOrder.discountType === 'percent' && reportOrder.discountValue
-                              ? ` (${reportOrder.discountValue}%)`
-                              : ''}
-                            :
-                          </span>
-                          <span>-{formatMoney(reportOrder.discountAmount || 0, currency)}</span>
-                        </div>
-                      </>
-                    )}
-                    <div className="flex justify-between items-center gap-2 pt-0.5 text-sm sm:text-base font-bold text-foreground">
-                      <span>{t.orders.totalAmountLabel}</span>
-                      <span className="text-primary text-base sm:text-lg">
-                        {formatMoney(reportOrder.totalAmount, currency)}
-                      </span>
+                  {!hidePrices && (
+                    <div className="rounded-control bg-primary/5 border border-primary/20 p-3.5 sm:p-4 space-y-1.5 text-xs sm:text-sm tabular-nums">
+                      {(reportOrder.discountAmount || 0) > 0 && (
+                        <>
+                          <div className="flex justify-between gap-2 text-muted">
+                            <span>{t.orders.subtotalLabel}</span>
+                            <span>
+                              {formatMoney(
+                                reportOrder.subtotalAmount ??
+                                  reportOrder.items.reduce(
+                                    (sum, it) => sum + it.unitPrice * it.quantity,
+                                    0
+                                  ),
+                                currency
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex justify-between gap-2 text-danger font-medium">
+                            <span>
+                              {t.orders.discountLabel}
+                              {reportOrder.discountType === 'percent' && reportOrder.discountValue
+                                ? ` (${reportOrder.discountValue}%)`
+                                : ''}
+                              :
+                            </span>
+                            <span>-{formatMoney(reportOrder.discountAmount || 0, currency)}</span>
+                          </div>
+                        </>
+                      )}
+                      <div className="flex justify-between items-center gap-2 pt-0.5 text-sm sm:text-base font-bold text-foreground">
+                        <span>{t.orders.totalAmountLabel}</span>
+                        <span className="text-primary text-base sm:text-lg">
+                          {formatMoney(reportOrder.totalAmount, currency)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Footer Actions */}
@@ -2689,7 +2733,8 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         {t.orders.exportExcelBtn}
                       </h3>
                       <p className="text-xs text-muted truncate tabular-nums">
-                        {filteredOrders.length} Orders · {formatMoney(filteredOrdersTotal, currency)}
+                        {filteredOrders.length} Orders
+                        {!hidePrices ? ` · ${formatMoney(filteredOrdersTotal, currency)}` : ''}
                       </p>
                     </div>
                   </div>
@@ -2778,11 +2823,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                           setExportingFormat(opt.format);
                           try {
                             if (opt.format === 'excel') {
-                              await exportOrdersToExcel(filteredOrders, currency);
+                              await exportOrdersToExcel(filteredOrders, currency, { hidePrices });
                             } else if (opt.format === 'csv') {
-                              await exportOrdersToCsv(filteredOrders, currency);
+                              await exportOrdersToCsv(filteredOrders, currency, { hidePrices });
                             } else {
-                              await exportOrdersToPdf(filteredOrders, currency);
+                              await exportOrdersToPdf(filteredOrders, currency, { hidePrices });
                             }
                             setExportModalOpen(false);
                             setStatusMessage(

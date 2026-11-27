@@ -8,7 +8,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
-import type { AdminProfile, WorkspaceLicense } from '../types';
+import type { AdminProfile, WarehouseManagerProfile, WorkspaceLicense } from '../types';
 
 export interface MasterAdminLicenseRecord {
   email: string;
@@ -28,6 +28,12 @@ export interface GateCheckResult {
   isSubAdmin: boolean;
   masterEmail: string;
   isRegisteredMaster: boolean;
+  isWarehouseManager?: boolean;
+  warehouseMasterEmail?: string;
+  warehouseMasterUid?: string;
+  assignedAdminEmail?: string;
+  warehouseName?: string;
+  warehouseActive?: boolean;
   telegramUrl: string;
 }
 
@@ -52,11 +58,23 @@ interface SubAdminRegistryEntry {
   createdAt: string;
 }
 
+export interface WarehouseRegistryEntry {
+  uid: string;
+  email: string;
+  masterEmail: string;
+  masterUid: string;
+  name: string;
+  assignedAdminEmail: string;
+  active: boolean;
+  createdAt: string;
+}
+
 interface ClientVaultState {
   vaultId: string;
   telegramUrl: string;
   masterAdmins: Record<string, MasterAdminLicenseRecord>;
   subAdminEmails: Record<string, SubAdminRegistryEntry>;
+  warehouseEmails?: Record<string, WarehouseRegistryEntry>;
   otpChallenges?: Record<string, unknown>;
   updatedAt: string;
 }
@@ -113,6 +131,7 @@ async function fetchClientVault(forceServer = false): Promise<ClientVaultState> 
       telegramUrl: DEFAULT_TELEGRAM_URL,
       masterAdmins: {},
       subAdminEmails: {},
+      warehouseEmails: {},
       updatedAt: '',
     };
   }
@@ -126,6 +145,9 @@ async function fetchClientVault(forceServer = false): Promise<ClientVaultState> 
     subAdminEmails: (data.subAdminEmails && typeof data.subAdminEmails === 'object'
       ? data.subAdminEmails
       : {}) as Record<string, SubAdminRegistryEntry>,
+    warehouseEmails: (data.warehouseEmails && typeof data.warehouseEmails === 'object'
+      ? data.warehouseEmails
+      : {}) as Record<string, WarehouseRegistryEntry>,
     otpChallenges:
       data.otpChallenges && typeof data.otpChallenges === 'object'
         ? (data.otpChallenges as Record<string, unknown>)
@@ -140,6 +162,7 @@ async function saveClientVault(next: ClientVaultState): Promise<void> {
     telegramUrl: next.telegramUrl || DEFAULT_TELEGRAM_URL,
     masterAdmins: next.masterAdmins || {},
     subAdminEmails: next.subAdminEmails || {},
+    warehouseEmails: next.warehouseEmails || {},
     ...(next.otpChallenges ? { otpChallenges: next.otpChallenges } : {}),
     updatedAt: new Date().toISOString(),
     serverUpdatedAt: serverTimestamp(),
@@ -152,6 +175,7 @@ export interface DeveloperVaultSnapshotData {
   masterAdmins: Record<string, MasterAdminLicenseRecord>;
   sortedMasterAdminsList: MasterAdminLicenseRecord[];
   subAdminEmails: Record<string, SubAdminRegistryEntry>;
+  warehouseEmails?: Record<string, WarehouseRegistryEntry>;
   updatedAt: string;
 }
 
@@ -192,6 +216,9 @@ export function subscribeToDeveloperVault(
       const subAdminEmails = (
         data.subAdminEmails && typeof data.subAdminEmails === 'object' ? data.subAdminEmails : {}
       ) as Record<string, SubAdminRegistryEntry>;
+      const warehouseEmails = (
+        data.warehouseEmails && typeof data.warehouseEmails === 'object' ? data.warehouseEmails : {}
+      ) as Record<string, WarehouseRegistryEntry>;
 
       onData({
         exists: true,
@@ -199,6 +226,7 @@ export function subscribeToDeveloperVault(
         masterAdmins: normalizedMasters,
         sortedMasterAdminsList: sortedMasterAdmins(normalizedMasters),
         subAdminEmails,
+        warehouseEmails,
         updatedAt: String(data.updatedAt || ''),
       });
     },
@@ -422,10 +450,17 @@ export async function checkEmailAuthGate(email: string): Promise<GateCheckResult
     const vault = await fetchClientVault();
     const subRec = vault.subAdminEmails[cleanEmail];
     const masterRec = vault.masterAdmins[cleanEmail];
+    const whRec = vault.warehouseEmails?.[cleanEmail];
     return {
       isSubAdmin: Boolean(subRec),
       masterEmail: subRec?.masterEmail || '',
       isRegisteredMaster: Boolean(masterRec),
+      isWarehouseManager: Boolean(whRec),
+      warehouseMasterEmail: whRec?.masterEmail || '',
+      warehouseMasterUid: whRec?.masterUid || '',
+      assignedAdminEmail: whRec?.assignedAdminEmail || '',
+      warehouseName: whRec?.name || '',
+      warehouseActive: whRec ? whRec.active !== false : true,
       telegramUrl: vault.telegramUrl || DEFAULT_TELEGRAM_URL,
     };
   } catch {
@@ -433,6 +468,12 @@ export async function checkEmailAuthGate(email: string): Promise<GateCheckResult
       isSubAdmin: false,
       masterEmail: '',
       isRegisteredMaster: false,
+      isWarehouseManager: false,
+      warehouseMasterEmail: '',
+      warehouseMasterUid: '',
+      assignedAdminEmail: '',
+      warehouseName: '',
+      warehouseActive: true,
       telegramUrl: DEFAULT_TELEGRAM_URL,
     };
   }
@@ -457,7 +498,10 @@ export async function registerMasterAdminLicense(payload: {
       return parsed.data.license;
     }
   } catch (err) {
-    if (err instanceof Error && err.message.includes('Switch Account')) {
+    if (
+      err instanceof Error &&
+      (err.message.includes('Switch Account') || err.message.includes('អ្នកគ្រប់គ្រងឃ្លាំង'))
+    ) {
       throw err;
     }
   }
@@ -468,6 +512,11 @@ export async function registerMasterAdminLicense(payload: {
     if (vault.subAdminEmails[cleanEmail]) {
       throw new Error(
         'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Master Admin បានទៀតទេ!'
+      );
+    }
+    if (vault.warehouseEmails?.[cleanEmail]) {
+      throw new Error(
+        '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings! Gmail នេះមិនអាចប្រើបង្កើត Master Admin ឬចូលនៅផ្នែក Admin បានទេ។ សូមចូលប្រើនៅផ្នែក «ចូលគណនី Sale» វិញ។'
       );
     }
     if (!vault.masterAdmins[cleanEmail]) {
@@ -492,7 +541,10 @@ export async function registerMasterAdminLicense(payload: {
       developerUpdatedAt: rec.developerUpdatedAt || '',
     };
   } catch (err) {
-    if (err instanceof Error && err.message.includes('Switch Account')) {
+    if (
+      err instanceof Error &&
+      (err.message.includes('Switch Account') || err.message.includes('អ្នកគ្រប់គ្រងឃ្លាំង'))
+    ) {
       throw err;
     }
     return buildDefaultTrialLicense();
@@ -524,6 +576,7 @@ export async function syncWorkspaceLicenseWithServer(
     displayName: string;
     license?: WorkspaceLicense;
     subAdmins: AdminProfile[];
+    warehouseProfiles?: WarehouseManagerProfile[];
   },
   options?: { forceServer?: boolean }
 ): Promise<SyncWorkspaceLicenseResult | null> {
@@ -622,6 +675,7 @@ export async function syncWorkspaceLicenseWithServer(
         const subEmail = (sa.email || '').trim().toLowerCase();
         if (!subEmail || !subEmail.includes('@') || subEmail === cleanEmail) continue;
         if (vault.masterAdmins[subEmail]) continue;
+        if (vault.warehouseEmails?.[subEmail]) continue;
         nextForMasterEntries.push([
           subEmail,
           {
@@ -646,6 +700,61 @@ export async function syncWorkspaceLicenseWithServer(
         }
         for (const [subEmail, subRec] of nextForMasterEntries) {
           vault.subAdminEmails[subEmail] = subRec;
+        }
+        changed = true;
+      }
+    }
+
+    if (Array.isArray(payload.warehouseProfiles)) {
+      if (!vault.warehouseEmails) vault.warehouseEmails = {};
+      const resolvedMasterUid = payload.uid || rec.uid || '';
+      const prevWhForMaster = Object.entries(vault.warehouseEmails)
+        .filter(([, val]) => val.masterEmail === cleanEmail)
+        .map(([k, val]) => `${k}:${val.uid}:${val.name}:${val.assignedAdminEmail}:${val.active}`)
+        .sort()
+        .join('|');
+
+      const nextWhEntries: Array<[string, WarehouseRegistryEntry]> = [];
+      const seenWh = new Set<string>();
+      for (const wp of payload.warehouseProfiles) {
+        const whEmail = (wp.email || '').trim().toLowerCase();
+        const whUid = String(wp.uid || '').trim();
+        if (!whEmail || !whEmail.includes('@') || whEmail === cleanEmail || !whUid || !resolvedMasterUid) {
+          continue;
+        }
+        if (seenWh.has(whEmail)) continue;
+        if (vault.masterAdmins[whEmail] || vault.subAdminEmails[whEmail]) continue;
+        const existingWh = vault.warehouseEmails[whEmail];
+        if (existingWh && existingWh.masterEmail !== cleanEmail) continue;
+        seenWh.add(whEmail);
+        nextWhEntries.push([
+          whEmail,
+          {
+            uid: whUid,
+            email: whEmail,
+            masterEmail: cleanEmail,
+            masterUid: resolvedMasterUid,
+            name: String(wp.name || whEmail.split('@')[0] || 'Warehouse').trim(),
+            assignedAdminEmail: (wp.assignedAdminEmail || cleanEmail).trim().toLowerCase() || cleanEmail,
+            active: wp.active !== false,
+            createdAt: String(wp.createdAt || new Date().toISOString()),
+          },
+        ]);
+      }
+
+      const nextWhForMaster = nextWhEntries
+        .map(([k, val]) => `${k}:${val.uid}:${val.name}:${val.assignedAdminEmail}:${val.active}`)
+        .sort()
+        .join('|');
+
+      if (prevWhForMaster !== nextWhForMaster) {
+        for (const [whKey, whVal] of Object.entries(vault.warehouseEmails)) {
+          if (whVal.masterEmail === cleanEmail) {
+            delete vault.warehouseEmails[whKey];
+          }
+        }
+        for (const [whEmail, whRec] of nextWhEntries) {
+          vault.warehouseEmails[whEmail] = whRec;
         }
         changed = true;
       }
@@ -684,6 +793,7 @@ export async function unregisterWorkspaceAccountRegistry(payload: {
   uid: string;
   masterEmail: string;
   subAdminEmails: string[];
+  warehouseEmails?: string[];
 }): Promise<{ removedMaster: boolean; removedSubEmails: string[] }> {
   const cleanMaster = payload.masterEmail.trim().toLowerCase();
   const cleanSubList = Array.from(
@@ -693,7 +803,15 @@ export async function unregisterWorkspaceAccountRegistry(payload: {
         .filter((e) => e.includes('@'))
     )
   );
+  const cleanWhList = Array.from(
+    new Set(
+      (payload.warehouseEmails || [])
+        .map((e) => String(e || '').trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+    )
+  );
   const subSet = new Set(cleanSubList);
+  const whSet = new Set(cleanWhList);
 
   let removedMaster = false;
   const removedSubs = new Set<string>();
@@ -713,6 +831,7 @@ export async function unregisterWorkspaceAccountRegistry(payload: {
           uid: payload.uid,
           masterEmail: cleanMaster,
           subAdminEmails: cleanSubList,
+          warehouseEmails: cleanWhList,
         }),
       });
       const parsed = await tryJson<{
@@ -753,6 +872,21 @@ export async function unregisterWorkspaceAccountRegistry(payload: {
         delete vault.subAdminEmails[subKey];
         removedSubs.add(cleanSubKey);
         changed = true;
+      }
+    }
+
+    if (vault.warehouseEmails) {
+      for (const [whKey, whRec] of Object.entries(vault.warehouseEmails)) {
+        const cleanWhKey = whKey.trim().toLowerCase();
+        const recMaster = String(whRec?.masterEmail || '').trim().toLowerCase();
+        if (
+          (cleanMaster && recMaster === cleanMaster) ||
+          (payload.uid && whRec?.masterUid === payload.uid) ||
+          whSet.has(cleanWhKey)
+        ) {
+          delete vault.warehouseEmails[whKey];
+          changed = true;
+        }
       }
     }
 
@@ -888,6 +1022,9 @@ export async function updateMasterAdminExpireApi(
   const vault = await fetchClientVault();
   if (vault.subAdminEmails[email]) {
     throw new Error('Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។');
+  }
+  if (vault.warehouseEmails?.[email]) {
+    throw new Error('Gmail នេះជាអ្នកគ្រប់គ្រងឃ្លាំង ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។');
   }
 
   const now = new Date();
@@ -1186,6 +1323,13 @@ export async function requestMasterAdminOtpApi(email: string): Promise<RequestMa
           ok: false,
           error:
             'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
+        };
+      }
+      if (gate.isWarehouseManager) {
+        return {
+          ok: false,
+          error:
+            'គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
         };
       }
       if (gate.isRegisteredMaster) {

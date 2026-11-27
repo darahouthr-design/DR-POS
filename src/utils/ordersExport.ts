@@ -3,6 +3,29 @@ import { formatMoney, todayLocalISO } from './helpers';
 
 export type OrderExportFormat = 'excel' | 'csv' | 'pdf';
 
+export interface OrderExportOptions {
+  hidePrices?: boolean;
+}
+
+type OrderExportColKey =
+  | 'orderNo'
+  | 'date'
+  | 'time'
+  | 'customer'
+  | 'phone'
+  | 'address'
+  | 'store'
+  | 'group'
+  | 'staff'
+  | 'warehouse'
+  | 'items'
+  | 'payment'
+  | 'dueDate'
+  | 'subtotal'
+  | 'discount'
+  | 'total'
+  | 'note';
+
 interface ExportOrderRow {
   cells: string[];
   paymentStatus: 'paid' | 'unpaid';
@@ -13,6 +36,8 @@ interface ExportOrderRow {
 
 interface OrdersExportReportData {
   exportDate: string;
+  hidePrices: boolean;
+  colKeys: OrderExportColKey[];
   headers: string[];
   rows: ExportOrderRow[];
   productTotals: Array<{ name: string; quantity: number }>;
@@ -23,34 +48,50 @@ interface OrdersExportReportData {
   currency: CurrencyCode;
 }
 
-const ORDER_EXPORT_HEADERS: string[] = [
-  'Order No',
-  'កាលបរិច្ឆេទ (Date)',
-  'ម៉ោង (Time)',
-  'អតិថិជន (Customer)',
-  'លេខទូរស័ព្ទ (Phone)',
-  'អាសយដ្ឋាន (Address)',
-  'ហាង (Store)',
-  'ក្រុម (Group)',
-  'បុគ្គលិកលក់ (Staff)',
-  'ឃ្លាំង (Warehouse)',
-  'ទំនិញ (Items)',
-  'ស្ថានភាពទូទាត់ (Payment)',
-  'ថ្ងៃណាត់ទូទាត់ (Due Date)',
-  'តម្លៃមុនបញ្ចុះ (Subtotal)',
-  'បញ្ចុះតម្លៃ (Discount)',
-  'តម្លៃសរុប (Total)',
-  'កំណត់ចំណាំ (Note)',
+interface ExportColDef {
+  key: OrderExportColKey;
+  header: string;
+  excelWch: number;
+  pdfLabel: string;
+  pdfWidth: number;
+  pdfHideWidthBonus?: number;
+  align: 'left' | 'center' | 'right';
+  isPrice?: boolean;
+}
+
+const ORDER_EXPORT_COL_DEFS: ExportColDef[] = [
+  { key: 'orderNo', header: 'Order No', excelWch: 26, pdfLabel: 'Order No', pdfWidth: 92, align: 'center' },
+  { key: 'date', header: 'កាលបរិច្ឆេទ (Date)', excelWch: 16, pdfLabel: 'កាលបរិច្ឆេទ', pdfWidth: 76, align: 'center' },
+  { key: 'time', header: 'ម៉ោង (Time)', excelWch: 11, pdfLabel: 'ម៉ោង', pdfWidth: 52, align: 'center' },
+  { key: 'customer', header: 'អតិថិជន (Customer)', excelWch: 22, pdfLabel: 'អតិថិជន', pdfWidth: 96, pdfHideWidthBonus: 40, align: 'left' },
+  { key: 'phone', header: 'លេខទូរស័ព្ទ (Phone)', excelWch: 16, pdfLabel: 'ទូរស័ព្ទ', pdfWidth: 84, align: 'center' },
+  { key: 'address', header: 'អាសយដ្ឋាន (Address)', excelWch: 28, pdfLabel: 'អាសយដ្ឋាន', pdfWidth: 118, pdfHideWidthBonus: 40, align: 'left' },
+  { key: 'store', header: 'ហាង (Store)', excelWch: 20, pdfLabel: 'ហាង', pdfWidth: 76, align: 'left' },
+  { key: 'group', header: 'ក្រុម (Group)', excelWch: 20, pdfLabel: 'ក្រុម', pdfWidth: 74, align: 'left' },
+  { key: 'staff', header: 'បុគ្គលិកលក់ (Staff)', excelWch: 18, pdfLabel: 'បុគ្គលិក', pdfWidth: 74, align: 'left' },
+  { key: 'warehouse', header: 'ឃ្លាំង (Warehouse)', excelWch: 18, pdfLabel: 'ឃ្លាំង', pdfWidth: 74, align: 'left' },
+  { key: 'items', header: 'ទំនិញ (Items)', excelWch: 40, pdfLabel: 'ទំនិញ (Items)', pdfWidth: 224, pdfHideWidthBonus: 110, align: 'left' },
+  { key: 'payment', header: 'ស្ថានភាពទូទាត់ (Payment)', excelWch: 18, pdfLabel: 'ទូទាត់', pdfWidth: 88, align: 'center' },
+  { key: 'dueDate', header: 'ថ្ងៃណាត់ទូទាត់ (Due Date)', excelWch: 16, pdfLabel: 'ថ្ងៃណាត់', pdfWidth: 74, align: 'center' },
+  { key: 'subtotal', header: 'តម្លៃមុនបញ្ចុះ (Subtotal)', excelWch: 18, pdfLabel: 'មុនបញ្ចុះ', pdfWidth: 84, align: 'right', isPrice: true },
+  { key: 'discount', header: 'បញ្ចុះតម្លៃ (Discount)', excelWch: 16, pdfLabel: 'បញ្ចុះតម្លៃ', pdfWidth: 72, align: 'right', isPrice: true },
+  { key: 'total', header: 'តម្លៃសរុប (Total)', excelWch: 18, pdfLabel: 'តម្លៃសរុប', pdfWidth: 94, align: 'right', isPrice: true },
+  { key: 'note', header: 'កំណត់ចំណាំ (Note)', excelWch: 24, pdfLabel: 'កំណត់ចំណាំ', pdfWidth: 160, pdfHideWidthBonus: 60, align: 'left' },
 ];
 
 function buildOrdersExportReportData(
   orders: Order[],
-  currency: CurrencyCode
+  currency: CurrencyCode,
+  hidePrices = false
 ): OrdersExportReportData {
   const productTotalsMap = new Map<string, { name: string; quantity: number }>();
   let grandSubtotalUsd = 0;
   let grandDiscountUsd = 0;
   let grandTotalUsd = 0;
+
+  const activeCols = hidePrices
+    ? ORDER_EXPORT_COL_DEFS.filter((c) => !c.isPrice)
+    : ORDER_EXPORT_COL_DEFS;
 
   const rows: ExportOrderRow[] = orders.map((o) => {
     for (const it of o.items || []) {
@@ -66,39 +107,42 @@ function buildOrdersExportReportData(
       }
     }
 
-    const subtotalUsd =
-      o.subtotalAmount ?? o.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
-    const discountUsd = Math.max(0, Number(o.discountAmount) || 0);
-    const totalUsd = Number(o.totalAmount) || 0;
+    const subtotalUsd = hidePrices
+      ? 0
+      : o.subtotalAmount ?? o.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
+    const discountUsd = hidePrices ? 0 : Math.max(0, Number(o.discountAmount) || 0);
+    const totalUsd = hidePrices ? 0 : Number(o.totalAmount) || 0;
 
     grandSubtotalUsd += subtotalUsd;
     grandDiscountUsd += discountUsd;
     grandTotalUsd += totalUsd;
+
+    const valueMap: Record<OrderExportColKey, string> = {
+      orderNo: o.orderNumber || '-',
+      date: o.date || '-',
+      time: o.time || '-',
+      customer: o.customerName || '-',
+      phone: o.customerPhone || '-',
+      address: o.customerAddress || '-',
+      store: o.storeName || '-',
+      group: o.groupName || '-',
+      staff: o.staffName || '-',
+      warehouse: o.warehouse || '-',
+      items: (o.items || []).map((i) => `${i.productName} x${i.quantity}`).join(', ') || '-',
+      payment: o.paymentStatus === 'paid' ? 'ទូទាត់រួច' : 'មិនទាន់ទូទាត់',
+      dueDate: o.dueDate || '-',
+      subtotal: formatMoney(subtotalUsd, currency),
+      discount: discountUsd > 0 ? `-${formatMoney(discountUsd, currency)}` : '-',
+      total: formatMoney(totalUsd, currency),
+      note: o.note || '',
+    };
 
     return {
       paymentStatus: o.paymentStatus === 'paid' ? 'paid' : 'unpaid',
       subtotalUsd,
       discountUsd,
       totalUsd,
-      cells: [
-        o.orderNumber || '-',
-        o.date || '-',
-        o.time || '-',
-        o.customerName || '-',
-        o.customerPhone || '-',
-        o.customerAddress || '-',
-        o.storeName || '-',
-        o.groupName || '-',
-        o.staffName || '-',
-        o.warehouse || '-',
-        (o.items || []).map((i) => `${i.productName} x${i.quantity}`).join(', ') || '-',
-        o.paymentStatus === 'paid' ? 'ទូទាត់រួច' : 'មិនទាន់ទូទាត់',
-        o.dueDate || '-',
-        formatMoney(subtotalUsd, currency),
-        discountUsd > 0 ? `-${formatMoney(discountUsd, currency)}` : '-',
-        formatMoney(totalUsd, currency),
-        o.note || '',
-      ],
+      cells: activeCols.map((c) => valueMap[c.key]),
     };
   });
 
@@ -109,7 +153,9 @@ function buildOrdersExportReportData(
 
   return {
     exportDate: todayLocalISO(),
-    headers: ORDER_EXPORT_HEADERS,
+    hidePrices,
+    colKeys: activeCols.map((c) => c.key),
+    headers: activeCols.map((c) => c.header),
     rows,
     productTotals,
     grandTotalUnits,
@@ -136,10 +182,12 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
  */
 export async function exportOrdersToExcel(
   orders: Order[],
-  currency: CurrencyCode
+  currency: CurrencyCode,
+  options?: OrderExportOptions
 ): Promise<void> {
+  const hidePrices = Boolean(options?.hidePrices);
   const { default: XLSX } = await import('xlsx-js-style');
-  const report = buildOrdersExportReportData(orders, currency);
+  const report = buildOrdersExportReportData(orders, currency, hidePrices);
 
   const thinBorder = {
     top: { style: 'thin', color: { rgb: 'B8C7C0' } },
@@ -231,8 +279,8 @@ export async function exportOrdersToExcel(
       : { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } };
 
     return row.cells.map((val, cIdx) => {
-      // Order No column
-      if (cIdx === 0) {
+      const colKey = report.colKeys[cIdx];
+      if (colKey === 'orderNo') {
         return {
           v: val,
           t: 's',
@@ -244,8 +292,7 @@ export async function exportOrdersToExcel(
           },
         };
       }
-      // Cart Items column (highlighted soft tint + wrapped)
-      if (cIdx === 10) {
+      if (colKey === 'items') {
         return {
           v: val,
           t: 's',
@@ -260,8 +307,7 @@ export async function exportOrdersToExcel(
           },
         };
       }
-      // Payment Status column (color-coded highlight)
-      if (cIdx === 11) {
+      if (colKey === 'payment') {
         const isPaid = row.paymentStatus === 'paid';
         return {
           v: val,
@@ -281,8 +327,7 @@ export async function exportOrdersToExcel(
           },
         };
       }
-      // Subtotal & Discount columns
-      if (cIdx === 13 || cIdx === 14) {
+      if (colKey === 'subtotal' || colKey === 'discount') {
         return {
           v: val,
           t: 's',
@@ -290,15 +335,14 @@ export async function exportOrdersToExcel(
             fill: baseFill,
             font: {
               sz: 10.5,
-              color: { rgb: cIdx === 14 && val !== '-' ? 'B45309' : '1E293B' },
+              color: { rgb: colKey === 'discount' && val !== '-' ? 'B45309' : '1E293B' },
             },
             alignment: { horizontal: 'right', vertical: 'center' },
             border: thinBorder,
           },
         };
       }
-      // Total column (highlighted emerald tint + bold)
-      if (cIdx === 15) {
+      if (colKey === 'total') {
         return {
           v: val,
           t: 's',
@@ -313,7 +357,6 @@ export async function exportOrdersToExcel(
           },
         };
       }
-      // Default cell
       return {
         v: val,
         t: 's',
@@ -321,9 +364,9 @@ export async function exportOrdersToExcel(
           fill: baseFill,
           font: { sz: 10.5, color: { rgb: '1E293B' } },
           alignment: {
-            horizontal: cIdx === 1 || cIdx === 2 || cIdx === 12 ? 'center' : 'left',
+            horizontal: colKey === 'date' || colKey === 'time' || colKey === 'dueDate' ? 'center' : 'left',
             vertical: 'center',
-            wrapText: cIdx === 5 || cIdx === 16,
+            wrapText: colKey === 'address' || colKey === 'note',
           },
           border: thinBorder,
         },
@@ -332,21 +375,29 @@ export async function exportOrdersToExcel(
   });
 
   const grandTotalRow = Array.from({ length: colCount }, (_, cIdx) => {
-    if (cIdx === 0) {
+    const colKey = report.colKeys[cIdx];
+    if (colKey === 'orderNo') {
       return {
         v: `សរុបរួម (${report.rows.length} Orders)`,
         t: 's',
         s: grandTotalLabelStyle,
       };
     }
-    if (cIdx === 13) {
+    if (hidePrices && colKey === 'items') {
+      return {
+        v: `ទំនិញលក់សរុប: ${report.grandTotalUnits}`,
+        t: 's',
+        s: grandTotalLabelStyle,
+      };
+    }
+    if (!hidePrices && colKey === 'subtotal') {
       return {
         v: formatMoney(report.grandSubtotalUsd, currency),
         t: 's',
         s: grandTotalBarStyle,
       };
     }
-    if (cIdx === 14) {
+    if (!hidePrices && colKey === 'discount') {
       return {
         v:
           report.grandDiscountUsd > 0
@@ -356,7 +407,7 @@ export async function exportOrdersToExcel(
         s: grandTotalBarStyle,
       };
     }
-    if (cIdx === 15) {
+    if (!hidePrices && colKey === 'total') {
       return {
         v: formatMoney(report.grandTotalUsd, currency),
         t: 's',
@@ -406,7 +457,9 @@ export async function exportOrdersToExcel(
     ],
   ];
 
-  const metaLine = `កាលបរិច្ឆេទ Export: ${report.exportDate}   |   ចំនួន Orders: ${report.rows.length}   |   ទំនិញលក់សរុប: ${report.grandTotalUnits}   |   សរុបទឹកប្រាក់: ${formatMoney(report.grandTotalUsd, currency)}`;
+  const metaLine = hidePrices
+    ? `កាលបរិច្ឆេទ Export: ${report.exportDate}   |   ចំនួន Orders: ${report.rows.length}   |   ទំនិញលក់សរុប: ${report.grandTotalUnits}`
+    : `កាលបរិច្ឆេទ Export: ${report.exportDate}   |   ចំនួន Orders: ${report.rows.length}   |   ទំនិញលក់សរុប: ${report.grandTotalUnits}   |   សរុបទឹកប្រាក់: ${formatMoney(report.grandTotalUsd, currency)}`;
 
   const ordersAoa = [
     blankMetaRow('DR-POS — របាយការណ៍ការបញ្ជាទិញ (Orders Report)', titleBannerStyle),
@@ -430,33 +483,22 @@ export async function exportOrdersToExcel(
     (max, item) => Math.max(max, item.name.length),
     16
   );
-  ordersSheet['!cols'] = [
-    { wch: Math.max(24, Math.min(44, longestProductName + 6)) }, // Order No / Product Name
-    { wch: 16 }, // Date / Total Qty
-    { wch: 11 }, // Time
-    { wch: 22 }, // Customer
-    { wch: 16 }, // Phone
-    { wch: 28 }, // Address
-    { wch: 20 }, // Store
-    { wch: 20 }, // Group
-    { wch: 18 }, // Staff
-    { wch: 18 }, // Warehouse
-    { wch: 40 }, // Items
-    { wch: 18 }, // Payment
-    { wch: 16 }, // Due Date
-    { wch: 18 }, // Subtotal
-    { wch: 16 }, // Discount
-    { wch: 18 }, // Total
-    { wch: 24 }, // Note
-  ];
+  const colDefMap = new Map(ORDER_EXPORT_COL_DEFS.map((c) => [c.key, c]));
+  ordersSheet['!cols'] = report.colKeys.map((key) => {
+    if (key === 'orderNo') {
+      return { wch: Math.max(24, Math.min(44, longestProductName + 6)) };
+    }
+    return { wch: colDefMap.get(key)?.excelWch ?? 18 };
+  });
 
+  const itemsIdx = report.colKeys.indexOf('items');
   ordersSheet['!rows'] = [
     { hpt: 30 }, // Banner
     { hpt: 22 }, // Meta
     { hpt: 10 }, // Spacer
     { hpt: 28 }, // Table Header
     ...report.rows.map((row) => {
-      const itemsLen = row.cells[10]?.length || 0;
+      const itemsLen = itemsIdx >= 0 ? row.cells[itemsIdx]?.length || 0 : 0;
       const lines = Math.max(1, Math.ceil(itemsLen / 38));
       return { hpt: Math.min(84, Math.max(22, lines * 17 + 6)) };
     }),
@@ -519,22 +561,23 @@ function escapeCsvCell(value: string | number): string {
 
 export async function exportOrdersToCsv(
   orders: Order[],
-  currency: CurrencyCode
+  currency: CurrencyCode,
+  options?: OrderExportOptions
 ): Promise<void> {
-  const report = buildOrdersExportReportData(orders, currency);
+  const hidePrices = Boolean(options?.hidePrices);
+  const report = buildOrdersExportReportData(orders, currency, hidePrices);
   const lines: string[] = [];
 
-  lines.push(
-    [
-      'DR-POS — របាយការណ៍ការបញ្ជាទិញ (Orders Report)',
-      `Export Date: ${report.exportDate}`,
-      `Orders: ${report.rows.length}`,
-      `Total Units: ${report.grandTotalUnits}`,
-      `Grand Total: ${formatMoney(report.grandTotalUsd, currency)}`,
-    ]
-      .map(escapeCsvCell)
-      .join(',')
-  );
+  const metaCols = [
+    'DR-POS — របាយការណ៍ការបញ្ជាទិញ (Orders Report)',
+    `Export Date: ${report.exportDate}`,
+    `Orders: ${report.rows.length}`,
+    `Total Units: ${report.grandTotalUnits}`,
+  ];
+  if (!hidePrices) {
+    metaCols.push(`Grand Total: ${formatMoney(report.grandTotalUsd, currency)}`);
+  }
+  lines.push(metaCols.map(escapeCsvCell).join(','));
   lines.push('');
 
   // Orders table header
@@ -547,11 +590,22 @@ export async function exportOrdersToCsv(
 
   // Grand Total row aligned to columns
   const grandTotalCells = Array.from({ length: report.headers.length }, () => '');
-  grandTotalCells[0] = `សរុបរួម (${report.rows.length} Orders)`;
-  grandTotalCells[13] = formatMoney(report.grandSubtotalUsd, currency);
-  grandTotalCells[14] =
-    report.grandDiscountUsd > 0 ? `-${formatMoney(report.grandDiscountUsd, currency)}` : '-';
-  grandTotalCells[15] = formatMoney(report.grandTotalUsd, currency);
+  const orderNoIdx = report.colKeys.indexOf('orderNo');
+  const itemsIdx = report.colKeys.indexOf('items');
+  const subIdx = report.colKeys.indexOf('subtotal');
+  const discIdx = report.colKeys.indexOf('discount');
+  const totIdx = report.colKeys.indexOf('total');
+  if (orderNoIdx >= 0) grandTotalCells[orderNoIdx] = `សរុបរួម (${report.rows.length} Orders)`;
+  if (hidePrices) {
+    if (itemsIdx >= 0) grandTotalCells[itemsIdx] = `ទំនិញលក់សរុប: ${report.grandTotalUnits}`;
+  } else {
+    if (subIdx >= 0) grandTotalCells[subIdx] = formatMoney(report.grandSubtotalUsd, currency);
+    if (discIdx >= 0) {
+      grandTotalCells[discIdx] =
+        report.grandDiscountUsd > 0 ? `-${formatMoney(report.grandDiscountUsd, currency)}` : '-';
+    }
+    if (totIdx >= 0) grandTotalCells[totIdx] = formatMoney(report.grandTotalUsd, currency);
+  }
   lines.push(grandTotalCells.map(escapeCsvCell).join(','));
 
   // Blank separator + Per-Product Summary table
@@ -755,9 +809,11 @@ function encodeJpegPagesToPdfBlob(
 
 export async function exportOrdersToPdf(
   orders: Order[],
-  currency: CurrencyCode
+  currency: CurrencyCode,
+  options?: OrderExportOptions
 ): Promise<void> {
-  const report = buildOrdersExportReportData(orders, currency);
+  const hidePrices = Boolean(options?.hidePrices);
+  const report = buildOrdersExportReportData(orders, currency, hidePrices);
 
   if (typeof document !== 'undefined' && document.fonts?.ready) {
     await document.fonts.ready.catch(() => {});
@@ -773,30 +829,17 @@ export async function exportOrdersToPdf(
   const FONT_FAMILY =
     '"Noto Sans Khmer", "Kantumruy Pro", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
-  // Proportioned 17-column widths summing cleanly to 1612px
   const COL_SPEC: Array<{
+    key: OrderExportColKey;
     label: string;
     width: number;
     align: 'left' | 'center' | 'right';
-  }> = [
-    { label: 'Order No', width: 92, align: 'center' },
-    { label: 'កាលបរិច្ឆេទ', width: 76, align: 'center' },
-    { label: 'ម៉ោង', width: 52, align: 'center' },
-    { label: 'អតិថិជន', width: 96, align: 'left' },
-    { label: 'ទូរស័ព្ទ', width: 84, align: 'center' },
-    { label: 'អាសយដ្ឋាន', width: 118, align: 'left' },
-    { label: 'ហាង', width: 76, align: 'left' },
-    { label: 'ក្រុម', width: 74, align: 'left' },
-    { label: 'បុគ្គលិក', width: 74, align: 'left' },
-    { label: 'ឃ្លាំង', width: 74, align: 'left' },
-    { label: 'ទំនិញ (Items)', width: 224, align: 'left' },
-    { label: 'ទូទាត់', width: 88, align: 'center' },
-    { label: 'ថ្ងៃណាត់', width: 74, align: 'center' },
-    { label: 'មុនបញ្ចុះ', width: 84, align: 'right' },
-    { label: 'បញ្ចុះតម្លៃ', width: 72, align: 'right' },
-    { label: 'តម្លៃសរុប', width: 94, align: 'right' },
-    { label: 'កំណត់ចំណាំ', width: 160, align: 'left' },
-  ];
+  }> = ORDER_EXPORT_COL_DEFS.filter((c) => !(hidePrices && c.isPrice)).map((c) => ({
+    key: c.key,
+    label: c.pdfLabel,
+    width: c.pdfWidth + (hidePrices ? c.pdfHideWidthBonus || 0 : 0),
+    align: c.align,
+  }));
 
   const pageCanvases: HTMLCanvasElement[] = [];
 
@@ -846,7 +889,9 @@ export async function exportOrdersToPdf(
   const kpis = [
     { label: 'ចំនួន Orders', value: `${report.rows.length}` },
     { label: 'ទំនិញលក់សរុប', value: `${report.grandTotalUnits}` },
-    { label: 'សរុបទឹកប្រាក់', value: formatMoney(report.grandTotalUsd, currency) },
+    ...(hidePrices
+      ? []
+      : [{ label: 'សរុបទឹកប្រាក់', value: formatMoney(report.grandTotalUsd, currency) }]),
   ];
   const kpiW = 182;
   const kpiGap = 12;
@@ -910,7 +955,7 @@ export async function exportOrdersToPdf(
   report.rows.forEach((row, rIdx) => {
     ctx.font = `500 ${CELL_FONT_SIZE}px ${FONT_FAMILY}`;
     const wrappedPerCol = COL_SPEC.map((col, cIdx) => {
-      const maxLines = cIdx === 10 ? 5 : cIdx === 5 || cIdx === 16 ? 3 : 2;
+      const maxLines = col.key === 'items' ? 5 : col.key === 'address' || col.key === 'note' ? 3 : 2;
       return wrapCanvasText(ctx, row.cells[cIdx], col.width - 12, maxLines);
     });
     const maxLineCount = wrappedPerCol.reduce((m, lines) => Math.max(m, lines.length), 1);
@@ -926,14 +971,13 @@ export async function exportOrdersToPdf(
     let x = MARGIN_X;
 
     COL_SPEC.forEach((col, cIdx) => {
-      // Cell Background Highlight
       let bg = isAlt ? '#F6FAF8' : '#FFFFFF';
-      if (cIdx === 10) {
-        bg = isAlt ? '#EBF8F0' : '#F4FCF7'; // Highlighted Cart Items column
-      } else if (cIdx === 11) {
+      if (col.key === 'items') {
+        bg = isAlt ? '#EBF8F0' : '#F4FCF7';
+      } else if (col.key === 'payment') {
         bg = row.paymentStatus === 'paid' ? '#DCFCE7' : '#FEE2E2';
-      } else if (cIdx === 15) {
-        bg = isAlt ? '#DCFCE7' : '#ECFDF5'; // Highlighted Total column
+      } else if (col.key === 'total') {
+        bg = isAlt ? '#DCFCE7' : '#ECFDF5';
       }
 
       ctx.fillStyle = bg;
@@ -943,18 +987,17 @@ export async function exportOrdersToPdf(
       ctx.lineWidth = 0.8;
       ctx.strokeRect(x, cursorY, col.width, rowH);
 
-      // Cell Text Style
       let textColor = '#0F172A';
       let weight = '500';
-      if (cIdx === 0) {
+      if (col.key === 'orderNo') {
         weight = '700';
-      } else if (cIdx === 11) {
+      } else if (col.key === 'payment') {
         weight = '700';
         textColor = row.paymentStatus === 'paid' ? '#166534' : '#991B1B';
-      } else if (cIdx === 14 && row.cells[cIdx] !== '-') {
+      } else if (col.key === 'discount' && row.cells[cIdx] !== '-') {
         textColor = '#B45309';
         weight = '600';
-      } else if (cIdx === 15) {
+      } else if (col.key === 'total') {
         weight = '700';
         textColor = '#065F46';
       }
@@ -1002,41 +1045,44 @@ export async function exportOrdersToPdf(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.fillText(
-    `សរុបទឹកប្រាក់ទាំងអស់ (Grand Total · ${report.rows.length} Orders)`,
+    hidePrices
+      ? `សរុបរួម (${report.rows.length} Orders · ទំនិញលក់សរុប ${report.grandTotalUnits})`
+      : `សរុបទឹកប្រាក់ទាំងអស់ (Grand Total · ${report.rows.length} Orders)`,
     MARGIN_X + 12,
     cursorY + GRAND_ROW_H / 2
   );
 
-  // Align Subtotal, Discount, Total totals cleanly under columns 13, 14, 15
-  let colX = MARGIN_X;
-  COL_SPEC.forEach((col, cIdx) => {
-    if (cIdx === 13) {
-      ctx.textAlign = 'right';
-      ctx.fillText(
-        formatMoney(report.grandSubtotalUsd, currency),
-        colX + col.width - 6,
-        cursorY + GRAND_ROW_H / 2,
-        col.width - 8
-      );
-    } else if (cIdx === 14 && report.grandDiscountUsd > 0) {
-      ctx.textAlign = 'right';
-      ctx.fillText(
-        `-${formatMoney(report.grandDiscountUsd, currency)}`,
-        colX + col.width - 6,
-        cursorY + GRAND_ROW_H / 2,
-        col.width - 8
-      );
-    } else if (cIdx === 15) {
-      ctx.textAlign = 'right';
-      ctx.fillText(
-        formatMoney(report.grandTotalUsd, currency),
-        colX + col.width - 6,
-        cursorY + GRAND_ROW_H / 2,
-        col.width - 8
-      );
-    }
-    colX += col.width;
-  });
+  if (!hidePrices) {
+    let colX = MARGIN_X;
+    COL_SPEC.forEach((col) => {
+      if (col.key === 'subtotal') {
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          formatMoney(report.grandSubtotalUsd, currency),
+          colX + col.width - 6,
+          cursorY + GRAND_ROW_H / 2,
+          col.width - 8
+        );
+      } else if (col.key === 'discount' && report.grandDiscountUsd > 0) {
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          `-${formatMoney(report.grandDiscountUsd, currency)}`,
+          colX + col.width - 6,
+          cursorY + GRAND_ROW_H / 2,
+          col.width - 8
+        );
+      } else if (col.key === 'total') {
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          formatMoney(report.grandTotalUsd, currency),
+          colX + col.width - 6,
+          cursorY + GRAND_ROW_H / 2,
+          col.width - 8
+        );
+      }
+      colX += col.width;
+    });
+  }
 
   cursorY += GRAND_ROW_H + 24;
 

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { MongoClient, type Collection, type Db, type Document } from 'mongodb';
 import type { Order, StockLogEntry } from '../src/types.js';
+import { normalizeEmail, readVaultState } from './developerRegistry.js';
 
 export interface FirebaseVerifiedUser {
   uid: string;
@@ -443,6 +444,90 @@ function stripMongoDoc<T>(doc: Document): T {
   return rest as T;
 }
 
+interface MongoCallerScope {
+  isWarehouse: boolean;
+  forbidden: boolean;
+  targetUid: string;
+  forcedOperatorEmail: string;
+  masterEmail: string;
+}
+
+async function resolveMongoCallerScope(
+  user: FirebaseVerifiedUser
+): Promise<MongoCallerScope> {
+  try {
+    const vault = await readVaultState();
+    const whMap = vault.warehouseEmails || {};
+    const emailKey = normalizeEmail(user.email);
+    const byEmail = emailKey ? whMap[emailKey] : undefined;
+    const whRec =
+      byEmail ||
+      Object.values(whMap).find(
+        (rec) => rec && (rec.uid === user.uid || (emailKey && normalizeEmail(rec.email) === emailKey))
+      );
+    if (whRec) {
+      const masterEm = normalizeEmail(whRec.masterEmail);
+      const forcedOp = normalizeEmail(whRec.assignedAdminEmail || masterEm) || masterEm;
+      return {
+        isWarehouse: true,
+        forbidden: whRec.active === false || !whRec.masterUid,
+        targetUid: String(whRec.masterUid || '').trim(),
+        forcedOperatorEmail: forcedOp,
+        masterEmail: masterEm,
+      };
+    }
+  } catch {
+    // Fallback to direct user scope when vault is unreachable
+  }
+  return {
+    isWarehouse: false,
+    forbidden: false,
+    targetUid: user.uid,
+    forcedOperatorEmail: '',
+    masterEmail: normalizeEmail(user.email),
+  };
+}
+
+function buildOperatorMongoFilter(opEmail: string, masterEmail: string): Record<string, unknown> {
+  if (!opEmail) return {};
+  if (opEmail === masterEmail) {
+    return {
+      $or: [
+        { operatorEmail: opEmail },
+        {
+          operatorEmail: { $in: ['', null] },
+          createdByEmail: { $in: [opEmail, '', null] },
+        },
+        {
+          operatorEmail: { $exists: false },
+          createdByEmail: { $in: [opEmail, '', null] },
+        },
+      ],
+    };
+  }
+  return { operatorEmail: opEmail };
+}
+
+function stripPricesFromOrder(order: Order): Order {
+  return {
+    ...order,
+    items: (order.items || []).map((item) => {
+      const { catalogUnitPrice: _omit, ...restItem } = item;
+      void _omit;
+      return {
+        ...restItem,
+        unitPrice: 0,
+        costPrice: 0,
+      };
+    }),
+    subtotalAmount: 0,
+    discountValue: 0,
+    discountAmount: 0,
+    totalAmount: 0,
+    totalCost: 0,
+  };
+}
+
 export interface ApiResult {
   status: number;
   body: Record<string, unknown>;
@@ -503,6 +588,11 @@ export async function runMongoSync(
   const user = await verifyFirebaseIdToken(headers);
   if (!user) {
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
+  }
+
+  const scope = await resolveMongoCallerScope(user);
+  if (scope.isWarehouse || scope.forbidden) {
+    return { status: 403, body: { error: 'Forbidden for warehouse manager role' } };
   }
 
   let db: Db | null = null;
@@ -892,18 +982,24 @@ export async function runMongoChanges(
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
   }
 
+  const scope = await resolveMongoCallerScope(user);
+  if (scope.forbidden || !scope.targetUid) {
+    return { status: 403, body: { error: 'Warehouse manager access is disabled' } };
+  }
+
   const db = await getMongoDb();
   if (!db) {
     return { status: 200, body: { configured: false, ok: false } };
   }
 
+  const targetUid = scope.targetUid;
   const serverNow = new Date().toISOString();
   const since = String(payload.since || '').trim();
 
   const [deletedOrderIds, deletedStockLogIds, wsTombstones] = await Promise.all([
-    listPersistentTombstones(db, user.uid, 'order', since),
-    listPersistentTombstones(db, user.uid, 'stock_log', since),
-    since ? listPersistentTombstones(db, user.uid, 'workspace', since) : Promise.resolve([]),
+    listPersistentTombstones(db, targetUid, 'order', since),
+    scope.isWarehouse ? Promise.resolve([]) : listPersistentTombstones(db, targetUid, 'stock_log', since),
+    since ? listPersistentTombstones(db, targetUid, 'workspace', since) : Promise.resolve([]),
   ]);
 
   if (!since) {
@@ -922,21 +1018,31 @@ export async function runMongoChanges(
     };
   }
 
+  const orderFilter: Record<string, unknown> = {
+    ownerUid: targetUid,
+    syncedAt: { $gt: since },
+    ...(scope.isWarehouse
+      ? buildOperatorMongoFilter(scope.forcedOperatorEmail, scope.masterEmail)
+      : {}),
+  };
+
   const [orderDocs, stockLogDocs] = await Promise.all([
     db
       .collection('drpos_orders')
-      .find({ ownerUid: user.uid, syncedAt: { $gt: since } })
+      .find(orderFilter)
       .sort({ createdAt: -1 })
       .limit(60)
       .toArray()
       .catch(() => []),
-    db
-      .collection('drpos_stock_logs')
-      .find({ ownerUid: user.uid, syncedAt: { $gt: since } })
-      .sort({ createdAt: -1 })
-      .limit(40)
-      .toArray()
-      .catch(() => []),
+    scope.isWarehouse
+      ? Promise.resolve([])
+      : db
+          .collection('drpos_stock_logs')
+          .find({ ownerUid: targetUid, syncedAt: { $gt: since } })
+          .sort({ createdAt: -1 })
+          .limit(40)
+          .toArray()
+          .catch(() => []),
   ]);
 
   const delOrderSet = new Set(deletedOrderIds);
@@ -944,10 +1050,13 @@ export async function runMongoChanges(
 
   const recentOrders = orderDocs
     .map((d) => stripMongoDoc<Order>(d))
-    .filter((o) => o?.id && !delOrderSet.has(o.id));
-  const recentStockLogs = stockLogDocs
-    .map((d) => stripMongoDoc<StockLogEntry>(d))
-    .filter((l) => l?.id && !delStockSet.has(l.id));
+    .filter((o) => o?.id && !delOrderSet.has(o.id))
+    .map((o) => (scope.isWarehouse ? stripPricesFromOrder(o) : o));
+  const recentStockLogs = scope.isWarehouse
+    ? []
+    : stockLogDocs
+        .map((d) => stripMongoDoc<StockLogEntry>(d))
+        .filter((l) => l?.id && !delStockSet.has(l.id));
 
   return {
     status: 200,
@@ -959,7 +1068,7 @@ export async function runMongoChanges(
       deletedStockLogIds,
       recentOrders,
       recentStockLogs,
-      workspaceDeleted: wsTombstones.includes(user.uid),
+      workspaceDeleted: wsTombstones.includes(targetUid),
     },
   };
 }
@@ -977,12 +1086,20 @@ export async function runMongoQueryOrders(
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
   }
 
+  const scope = await resolveMongoCallerScope(user);
+  if (scope.forbidden || !scope.targetUid) {
+    return { status: 403, body: { error: 'Warehouse manager access is disabled' } };
+  }
+
   const db = await getMongoDb();
   if (!db) {
     return { status: 200, body: { configured: false, ok: false, orders: [], hasMore: false } };
   }
 
-  const operatorEmail = String(payload.operatorEmail || '').trim().toLowerCase();
+  const targetUid = scope.targetUid;
+  const operatorEmail = scope.isWarehouse
+    ? scope.forcedOperatorEmail
+    : String(payload.operatorEmail || '').trim().toLowerCase();
   const staffName = String(payload.staffName || '').trim().toLowerCase();
   const paymentStatus =
     payload.paymentStatus === 'paid' || payload.paymentStatus === 'unpaid'
@@ -997,15 +1114,17 @@ export async function runMongoQueryOrders(
 
   const localTombstones = listActiveTombstonesForUid(
     g.__drposMongo!.deletedOrderTombstones!,
-    user.uid
+    targetUid
   );
-  const persistentTombstones = await listPersistentTombstones(db, user.uid, 'order');
+  const persistentTombstones = await listPersistentTombstones(db, targetUid, 'order');
   const combinedExcludeIds = Array.from(
     new Set([...excludeIds, ...localTombstones, ...persistentTombstones])
   );
 
-  const filter: Record<string, unknown> = { ownerUid: user.uid };
-  if (operatorEmail) {
+  const filter: Record<string, unknown> = { ownerUid: targetUid };
+  if (scope.isWarehouse) {
+    Object.assign(filter, buildOperatorMongoFilter(operatorEmail, scope.masterEmail));
+  } else if (operatorEmail) {
     filter.operatorEmail = operatorEmail;
   }
   if (staffName) {
@@ -1035,7 +1154,8 @@ export async function runMongoQueryOrders(
 
   const hasMore = docs.length > limitNum;
   const pageDocs = hasMore ? docs.slice(0, limitNum) : docs;
-  const orders = pageDocs.map((d) => stripMongoDoc<Order>(d));
+  const rawOrders = pageDocs.map((d) => stripMongoDoc<Order>(d));
+  const orders = scope.isWarehouse ? rawOrders.map(stripPricesFromOrder) : rawOrders;
   const nextCursor = orders.length > 0 ? orders[orders.length - 1].createdAt : '';
 
   return {
@@ -1062,6 +1182,11 @@ export async function runMongoQueryStockLogs(
   const user = await verifyFirebaseIdToken(headers);
   if (!user) {
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
+  }
+
+  const scope = await resolveMongoCallerScope(user);
+  if (scope.isWarehouse || scope.forbidden) {
+    return { status: 403, body: { error: 'Forbidden for warehouse manager role' } };
   }
 
   const db = await getMongoDb();
@@ -1133,6 +1258,11 @@ export async function runMongoAnalytics(
   const user = await verifyFirebaseIdToken(headers);
   if (!user) {
     return { status: 401, body: { error: 'Unauthorized Firebase session' } };
+  }
+
+  const scope = await resolveMongoCallerScope(user);
+  if (scope.isWarehouse || scope.forbidden) {
+    return { status: 403, body: { error: 'Forbidden for warehouse manager role' } };
   }
 
   const db = await getMongoDb();

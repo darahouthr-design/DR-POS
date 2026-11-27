@@ -66,11 +66,218 @@ import type {
   SaleUserPreferences,
   StaffMember,
   StockLogEntry,
+  WarehouseManagerProfile,
   WorkspaceData,
   WorkspaceLicense,
   WorkspacePaginationState,
   WorkspaceSettings,
 } from '../types';
+
+export function computeWarehouseUidsForOperator(
+  warehouseProfiles: WarehouseManagerProfile[] | undefined,
+  operatorEmail: string,
+  masterEmail: string
+): string[] {
+  if (!Array.isArray(warehouseProfiles) || warehouseProfiles.length === 0) return [];
+  const masterClean = masterEmail.trim().toLowerCase();
+  const targetOp = (operatorEmail || masterClean).trim().toLowerCase();
+  const set = new Set<string>();
+  for (const wp of warehouseProfiles) {
+    if (!wp || !wp.uid || wp.active === false) continue;
+    const assigned = (wp.assignedAdminEmail || masterClean).trim().toLowerCase();
+    if (assigned === targetOp) {
+      set.add(wp.uid.trim());
+    }
+  }
+  return Array.from(set).slice(0, 50);
+}
+
+export interface WarehouseDirectoryRecord {
+  warehouseUid: string;
+  masterUid: string;
+  masterEmail: string;
+  name: string;
+  email: string;
+  assignedAdminEmail: string;
+  active: boolean;
+}
+
+export async function resolveWarehouseDirectoryForUid(
+  warehouseUid: string
+): Promise<WarehouseDirectoryRecord | null> {
+  const cleanUid = String(warehouseUid || '').trim();
+  if (!cleanUid) return null;
+  try {
+    const ref = doc(db, 'warehouseDirectory', cleanUid);
+    const snap = await getDocFromServer(ref).catch(() => getDoc(ref));
+    if (!snap.exists()) return null;
+    const d = snap.data() as Record<string, unknown>;
+    const masterUid = String(d.ownerUid || d.masterUid || '').trim();
+    const masterEmail = String(d.masterEmail || '').trim().toLowerCase();
+    if (!masterUid || !masterEmail) return null;
+    return {
+      warehouseUid: cleanUid,
+      masterUid,
+      masterEmail,
+      name: String(d.name || '').trim(),
+      email: String(d.warehouseEmail || d.email || '').trim().toLowerCase(),
+      assignedAdminEmail: String(d.assignedAdminEmail || masterEmail).trim().toLowerCase(),
+      active: d.active !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveWarehouseMemberDocsFs(
+  masterUid: string,
+  masterEmail: string,
+  profile: WarehouseManagerProfile
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== masterUid) {
+    throw new Error('មានតែ Master Admin ប៉ុណ្ណោះដែលអាចគ្រប់គ្រងអ្នកគ្រប់គ្រងឃ្លាំងបាន។');
+  }
+  const cleanMasterEmail = masterEmail.trim().toLowerCase().slice(0, 200);
+  const cleanWhEmail = profile.email.trim().toLowerCase().slice(0, 200);
+  const cleanAssigned = ((profile.assignedAdminEmail || cleanMasterEmail).trim().toLowerCase()).slice(
+    0,
+    200
+  );
+  const cleanName = profile.name.trim().slice(0, 200);
+  const cleanUid = profile.uid.trim();
+  if (!cleanUid || !cleanWhEmail || !cleanName || !cleanMasterEmail) {
+    throw new Error('ទិន្នន័យអ្នកគ្រប់គ្រងឃ្លាំងមិនគ្រប់គ្រាន់ទេ។');
+  }
+
+  const memRef = doc(db, 'workspaces', masterUid, 'warehouseMembers', cleanUid);
+  const dirRef = doc(db, 'warehouseDirectory', cleanUid);
+
+  const [existingMemSnap, existingDirSnap] = await Promise.all([
+    getDocFromServer(memRef).catch(() => getDoc(memRef)).catch(() => null),
+    getDocFromServer(dirRef).catch(() => getDoc(dirRef)).catch(() => null),
+  ]);
+
+  const fallbackCreatedAt = String(profile.createdAt || new Date().toISOString()).slice(0, 64);
+  const memCreatedAt =
+    existingMemSnap && existingMemSnap.exists()
+      ? String(existingMemSnap.data()?.createdAt || fallbackCreatedAt).slice(0, 64)
+      : fallbackCreatedAt;
+  const dirCreatedAt =
+    existingDirSnap && existingDirSnap.exists()
+      ? String(existingDirSnap.data()?.createdAt || fallbackCreatedAt).slice(0, 64)
+      : fallbackCreatedAt;
+
+  const batch = writeBatch(db);
+  batch.set(memRef, {
+    uid: cleanUid,
+    ownerUid: masterUid,
+    email: cleanWhEmail,
+    name: cleanName,
+    assignedAdminEmail: cleanAssigned,
+    active: profile.active !== false,
+    createdAt: memCreatedAt,
+    serverUpdatedAt: serverTimestamp(),
+  });
+  batch.set(dirRef, {
+    uid: cleanUid,
+    ownerUid: masterUid,
+    masterEmail: cleanMasterEmail,
+    warehouseEmail: cleanWhEmail,
+    name: cleanName,
+    assignedAdminEmail: cleanAssigned,
+    active: profile.active !== false,
+    createdAt: dirCreatedAt,
+    serverUpdatedAt: serverTimestamp(),
+  });
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `workspaces/${masterUid}/warehouseMembers/${cleanUid}`);
+  }
+}
+
+export async function deleteWarehouseMemberDocsFs(
+  masterUid: string,
+  warehouseUid: string
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== masterUid) {
+    throw new Error('មានតែ Master Admin ប៉ុណ្ណោះដែលអាចលុបអ្នកគ្រប់គ្រងឃ្លាំងបាន។');
+  }
+  const cleanUid = warehouseUid.trim();
+  if (!cleanUid) return;
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'workspaces', masterUid, 'warehouseMembers', cleanUid));
+  batch.delete(doc(db, 'warehouseDirectory', cleanUid));
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `workspaces/${masterUid}/warehouseMembers/${cleanUid}`);
+  }
+}
+
+function sameStringArray(a: unknown, b: string[]): boolean {
+  if (!Array.isArray(a)) return b.length === 0;
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].map((x) => String(x)).sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((val, idx) => val === sortedB[idx]);
+}
+
+export async function syncWarehouseUidsInFirestore(
+  masterUid: string,
+  warehouseProfiles: WarehouseManagerProfile[],
+  masterEmail: string
+): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== masterUid) return;
+  const cleanMasterEmail = masterEmail.trim().toLowerCase();
+  const [prodSnap, ordSnap] = await Promise.all([
+    getDocs(query(collection(db, 'workspaces', masterUid, 'products'), where('ownerUid', '==', masterUid))),
+    getDocs(query(collection(db, 'workspaces', masterUid, 'orders'), where('ownerUid', '==', masterUid))),
+  ]);
+
+  const updates: Array<{ ref: QueryDocumentSnapshot<DocumentData>['ref']; warehouseUids: string[] }> = [];
+  for (const d of prodSnap.docs) {
+    const data = d.data();
+    const op = String(data.operatorEmail || cleanMasterEmail).trim().toLowerCase();
+    const expected = computeWarehouseUidsForOperator(warehouseProfiles, op, cleanMasterEmail);
+    if (!sameStringArray(data.warehouseUids, expected)) {
+      updates.push({ ref: d.ref, warehouseUids: expected });
+    }
+  }
+  for (const d of ordSnap.docs) {
+    const data = d.data();
+    const op = String(data.operatorEmail || data.createdByEmail || cleanMasterEmail).trim().toLowerCase();
+    const expected = computeWarehouseUidsForOperator(warehouseProfiles, op, cleanMasterEmail);
+    if (!sameStringArray(data.warehouseUids, expected)) {
+      updates.push({ ref: d.ref, warehouseUids: expected });
+    }
+  }
+
+  const BATCH_LIMIT = 400;
+  for (let i = 0; i < updates.length; i += BATCH_LIMIT) {
+    const chunk = updates.slice(i, i + BATCH_LIMIT);
+    const batch = writeBatch(db);
+    for (const item of chunk) {
+      batch.update(item.ref, {
+        warehouseUids: item.warehouseUids,
+        serverUpdatedAt: serverTimestamp(),
+      });
+    }
+    try {
+      await batch.commit();
+    } catch {
+      // Fallback per-document so a single legacy record with non-standard fields does not block all others
+      await Promise.allSettled(
+        chunk.map((item) =>
+          updateDoc(item.ref, {
+            warehouseUids: item.warehouseUids,
+            serverUpdatedAt: serverTimestamp(),
+          })
+        )
+      );
+    }
+  }
+}
 
 export async function fetchLatestWorkspaceSaleProfilesFromServer(
   uid: string
@@ -207,6 +414,7 @@ function defaultSettings(email: string, displayName: string): WorkspaceSettings 
     accessRules: [],
     saleProfiles: [],
     adminProfiles: [],
+    warehouseProfiles: [],
   };
 }
 
@@ -269,6 +477,7 @@ async function cleanupLegacySampleDataIfNeeded(
         accessRules: Array.isArray(raw.accessRules) ? raw.accessRules : [],
         saleProfiles: Array.isArray(raw.saleProfiles) ? raw.saleProfiles : [],
         adminProfiles: Array.isArray(raw.adminProfiles) ? raw.adminProfiles : [],
+        warehouseProfiles: Array.isArray(raw.warehouseProfiles) ? raw.warehouseProfiles : [],
       };
       batch.update(doc(targetDb, 'workspaces', uid), {
         settings: cleanedSettings,
@@ -511,17 +720,24 @@ export function subscribeToWorkspace(
     }) => void;
     onDeleted: () => void;
     onError: (err: Error) => void;
+  },
+  options?: {
+    isWarehouseViewer?: boolean;
+    warehouseUid?: string;
+    assignedAdminEmail?: string;
   }
 ): WorkspaceSubscription {
+  const isWarehouseViewer = Boolean(options?.isWarehouseViewer && options?.warehouseUid);
+  const warehouseViewerUid = String(options?.warehouseUid || '').trim();
   let rootReady = false;
   let rootFromCache = true;
   let disposed = false;
   let initialProductsLoaded = false;
   let initialOrdersLoaded = false;
-  let initialStaffLoaded = false;
-  let initialPricesLoaded = false;
-  let initialStockLogsLoaded = false;
-  let initialProblemsLoaded = false;
+  let initialStaffLoaded = isWarehouseViewer;
+  let initialPricesLoaded = isWarehouseViewer;
+  let initialStockLogsLoaded = isWarehouseViewer;
+  let initialProblemsLoaded = isWarehouseViewer;
   const knownOrderIds = new Set<string>();
   const deletedOrderIds = new Set<string>();
   const deletedStockLogIds = new Set<string>();
@@ -585,7 +801,7 @@ export function subscribeToWorkspace(
   let initialDeltaTimerId: number | null = null;
 
   const triggerMongoBackfillIfReady = () => {
-    if (didTriggerMongoBackfill || disposed) return;
+    if (isWarehouseViewer || didTriggerMongoBackfill || disposed) return;
     if (liveOrders.length === 0 && liveStockLogs.length === 0) return;
     didTriggerMongoBackfill = true;
     // Defer initial MongoDB backfill so mobile startup bandwidth goes 100% to Firestore UI boot
@@ -623,7 +839,7 @@ export function subscribeToWorkspace(
   };
 
   const syncEffectiveLicenseToWorkspaceDoc = () => {
-    if (!rootReady || disposed || !vaultData?.exists) return;
+    if (isWarehouseViewer || !rootReady || disposed || !vaultData?.exists) return;
     if (!auth.currentUser || auth.currentUser.uid !== uid) return;
     const effective = resolveEffectiveLicense();
     if (!effective) return;
@@ -738,7 +954,7 @@ export function subscribeToWorkspace(
       if (!snap.exists()) {
         if (rootReady) {
           callbacks.onDeleted();
-        } else if (!snap.metadata.fromCache && !autoSeedTriggered) {
+        } else if (!isWarehouseViewer && !snap.metadata.fromCache && !autoSeedTriggered) {
           autoSeedTriggered = true;
           void seedWorkspaceIfNeeded(uid, email, displayName).catch((err) => {
             if (!disposed) {
@@ -757,6 +973,9 @@ export function subscribeToWorkspace(
         ...rawSettings,
         saleProfiles: Array.isArray(rawSettings.saleProfiles) ? rawSettings.saleProfiles : [],
         adminProfiles: Array.isArray(rawSettings.adminProfiles) ? rawSettings.adminProfiles : [],
+        warehouseProfiles: Array.isArray(rawSettings.warehouseProfiles)
+          ? rawSettings.warehouseProfiles
+          : [],
       };
       if (d.license && typeof d.license === 'object') {
         docLicense = {
@@ -770,7 +989,7 @@ export function subscribeToWorkspace(
         docLicense = undefined;
       }
       rootReady = true;
-      if (!legacyCleanupTriggered && !rootFromCache) {
+      if (!isWarehouseViewer && !legacyCleanupTriggered && !rootFromCache) {
         legacyCleanupTriggered = true;
         void cleanupLegacySampleDataIfNeeded(uid, d, db).catch(() => {});
       }
@@ -806,8 +1025,17 @@ export function subscribeToWorkspace(
     }
   };
 
+  const productsCol = collection(db, 'workspaces', uid, 'products');
+  const productsQuery = isWarehouseViewer
+    ? query(
+        productsCol,
+        where('ownerUid', '==', uid),
+        where('warehouseUids', 'array-contains', warehouseViewerUid)
+      )
+    : query(productsCol, where('ownerUid', '==', uid));
+
   const unsubProducts = onSnapshot(
-    query(collection(db, 'workspaces', uid, 'products'), where('ownerUid', '==', uid)),
+    productsQuery,
     (snap) => {
       products = snap.docs.map((d) => stripProduct(d.data()));
       initialProductsLoaded = true;
@@ -822,7 +1050,22 @@ export function subscribeToWorkspace(
     unsubOrders();
     ordersOrderedQuerySupported = withOrderBy;
     const ordersCol = collection(db, 'workspaces', uid, 'orders');
-    const ordersQuery = withOrderBy
+    const ordersQuery = isWarehouseViewer
+      ? withOrderBy
+        ? query(
+            ordersCol,
+            where('ownerUid', '==', uid),
+            where('warehouseUids', 'array-contains', warehouseViewerUid),
+            orderBy('createdAt', 'desc'),
+            limit(ORDERS_PAGE_SIZE)
+          )
+        : query(
+            ordersCol,
+            where('ownerUid', '==', uid),
+            where('warehouseUids', 'array-contains', warehouseViewerUid),
+            limit(ORDERS_PAGE_SIZE)
+          )
+      : withOrderBy
       ? query(
           ordersCol,
           where('ownerUid', '==', uid),
@@ -882,7 +1125,9 @@ export function subscribeToWorkspace(
                 if (disposed) return;
                 if (!serverSnap.exists()) {
                   evictOrders([candidate.id]);
-                  deleteOrdersFromMongoBackground([candidate.id]);
+                  if (!isWarehouseViewer) {
+                    deleteOrdersFromMongoBackground([candidate.id]);
+                  }
                 }
               })
               .catch(() => {
@@ -916,18 +1161,20 @@ export function subscribeToWorkspace(
         if (!hasPaginatedOrders) {
           hasMoreOrders = snap.docs.length >= ORDERS_PAGE_SIZE;
         }
-        triggerMongoBackfillIfReady();
-        if (changedOrders.length > 0) {
-          syncOrdersToMongoBackground(changedOrders);
-        }
-        if (removedIds.length > 0) {
-          deleteOrdersFromMongoBackground(removedIds);
-        }
-        if (!snap.metadata.fromCache && snap.docs.length < ORDERS_PAGE_SIZE) {
-          reconcileWorkspaceOrdersWithMongo(
-            uid,
-            nextOrders.map((o) => o.id)
-          );
+        if (!isWarehouseViewer) {
+          triggerMongoBackfillIfReady();
+          if (changedOrders.length > 0) {
+            syncOrdersToMongoBackground(changedOrders);
+          }
+          if (removedIds.length > 0) {
+            deleteOrdersFromMongoBackground(removedIds);
+          }
+          if (!snap.metadata.fromCache && snap.docs.length < ORDERS_PAGE_SIZE) {
+            reconcileWorkspaceOrdersWithMongo(
+              uid,
+              nextOrders.map((o) => o.id)
+            );
+          }
         }
         emit(newlyArrived);
       },
@@ -942,30 +1189,35 @@ export function subscribeToWorkspace(
   };
   attachOrdersListener(true);
 
-  const unsubStaff = onSnapshot(
-    query(collection(db, 'workspaces', uid, 'staff'), where('ownerUid', '==', uid)),
-    (snap) => {
-      staff = snap.docs.map((d) => stripStaff(d.data()));
-      initialStaffLoaded = true;
-      staffDirty = true;
-      emit();
-    },
-    subError(`${wsPath}/staff`)
-  );
+  const unsubStaff: Unsubscribe = isWarehouseViewer
+    ? () => {}
+    : onSnapshot(
+        query(collection(db, 'workspaces', uid, 'staff'), where('ownerUid', '==', uid)),
+        (snap) => {
+          staff = snap.docs.map((d) => stripStaff(d.data()));
+          initialStaffLoaded = true;
+          staffDirty = true;
+          emit();
+        },
+        subError(`${wsPath}/staff`)
+      );
 
-  const unsubPrices = onSnapshot(
-    query(collection(db, 'workspaces', uid, 'priceRecords'), where('ownerUid', '==', uid)),
-    (snap) => {
-      priceRecords = snap.docs.map((d) => stripPriceRecord(d.data()));
-      initialPricesLoaded = true;
-      pricesDirty = true;
-      emit();
-    },
-    subError(`${wsPath}/priceRecords`)
-  );
+  const unsubPrices: Unsubscribe = isWarehouseViewer
+    ? () => {}
+    : onSnapshot(
+        query(collection(db, 'workspaces', uid, 'priceRecords'), where('ownerUid', '==', uid)),
+        (snap) => {
+          priceRecords = snap.docs.map((d) => stripPriceRecord(d.data()));
+          initialPricesLoaded = true;
+          pricesDirty = true;
+          emit();
+        },
+        subError(`${wsPath}/priceRecords`)
+      );
 
   let unsubStockLogs: Unsubscribe = () => {};
   const attachStockLogsListener = (withOrderBy: boolean) => {
+    if (isWarehouseViewer) return;
     unsubStockLogs();
     stockLogsOrderedQuerySupported = withOrderBy;
     const stockLogsCol = collection(db, 'workspaces', uid, 'stockLogs');
@@ -1078,16 +1330,18 @@ export function subscribeToWorkspace(
   };
   attachStockLogsListener(true);
 
-  const unsubProblems = onSnapshot(
-    query(collection(db, 'workspaces', uid, 'problemCustomers'), where('ownerUid', '==', uid)),
-    (snap) => {
-      problemCustomers = snap.docs.map((d) => stripProblemCustomer(d.data()));
-      initialProblemsLoaded = true;
-      problemsDirty = true;
-      emit();
-    },
-    subError(`${wsPath}/problemCustomers`)
-  );
+  const unsubProblems: Unsubscribe = isWarehouseViewer
+    ? () => {}
+    : onSnapshot(
+        query(collection(db, 'workspaces', uid, 'problemCustomers'), where('ownerUid', '==', uid)),
+        (snap) => {
+          problemCustomers = snap.docs.map((d) => stripProblemCustomer(d.data()));
+          initialProblemsLoaded = true;
+          problemsDirty = true;
+          emit();
+        },
+        subError(`${wsPath}/problemCustomers`)
+      );
 
   const loadMoreOrders = async (): Promise<boolean> => {
     if (disposed || loadingOrdersPage || !hasMoreOrders) return false;
@@ -1140,7 +1394,24 @@ export function subscribeToWorkspace(
       }
 
       const ordersCol = collection(db, 'workspaces', uid, 'orders');
-      const nextQuery = ordersOrderedQuerySupported
+      const nextQuery = isWarehouseViewer
+        ? ordersOrderedQuerySupported
+          ? query(
+              ordersCol,
+              where('ownerUid', '==', uid),
+              where('warehouseUids', 'array-contains', warehouseViewerUid),
+              orderBy('createdAt', 'desc'),
+              startAfter(cursor),
+              limit(ORDERS_PAGE_SIZE)
+            )
+          : query(
+              ordersCol,
+              where('ownerUid', '==', uid),
+              where('warehouseUids', 'array-contains', warehouseViewerUid),
+              startAfter(cursor),
+              limit(ORDERS_PAGE_SIZE)
+            )
+        : ordersOrderedQuerySupported
         ? query(
             ordersCol,
             where('ownerUid', '==', uid),
@@ -1168,7 +1439,9 @@ export function subscribeToWorkspace(
       ordersDirty = true;
       olderOrdersTailDoc = snap.docs[snap.docs.length - 1];
       hasMoreOrders = snap.docs.length >= ORDERS_PAGE_SIZE;
-      syncOrdersToMongoBackground(fetched);
+      if (!isWarehouseViewer) {
+        syncOrdersToMongoBackground(fetched);
+      }
       emit();
       return true;
     } catch (err) {
@@ -1589,11 +1862,17 @@ export async function saveProductFs(
   const cleanPromo = Math.max(0, Number(payload.promotion) || 0);
   const cleanOp = operatorEmail.trim().toLowerCase().slice(0, 200);
   const existing = payload.id ? currentProducts.find((p) => p.id === payload.id) : undefined;
+  const masterOwnerEmail = String(auth.currentUser?.email || cleanOp || '').trim().toLowerCase();
 
   if (existing) {
     const prodPath = `workspaces/${uid}/products/${existing.id}`;
     const prodRef = doc(db, 'workspaces', uid, 'products', existing.id);
     const delta = cleanStock - existing.stock;
+    const warehouseUids = computeWarehouseUidsForOperator(
+      settings.warehouseProfiles,
+      existing.operatorEmail || cleanOp || masterOwnerEmail,
+      masterOwnerEmail
+    );
     const batch = writeBatch(db);
     batch.update(prodRef, {
       name,
@@ -1605,6 +1884,7 @@ export async function saveProductFs(
       barcode: String(payload.barcode ?? existing.barcode).trim().slice(0, 120),
       category: String(payload.category ?? existing.category).trim().slice(0, 120),
       warehouse: String(payload.warehouse ?? existing.warehouse).trim().slice(0, 120),
+      warehouseUids,
       updatedAt: now.toISOString(),
       serverUpdatedAt: serverTimestamp(),
     });
@@ -1647,6 +1927,12 @@ export async function saveProductFs(
     .trim()
     .slice(0, 120);
 
+  const newWarehouseUids = computeWarehouseUidsForOperator(
+    settings.warehouseProfiles,
+    cleanOp || masterOwnerEmail,
+    masterOwnerEmail
+  );
+
   const batch = writeBatch(db);
   batch.set(doc(db, 'workspaces', uid, 'products', newId), {
     id: newId,
@@ -1660,6 +1946,7 @@ export async function saveProductFs(
     barcode: String(payload.barcode || '').trim().slice(0, 120),
     category: String(payload.category || settings.categories[0] || 'ទូទៅ').trim().slice(0, 120),
     warehouse,
+    warehouseUids: newWarehouseUids,
     sortOrder: maxSort + 1,
     updatedAt: now.toISOString(),
     ...(cleanOp ? { operatorEmail: cleanOp } : {}),
@@ -1966,6 +2253,12 @@ export async function createOrderFs(
     operatorEmail: operatorEmail || userEmail,
   };
 
+  const orderWarehouseUids = computeWarehouseUidsForOperator(
+    settings.warehouseProfiles,
+    operatorEmail || userEmail,
+    userEmail
+  );
+
   const batch = writeBatch(db);
   for (const [pid, { qtyUsed }] of usedQtyByProdId.entries()) {
     batch.update(doc(db, 'workspaces', uid, 'products', pid), {
@@ -1976,6 +2269,7 @@ export async function createOrderFs(
   }
   batch.set(orderRef, {
     ...createdOrder,
+    warehouseUids: orderWarehouseUids,
     ownerUid: uid,
     serverCreatedAt: serverTimestamp(),
     serverUpdatedAt: serverTimestamp(),
@@ -2570,6 +2864,24 @@ export async function updateSettingsFs(
       0,
       100
     ),
+    warehouseProfiles: (Array.isArray(rawMerged.warehouseProfiles)
+      ? rawMerged.warehouseProfiles
+      : []
+    )
+      .slice(0, 100)
+      .map((wp) => ({
+        id: String(wp.id || ''),
+        uid: String(wp.uid || ''),
+        name: String(wp.name || '').trim().slice(0, 200),
+        email: String(wp.email || '').trim().toLowerCase().slice(0, 200),
+        assignedAdminEmail: String(wp.assignedAdminEmail || '')
+          .trim()
+          .toLowerCase()
+          .slice(0, 200),
+        active: wp.active !== false,
+        createdAt: String(wp.createdAt || ''),
+      }))
+      .filter((wp) => Boolean(wp.uid && wp.email)),
   };
   try {
     await updateDoc(doc(db, 'workspaces', uid), {
@@ -2704,10 +3016,12 @@ export async function updateWorkspaceLicenseFs(
 
 export async function deleteAccountWorkspaceFs(
   uid: string,
-  options?: { masterEmail?: string; subAdminEmails?: string[] }
+  options?: { masterEmail?: string; subAdminEmails?: string[]; warehouseEmails?: string[] }
 ): Promise<void> {
   const emailSet = new Set<string>();
   const subEmailSet = new Set<string>();
+  const whEmailSet = new Set<string>();
+  const whUidSet = new Set<string>();
 
   let masterEmail = String(options?.masterEmail || auth.currentUser?.email || '')
     .trim()
@@ -2722,15 +3036,24 @@ export async function deleteAccountWorkspaceFs(
       emailSet.add(clean);
     }
   }
+  for (const we of options?.warehouseEmails || []) {
+    const clean = String(we || '').trim().toLowerCase();
+    if (clean && clean.includes('@')) {
+      whEmailSet.add(clean);
+    }
+  }
 
-  // Read authoritative workspace root doc to make sure ALL sub-admin Gmails are captured before deletion
+  // Read authoritative workspace root doc to make sure ALL sub-admin & warehouse Gmails are captured before deletion
   try {
     const wsRef = doc(db, 'workspaces', uid);
     const wsSnap = await getDocFromServer(wsRef).catch(() => getDoc(wsRef));
     if (wsSnap.exists()) {
       const wsData = wsSnap.data() as {
         ownerEmail?: string;
-        settings?: { adminProfiles?: Array<{ email?: string }> };
+        settings?: {
+          adminProfiles?: Array<{ email?: string }>;
+          warehouseProfiles?: Array<{ uid?: string; email?: string }>;
+        };
       };
       const docOwnerEmail = String(wsData?.ownerEmail || '').trim().toLowerCase();
       if (docOwnerEmail && docOwnerEmail.includes('@')) {
@@ -2747,6 +3070,19 @@ export async function deleteAccountWorkspaceFs(
           emailSet.add(cleanAdm);
         }
       }
+      const docWhs = Array.isArray(wsData?.settings?.warehouseProfiles)
+        ? wsData.settings!.warehouseProfiles!
+        : [];
+      for (const wh of docWhs) {
+        const cleanWh = String(wh?.email || '').trim().toLowerCase();
+        if (cleanWh && cleanWh.includes('@')) {
+          whEmailSet.add(cleanWh);
+        }
+        const cleanWhUid = String(wh?.uid || '').trim();
+        if (cleanWhUid) {
+          whUidSet.add(cleanWhUid);
+        }
+      }
     }
   } catch {
     // Proceed with caller-supplied email list if workspace doc is already unreadable
@@ -2754,6 +3090,7 @@ export async function deleteAccountWorkspaceFs(
 
   const allEmails = Array.from(emailSet);
   const allSubEmails = Array.from(subEmailSet);
+  const allWhEmails = Array.from(whEmailSet);
 
   // 1. Purge MongoDB workspace partition BEFORE auth.currentUser is deleted (requires valid ID token)
   const mongoDeleted = await deleteWorkspaceFromMongoSync(allEmails);
@@ -2766,12 +3103,18 @@ export async function deleteAccountWorkspaceFs(
     );
   }
 
-  // 2. Unregister Master Admin Gmail + ALL Sub-Admin Gmails from Developer Vault (Server + Firestore)
+  // 2. Unregister Master Admin Gmail + ALL Sub-Admin & Warehouse Manager Gmails from Developer Vault (Server + Firestore)
   await unregisterWorkspaceAccountRegistry({
     uid,
     masterEmail,
     subAdminEmails: allSubEmails,
+    warehouseEmails: allWhEmails,
   });
+
+  // Clean up warehouseDirectory docs
+  for (const whUid of whUidSet) {
+    await deleteDoc(doc(db, 'warehouseDirectory', whUid)).catch(() => {});
+  }
 
   // 3. Delete all Firestore subcollections
   const subcollections = [
@@ -2783,6 +3126,7 @@ export async function deleteAccountWorkspaceFs(
     'problemCustomers',
     'salePresence',
     'activityLogs',
+    'warehouseMembers',
   ] as const;
 
   for (const sub of subcollections) {

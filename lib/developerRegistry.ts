@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import type { AdminProfile, WorkspaceLicense } from '../src/types.js';
+import type { AdminProfile, WarehouseManagerProfile, WorkspaceLicense } from '../src/types.js';
 import { verifyFirebaseIdToken } from './mongoPartition.js';
 import {
   deleteMasterCredentialByEmail,
@@ -33,6 +33,17 @@ export interface SubAdminRegistryRecord {
   createdAt: string;
 }
 
+export interface WarehouseRegistryRecord {
+  uid: string;
+  email: string;
+  masterEmail: string;
+  masterUid: string;
+  name: string;
+  assignedAdminEmail: string;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface OtpChallengeRecord {
   emailHash: string;
   maskedEmail: string;
@@ -50,6 +61,7 @@ export interface DeveloperVaultState {
   telegramUrl: string;
   masterAdmins: Record<string, MasterAdminLicenseRecord>;
   subAdminEmails: Record<string, SubAdminRegistryRecord>;
+  warehouseEmails?: Record<string, WarehouseRegistryRecord>;
   otpChallenges?: Record<string, OtpChallengeRecord>;
   updatedAt: string;
 }
@@ -220,6 +232,7 @@ export function createDefaultVaultState(): DeveloperVaultState {
     telegramUrl: DEFAULT_TELEGRAM_URL,
     masterAdmins: {},
     subAdminEmails: {},
+    warehouseEmails: {},
     otpChallenges: {},
     updatedAt: '',
   };
@@ -296,6 +309,34 @@ function decodeSubAdminEmails(
       email,
       masterEmail,
       name: f.name?.stringValue || email.split('@')[0] || 'Admin',
+      createdAt: f.createdAt?.stringValue || new Date().toISOString(),
+    };
+  }
+  return out;
+}
+
+function decodeWarehouseEmails(
+  rawField?: FirestoreRestValue
+): Record<string, WarehouseRegistryRecord> {
+  const out: Record<string, WarehouseRegistryRecord> = {};
+  const mapFields = rawField?.mapValue?.fields;
+  if (!mapFields) return out;
+  for (const [k, v] of Object.entries(mapFields)) {
+    const f = v?.mapValue?.fields;
+    if (!f) continue;
+    const email = normalizeEmail(f.email?.stringValue || k);
+    const masterEmail = normalizeEmail(f.masterEmail?.stringValue || '');
+    const uid = String(f.uid?.stringValue || '').trim();
+    const masterUid = String(f.masterUid?.stringValue || '').trim();
+    if (!email || !masterEmail || !uid || !masterUid) continue;
+    out[email] = {
+      uid,
+      email,
+      masterEmail,
+      masterUid,
+      name: f.name?.stringValue || email.split('@')[0] || 'Warehouse',
+      assignedAdminEmail: normalizeEmail(f.assignedAdminEmail?.stringValue || masterEmail),
+      active: f.active?.booleanValue !== false,
       createdAt: f.createdAt?.stringValue || new Date().toISOString(),
     };
   }
@@ -379,6 +420,7 @@ export function seedMemoryVaultFallback(seed?: Partial<DeveloperVaultState>): vo
     telegramUrl: seed.telegramUrl || DEFAULT_TELEGRAM_URL,
     masterAdmins: seed.masterAdmins || {},
     subAdminEmails: seed.subAdminEmails || {},
+    warehouseEmails: seed.warehouseEmails || {},
     otpChallenges: seed.otpChallenges || {},
     updatedAt: seed.updatedAt || '',
   });
@@ -410,6 +452,10 @@ export function mergeVaultStates(
     ...(incoming.subAdminEmails || {}),
     ...(base.subAdminEmails || {}),
   };
+  const warehouseEmails: Record<string, WarehouseRegistryRecord> = {
+    ...(incoming.warehouseEmails || {}),
+    ...(base.warehouseEmails || {}),
+  };
 
   const otpChallenges: Record<string, OtpChallengeRecord> = { ...(base.otpChallenges || {}) };
   for (const [k, rec] of Object.entries(incoming.otpChallenges || {})) {
@@ -437,6 +483,7 @@ export function mergeVaultStates(
     telegramUrl: telegramUrl || DEFAULT_TELEGRAM_URL,
     masterAdmins,
     subAdminEmails,
+    warehouseEmails,
     otpChallenges: pruneOtpChallenges(otpChallenges),
     updatedAt,
   };
@@ -470,6 +517,7 @@ async function fetchVaultFromFirestore(): Promise<LoadedVault | null> {
       telegramUrl: fields.telegramUrl?.stringValue || DEFAULT_TELEGRAM_URL,
       masterAdmins: decodeMasterAdmins(fields.masterAdmins),
       subAdminEmails: decodeSubAdminEmails(fields.subAdminEmails),
+      warehouseEmails: decodeWarehouseEmails(fields.warehouseEmails),
       otpChallenges: decodeOtpChallenges(fields.otpChallenges),
       updatedAt: fields.updatedAt?.stringValue || '',
     };
@@ -528,6 +576,20 @@ async function commitVaultToFirestore(
     };
   }
 
+  const warehouseEntries: Record<string, Record<string, unknown>> = {};
+  for (const [k, rec] of Object.entries(state.warehouseEmails || {})) {
+    warehouseEntries[k] = {
+      uid: rec.uid,
+      email: rec.email,
+      masterEmail: rec.masterEmail,
+      masterUid: rec.masterUid,
+      name: rec.name,
+      assignedAdminEmail: rec.assignedAdminEmail,
+      active: rec.active !== false,
+      createdAt: rec.createdAt,
+    };
+  }
+
   const prunedOtp = pruneOtpChallenges(state.otpChallenges);
   const otpEntries: Record<string, Record<string, unknown>> = {};
   for (const [k, rec] of Object.entries(prunedOtp)) {
@@ -560,6 +622,7 @@ async function commitVaultToFirestore(
             telegramUrl: { stringValue: normalizeTelegramUrl(state.telegramUrl) },
             masterAdmins: encodeStringMap(masterEntries),
             subAdminEmails: encodeStringMap(subEntries),
+            warehouseEmails: encodeStringMap(warehouseEntries),
             otpChallenges: encodeStringMap(otpEntries),
             updatedAt: { stringValue: cleanUpdatedAt },
           },
@@ -627,6 +690,7 @@ export async function mutateVaultState<T>(
       telegramUrl: remote.state.telegramUrl || DEFAULT_TELEGRAM_URL,
       masterAdmins: { ...remote.state.masterAdmins },
       subAdminEmails: { ...remote.state.subAdminEmails },
+      warehouseEmails: { ...(remote.state.warehouseEmails || {}) },
       otpChallenges: pruneOtpChallenges(remote.state.otpChallenges),
       updatedAt: remote.state.updatedAt || '',
     };
@@ -636,6 +700,7 @@ export async function mutateVaultState<T>(
       working.telegramUrl = merged.telegramUrl;
       working.masterAdmins = merged.masterAdmins;
       working.subAdminEmails = merged.subAdminEmails;
+      working.warehouseEmails = merged.warehouseEmails || {};
       working.otpChallenges = pruneOtpChallenges(merged.otpChallenges);
       working.updatedAt = merged.updatedAt;
     }
@@ -664,6 +729,7 @@ export async function mutateVaultState<T>(
         ...memoryFallbackVault,
         masterAdmins: { ...memoryFallbackVault.masterAdmins },
         subAdminEmails: { ...memoryFallbackVault.subAdminEmails },
+        warehouseEmails: { ...(memoryFallbackVault.warehouseEmails || {}) },
         otpChallenges: pruneOtpChallenges(memoryFallbackVault.otpChallenges),
       }
     : createDefaultVaultState();
@@ -725,12 +791,19 @@ export async function runAuthGateCheck(
   const state = await readVaultState(onMirrorLocal);
   const subRec = state.subAdminEmails[email];
   const masterRec = state.masterAdmins[email];
+  const whRec = state.warehouseEmails?.[email];
   return {
     status: 200,
     body: {
       isSubAdmin: Boolean(subRec),
       masterEmail: subRec?.masterEmail || '',
       isRegisteredMaster: Boolean(masterRec),
+      isWarehouseManager: Boolean(whRec),
+      warehouseMasterEmail: whRec?.masterEmail || '',
+      warehouseMasterUid: whRec?.masterUid || '',
+      assignedAdminEmail: whRec?.assignedAdminEmail || '',
+      warehouseName: whRec?.name || '',
+      warehouseActive: whRec ? whRec.active !== false : true,
       telegramUrl: state.telegramUrl || DEFAULT_TELEGRAM_URL,
     },
   };
@@ -758,6 +831,19 @@ export async function runRegisterMaster(
           body: {
             error:
               'គណនី Gmail នេះត្រូវបានបង្កើតនៅក្នុង Setting សម្រាប់ Switch Account ប៉ុណ្ណោះ មិនអាចបង្កើត Master Admin បានទៀតទេ!',
+          },
+        },
+      };
+    }
+
+    if (state.warehouseEmails?.[email]) {
+      return {
+        changed: false,
+        result: {
+          status: 403,
+          body: {
+            error:
+              '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings! Gmail នេះមិនអាចប្រើបង្កើត Master Admin ឬចូលនៅផ្នែក Admin បានទេ។ សូមចូលប្រើនៅផ្នែក «ចូលគណនី Sale» វិញ។',
           },
         },
       };
@@ -816,6 +902,9 @@ export async function runSyncWorkspace(
   const subAdminsRaw = Array.isArray(payload?.subAdmins)
     ? (payload.subAdmins as Array<Partial<AdminProfile>>)
     : null;
+  const warehouseProfilesRaw = Array.isArray(payload?.warehouseProfiles)
+    ? (payload.warehouseProfiles as Array<Partial<WarehouseManagerProfile>>)
+    : null;
 
   if (!email || !email.includes('@')) {
     return { status: 400, body: { error: 'Invalid master email' } };
@@ -865,6 +954,7 @@ export async function runSyncWorkspace(
         const subEmail = normalizeEmail(sa.email || '');
         if (!subEmail || !subEmail.includes('@') || subEmail === email) continue;
         if (state.masterAdmins[subEmail]) continue;
+        if (state.warehouseEmails?.[subEmail]) continue;
         nextForMasterEntries.push([
           subEmail,
           {
@@ -889,6 +979,61 @@ export async function runSyncWorkspace(
         }
         for (const [subEmail, subRec] of nextForMasterEntries) {
           state.subAdminEmails[subEmail] = subRec;
+        }
+        changed = true;
+      }
+    }
+
+    if (warehouseProfilesRaw !== null) {
+      if (!state.warehouseEmails) state.warehouseEmails = {};
+      const resolvedMasterUid = uid || rec.uid || '';
+      const prevWhForMaster = Object.entries(state.warehouseEmails)
+        .filter(([, val]) => val.masterEmail === email)
+        .map(([k, val]) => `${k}:${val.uid}:${val.name}:${val.assignedAdminEmail}:${val.active}`)
+        .sort()
+        .join('|');
+
+      const nextWhEntries: Array<[string, WarehouseRegistryRecord]> = [];
+      const seenEmails = new Set<string>();
+      for (const wp of warehouseProfilesRaw) {
+        const whEmail = normalizeEmail(wp.email || '');
+        const whUid = String(wp.uid || '').trim();
+        if (!whEmail || !whEmail.includes('@') || whEmail === email || !whUid || !resolvedMasterUid) {
+          continue;
+        }
+        if (seenEmails.has(whEmail)) continue;
+        if (state.masterAdmins[whEmail] || state.subAdminEmails[whEmail]) continue;
+        const existingWh = state.warehouseEmails[whEmail];
+        if (existingWh && existingWh.masterEmail !== email) continue;
+        seenEmails.add(whEmail);
+        nextWhEntries.push([
+          whEmail,
+          {
+            uid: whUid,
+            email: whEmail,
+            masterEmail: email,
+            masterUid: resolvedMasterUid,
+            name: String(wp.name || whEmail.split('@')[0] || 'Warehouse').trim(),
+            assignedAdminEmail: normalizeEmail(wp.assignedAdminEmail || email) || email,
+            active: wp.active !== false,
+            createdAt: String(wp.createdAt || new Date().toISOString()),
+          },
+        ]);
+      }
+
+      const nextWhForMaster = nextWhEntries
+        .map(([k, val]) => `${k}:${val.uid}:${val.name}:${val.assignedAdminEmail}:${val.active}`)
+        .sort()
+        .join('|');
+
+      if (prevWhForMaster !== nextWhForMaster) {
+        for (const [whKey, whVal] of Object.entries(state.warehouseEmails)) {
+          if (whVal.masterEmail === email) {
+            delete state.warehouseEmails[whKey];
+          }
+        }
+        for (const [whEmail, whRec] of nextWhEntries) {
+          state.warehouseEmails[whEmail] = whRec;
         }
         changed = true;
       }
@@ -938,7 +1083,11 @@ export async function runUnregisterWorkspaceAccount(
   const extraSubEmails = Array.isArray(payload?.subAdminEmails)
     ? (payload.subAdminEmails as unknown[]).map((v) => normalizeEmail(v)).filter((e) => e.includes('@'))
     : [];
+  const extraWarehouseEmails = Array.isArray(payload?.warehouseEmails)
+    ? (payload.warehouseEmails as unknown[]).map((v) => normalizeEmail(v)).filter((e) => e.includes('@'))
+    : [];
   const subEmailSet = new Set(extraSubEmails);
+  const whEmailSet = new Set(extraWarehouseEmails);
 
   const removedEmailHashes = new Set<string>();
   const recordEmailHash = (em: string) => {
@@ -948,8 +1097,10 @@ export async function runUnregisterWorkspaceAccount(
   };
   if (masterEmail) recordEmailHash(masterEmail);
   for (const se of subEmailSet) recordEmailHash(se);
+  for (const we of whEmailSet) recordEmailHash(we);
 
   const removedSubEmails: string[] = [];
+  const removedWarehouseEmails: string[] = [];
   let removedMaster = false;
 
   const { value, persistedToCloud } = await mutateVaultState<ApiResult>((state) => {
@@ -981,6 +1132,22 @@ export async function runUnregisterWorkspaceAccount(
       }
     }
 
+    if (state.warehouseEmails) {
+      for (const [whKey, whRec] of Object.entries(state.warehouseEmails)) {
+        const cleanWhKey = normalizeEmail(whKey);
+        const cleanRecMaster = normalizeEmail(whRec?.masterEmail);
+        const belongsToMaster = Boolean(masterEmail && cleanRecMaster === masterEmail);
+        const matchesMasterUid = Boolean(user.uid && whRec?.masterUid === user.uid);
+        const explicitlyListed = whEmailSet.has(cleanWhKey);
+        if (belongsToMaster || matchesMasterUid || explicitlyListed) {
+          recordEmailHash(cleanWhKey);
+          delete state.warehouseEmails[whKey];
+          removedWarehouseEmails.push(cleanWhKey);
+          changed = true;
+        }
+      }
+    }
+
     if (state.otpChallenges && removedEmailHashes.size > 0) {
       for (const [hKey, ch] of Object.entries(state.otpChallenges)) {
         if (removedEmailHashes.has(hKey) || removedEmailHashes.has(String(ch?.emailHash || ''))) {
@@ -998,6 +1165,7 @@ export async function runUnregisterWorkspaceAccount(
           ok: true,
           removedMaster,
           removedSubEmails,
+          removedWarehouseEmails,
         },
       },
     };
@@ -1090,6 +1258,18 @@ export async function runUpdateMasterAdminExpire(
             status: 400,
             body: {
               error: 'Gmail នេះជា Sub-Admin ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។',
+            },
+          },
+        };
+      }
+
+      if (state.warehouseEmails?.[email]) {
+        return {
+          changed: false,
+          result: {
+            status: 400,
+            body: {
+              error: 'Gmail នេះជាអ្នកគ្រប់គ្រងឃ្លាំង ដែលបង្កើតក្នុង Setting មិនមែនជា Master Admin ទេ។',
             },
           },
         };

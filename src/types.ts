@@ -31,6 +31,7 @@ export interface Product {
   sortOrder: number;
   updatedAt: string;
   operatorEmail?: string;
+  warehouseUids?: string[];
 }
 
 export interface OrderItem {
@@ -68,6 +69,7 @@ export interface Order {
   totalCost: number;
   createdByEmail: string;
   operatorEmail: string;
+  warehouseUids?: string[];
 }
 
 export interface ProblemCustomer {
@@ -126,7 +128,7 @@ export interface UserAccessRule {
   blockedPages: PageId[];
 }
 
-export type UserRole = 'admin' | 'sale';
+export type UserRole = 'admin' | 'sale' | 'warehouse';
 
 export interface SaleUserPreferences {
   darkMode?: boolean;
@@ -154,6 +156,17 @@ export interface AdminProfile {
   createdAt: string;
 }
 
+export interface WarehouseManagerProfile {
+  id: string;
+  uid: string;
+  name: string;
+  email: string;
+  assignedAdminEmail: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface WorkspaceLicense {
   trialStartedAt: string;
   expireAt: string;
@@ -177,6 +190,7 @@ export interface WorkspaceSettings {
   accessRules: UserAccessRule[];
   saleProfiles: SaleProfile[];
   adminProfiles: AdminProfile[];
+  warehouseProfiles?: WarehouseManagerProfile[];
 }
 
 export interface WorkspacePaginationState {
@@ -202,6 +216,9 @@ export interface AuthSession {
   operatorEmail: string;
   role: UserRole;
   saleName?: string;
+  warehouseName?: string;
+  masterUid?: string;
+  assignedAdminEmail?: string;
   createdAt: string;
 }
 

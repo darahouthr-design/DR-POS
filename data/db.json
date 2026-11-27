@@ -25,26 +25,14 @@
       }
     },
     "otpChallenges": {
-      "777bb4ff96bd813f75beac4a": {
-        "emailHash": "777bb4ff96bd813f75beac4a",
-        "maskedEmail": "te***7@gmail.com",
-        "jti": "269da88c-45fd-42e0-b057-ee58d268457e",
-        "salt": "b4ebc65b13b2c025",
-        "otpDigest": "7a61316348069b1f055732a3acec1a9bde143dd721ff7dea03940a8114cc8418",
-        "createdAt": "2026-11-26T05:01:53.643Z",
-        "expiresAt": "2026-11-26T05:11:53.643Z",
-        "usedAt": "2026-11-26T05:01:55.463Z",
-        "attempts": 0,
-        "source": "developer"
-      },
-      "6a0523be8334e48dfd446121": {
-        "emailHash": "6a0523be8334e48dfd446121",
-        "maskedEmail": "te***k@gmail.com",
-        "jti": "7ba569fb-94b4-4d10-968f-696fe93e664c",
-        "salt": "ec6414b78b0a43e5",
-        "otpDigest": "dfe365072105e9e7ee723e400c5c8cc1780c53c6250164b8b9cf2442652bc4e1",
-        "createdAt": "2026-11-26T05:01:02.828Z",
-        "expiresAt": "2026-11-26T05:11:02.828Z",
+      "e3733783c6eea5f2ac5874b8": {
+        "emailHash": "e3733783c6eea5f2ac5874b8",
+        "maskedEmail": "vo***8@gmail.com",
+        "jti": "3bbe36da-356f-4036-a7ab-9320fd862f91",
+        "salt": "1814b579f776f1c9",
+        "otpDigest": "6c077fd11d4513c01968481d21b12942ff789b2ef836f78bcf0a1c60efd130c4",
+        "createdAt": "2026-11-27T01:14:30.216Z",
+        "expiresAt": "2026-11-27T01:24:30.216Z",
         "usedAt": "",
         "attempts": 0,
         "source": "email"

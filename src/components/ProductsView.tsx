@@ -18,6 +18,7 @@ interface ProductsViewProps {
   settings: WorkspaceSettings;
   currency: CurrencyCode;
   hideWarehouse: boolean;
+  hidePrices?: boolean;
   readOnly?: boolean;
   onSaveProduct: (payload: Partial<Product>) => Promise<boolean>;
   onUpdateProductImage?: (productId: string, imageUrl: string) => Promise<boolean>;
@@ -46,6 +47,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   settings,
   currency,
   hideWarehouse,
+  hidePrices = false,
   readOnly = false,
   onSaveProduct,
   onUpdateProductImage,
@@ -792,16 +794,18 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
                   <div className="border-t border-border/50 pt-2 sm:pt-2.5 space-y-2">
                     <div className="flex flex-wrap items-baseline justify-between gap-1">
-                      <div className="min-w-0">
-                        <span className="text-sm sm:text-base font-bold tabular-nums text-primary">
-                          {formatMoney(effective, currency)}
-                        </span>
-                        {prod.promotion > 0 && (
-                          <span className="ml-1 text-[10px] sm:text-xs line-through text-muted tabular-nums">
-                            {formatMoney(prod.sellingPrice, currency)}
+                      {!hidePrices && (
+                        <div className="min-w-0">
+                          <span className="text-sm sm:text-base font-bold tabular-nums text-primary">
+                            {formatMoney(effective, currency)}
                           </span>
-                        )}
-                      </div>
+                          {prod.promotion > 0 && (
+                            <span className="ml-1 text-[10px] sm:text-xs line-through text-muted tabular-nums">
+                              {formatMoney(prod.sellingPrice, currency)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <span
                         className={`text-[11px] sm:text-xs tabular-nums ${
                           prod.stock <= 0
@@ -815,7 +819,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       </span>
                     </div>
 
-                    {!readOnly && (
+                    {!readOnly && !hidePrices && (
                       <div className="text-[11px] text-muted tabular-nums">
                         {t.products.costPrefix}{' '}
                         <strong className="text-foreground">
@@ -925,15 +929,17 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                         {prod.barcode ? ` · ${t.products.barcodePrefix} ${prod.barcode}` : ''}
                       </p>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-                        {!readOnly && (
+                        {!readOnly && !hidePrices && (
                           <span>
                             {t.products.costPrefix} <strong>{formatMoney(prod.costPrice, currency)}</strong>
                           </span>
                         )}
-                        <span>
-                          {t.products.sellPrefix} <strong className="text-primary">{formatMoney(effective, currency)}</strong>
-                        </span>
-                        {prod.promotion > 0 && (
+                        {!hidePrices && (
+                          <span>
+                            {t.products.sellPrefix} <strong className="text-primary">{formatMoney(effective, currency)}</strong>
+                          </span>
+                        )}
+                        {!hidePrices && prod.promotion > 0 && (
                           <span className="text-accent">
                             {t.products.promoPrefix} -{formatMoney(prod.promotion, currency)}
                           </span>

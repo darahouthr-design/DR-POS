@@ -41,6 +41,21 @@ service cloud.firestore {
       );
     }
 
+    function isActiveWarehouseMember(workspaceId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/workspaces/$(workspaceId)/warehouseMembers/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/workspaces/$(workspaceId)/warehouseMembers/$(request.auth.uid)).data.active == true;
+    }
+
+    function isWarehouseDocViewer(workspaceId) {
+      return isSignedIn() &&
+        existing().ownerUid == workspaceId &&
+        'warehouseUids' in existing() &&
+        existing().warehouseUids is list &&
+        existing().warehouseUids.size() <= 50 &&
+        request.auth.uid in existing().warehouseUids;
+    }
+
     // Entity Validation Blueprints (No existing() or diff() inside helpers)
     function isValidWorkspaceSettings(s) {
       return s is map &&
@@ -53,7 +68,7 @@ service cloud.firestore {
           'personalName', 'personalPhone', 'businessName', 'darkMode',
           'language', 'currency', 'soundEnabled', 'warehouses', 'stores',
           'groups', 'categories', 'accessRules',
-          'saleProfiles', 'adminProfiles'
+          'saleProfiles', 'adminProfiles', 'warehouseProfiles'
         ]) &&
         s.personalName is string && s.personalName.size() <= 200 &&
         s.personalPhone is string && s.personalPhone.size() <= 64 &&
@@ -73,7 +88,8 @@ service cloud.firestore {
         s.accessRules is list && s.accessRules.size() <= 100 &&
         (s.accessRules.size() == 0 || s.accessRules[0] is map) &&
         (!('saleProfiles' in s) || (s.saleProfiles is list && s.saleProfiles.size() <= 100 && (s.saleProfiles.size() == 0 || s.saleProfiles[0] is map))) &&
-        (!('adminProfiles' in s) || (s.adminProfiles is list && s.adminProfiles.size() <= 100 && (s.adminProfiles.size() == 0 || s.adminProfiles[0] is map)));
+        (!('adminProfiles' in s) || (s.adminProfiles is list && s.adminProfiles.size() <= 100 && (s.adminProfiles.size() == 0 || s.adminProfiles[0] is map))) &&
+        (!('warehouseProfiles' in s) || (s.warehouseProfiles is list && s.warehouseProfiles.size() <= 100 && (s.warehouseProfiles.size() == 0 || s.warehouseProfiles[0] is map)));
     }
 
     function isValidWorkspaceLicense(l) {
@@ -110,7 +126,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'id', 'ownerUid', 'name', 'imageUrl', 'costPrice', 'sellingPrice',
           'promotion', 'stock', 'barcode', 'category', 'warehouse', 'sortOrder',
-          'updatedAt', 'operatorEmail', 'serverUpdatedAt'
+          'updatedAt', 'operatorEmail', 'warehouseUids', 'serverUpdatedAt'
         ]) &&
         isValidId(data.id) &&
         isValidId(data.ownerUid) &&
@@ -127,6 +143,7 @@ service cloud.firestore {
         data.sortOrder is number && data.sortOrder >= 0 &&
         data.updatedAt is string && data.updatedAt.size() <= 64 &&
         (!('operatorEmail' in data) || (data.operatorEmail is string && data.operatorEmail.size() <= 200)) &&
+        (!('warehouseUids' in data) || (data.warehouseUids is list && data.warehouseUids.size() <= 50 && (data.warehouseUids.size() == 0 || data.warehouseUids[0] is string))) &&
         data.serverUpdatedAt is timestamp;
     }
 
@@ -145,7 +162,7 @@ service cloud.firestore {
           'groupName', 'staffName', 'warehouse', 'paymentStatus', 'dueDate',
           'note', 'items', 'subtotalAmount', 'discountType', 'discountValue',
           'discountAmount', 'totalAmount', 'totalCost', 'createdByEmail',
-          'operatorEmail', 'serverCreatedAt', 'serverUpdatedAt'
+          'operatorEmail', 'warehouseUids', 'serverCreatedAt', 'serverUpdatedAt'
         ]) &&
         isValidId(data.id) &&
         isValidId(data.ownerUid) &&
@@ -174,6 +191,7 @@ service cloud.firestore {
         data.totalCost is number && data.totalCost >= 0 &&
         data.createdByEmail is string && data.createdByEmail.size() <= 200 &&
         data.operatorEmail is string && data.operatorEmail.size() <= 200 &&
+        (!('warehouseUids' in data) || (data.warehouseUids is list && data.warehouseUids.size() <= 50 && (data.warehouseUids.size() == 0 || data.warehouseUids[0] is string))) &&
         data.serverCreatedAt is timestamp &&
         data.serverUpdatedAt is timestamp;
     }
@@ -332,6 +350,49 @@ service cloud.firestore {
         data.serverCreatedAt is timestamp;
     }
 
+    function isValidWarehouseMember(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'uid', 'ownerUid', 'email', 'name', 'assignedAdminEmail',
+          'active', 'createdAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'ownerUid', 'email', 'name', 'assignedAdminEmail',
+          'active', 'createdAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 200 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        data.assignedAdminEmail is string && data.assignedAdminEmail.size() <= 200 &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.serverUpdatedAt is timestamp;
+    }
+
+    function isValidWarehouseDirectory(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'uid', 'ownerUid', 'masterEmail', 'warehouseEmail',
+          'name', 'assignedAdminEmail', 'active', 'createdAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'ownerUid', 'masterEmail', 'warehouseEmail',
+          'name', 'assignedAdminEmail', 'active', 'createdAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        isValidId(data.ownerUid) &&
+        data.ownerUid == request.auth.uid &&
+        data.masterEmail is string && data.masterEmail.size() > 0 && data.masterEmail.size() <= 200 &&
+        data.warehouseEmail is string && data.warehouseEmail.size() > 0 && data.warehouseEmail.size() <= 200 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+        data.assignedAdminEmail is string && data.assignedAdminEmail.size() <= 200 &&
+        data.active is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.serverUpdatedAt is timestamp;
+    }
+
     function isValidDeveloperVaultId(vaultId) {
       return isValidId(vaultId) && vaultId == 'devvault_a882249ff19ca7af4920b868d2613325';
     }
@@ -344,12 +405,13 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'vaultId', 'telegramUrl', 'masterAdmins', 'subAdminEmails',
-          'otpChallenges', 'updatedAt', 'serverUpdatedAt'
+          'warehouseEmails', 'otpChallenges', 'updatedAt', 'serverUpdatedAt'
         ]) &&
         isValidDeveloperVaultId(data.vaultId) &&
         data.telegramUrl is string && data.telegramUrl.size() > 0 && data.telegramUrl.size() <= 500 &&
         data.masterAdmins is map &&
         data.subAdminEmails is map &&
+        (!('warehouseEmails' in data) || data.warehouseEmails is map) &&
         (!('otpChallenges' in data) || (data.otpChallenges is map && data.otpChallenges.size() <= 200)) &&
         data.updatedAt is string && data.updatedAt.size() <= 64 &&
         data.serverUpdatedAt is timestamp;
@@ -357,7 +419,7 @@ service cloud.firestore {
 
     // Account-Segregated Workspace Root Document (Strictly keyed by request.auth.uid)
     match /workspaces/{workspaceId} {
-      allow get: if isValidId(workspaceId) && isWorkspaceOwner(workspaceId);
+      allow get: if isValidId(workspaceId) && (isWorkspaceOwner(workspaceId) || isActiveWarehouseMember(workspaceId));
       allow list: if false;
 
       allow create: if isValidId(workspaceId) &&
@@ -378,8 +440,8 @@ service cloud.firestore {
 
       // Products Subcollection
       match /products/{productId} {
-        allow get: if isValidId(workspaceId) && isValidId(productId) && isWorkspaceOwner(workspaceId);
-        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+        allow get: if isValidId(workspaceId) && isValidId(productId) && (isWorkspaceOwner(workspaceId) || isWarehouseDocViewer(workspaceId));
+        allow list: if (isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid) || isWarehouseDocViewer(workspaceId);
 
         allow create: if isValidId(workspaceId) && isValidId(productId) &&
           isParentWorkspaceOwned(workspaceId) &&
@@ -397,10 +459,11 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'imageUrl', 'costPrice', 'sellingPrice', 'promotion',
               'stock', 'barcode', 'category', 'warehouse', 'sortOrder',
-              'updatedAt', 'serverUpdatedAt'
+              'updatedAt', 'warehouseUids', 'serverUpdatedAt'
             ]) ||
             incoming().diff(existing()).affectedKeys().hasOnly(['sortOrder', 'serverUpdatedAt']) ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'updatedAt', 'serverUpdatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'updatedAt', 'serverUpdatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['warehouseUids', 'serverUpdatedAt'])
           );
 
         allow delete: if isValidId(workspaceId) && isValidId(productId) && isWorkspaceOwner(workspaceId);
@@ -408,8 +471,8 @@ service cloud.firestore {
 
       // Orders Subcollection
       match /orders/{orderId} {
-        allow get: if isValidId(workspaceId) && isValidId(orderId) && isWorkspaceOwner(workspaceId);
-        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+        allow get: if isValidId(workspaceId) && isValidId(orderId) && (isWorkspaceOwner(workspaceId) || isWarehouseDocViewer(workspaceId));
+        allow list: if (isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid) || isWarehouseDocViewer(workspaceId);
 
         allow create: if isValidId(workspaceId) && isValidId(orderId) &&
           isParentWorkspaceOwned(workspaceId) &&
@@ -430,9 +493,11 @@ service cloud.firestore {
               'date', 'time', 'customerName', 'customerPhone', 'customerAddress',
               'storeName', 'groupName', 'staffName', 'warehouse', 'paymentStatus',
               'dueDate', 'note', 'items', 'subtotalAmount', 'discountType',
-              'discountValue', 'discountAmount', 'totalAmount', 'totalCost', 'serverUpdatedAt'
+              'discountValue', 'discountAmount', 'totalAmount', 'totalCost',
+              'warehouseUids', 'serverUpdatedAt'
             ]) ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'dueDate', 'serverUpdatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'dueDate', 'serverUpdatedAt']) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['warehouseUids', 'serverUpdatedAt'])
           );
 
         allow delete: if isValidId(workspaceId) && isValidId(orderId) && isWorkspaceOwner(workspaceId);
@@ -557,6 +622,57 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isValidId(workspaceId) && isValidId(activityId) && isWorkspaceOwner(workspaceId);
       }
+
+      // Warehouse Manager Memberships Subcollection
+      match /warehouseMembers/{warehouseUid} {
+        allow get: if isValidId(workspaceId) && isValidId(warehouseUid) && (isWorkspaceOwner(workspaceId) || request.auth.uid == warehouseUid);
+        allow list: if isWorkspaceOwner(workspaceId) && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(workspaceId) && isValidId(warehouseUid) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidWarehouseMember(incoming()) &&
+          incoming().uid == warehouseUid &&
+          incoming().ownerUid == workspaceId &&
+          incoming().serverUpdatedAt == request.time;
+
+        allow update: if isValidId(workspaceId) && isValidId(warehouseUid) &&
+          isParentWorkspaceOwned(workspaceId) &&
+          isValidWarehouseMember(incoming()) &&
+          incoming().uid == existing().uid &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().serverUpdatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'email', 'name', 'assignedAdminEmail', 'active', 'serverUpdatedAt'
+          ]);
+
+        allow delete: if isValidId(workspaceId) && isValidId(warehouseUid) && isWorkspaceOwner(workspaceId);
+      }
+    }
+
+    // Warehouse Manager Self-Lookup Directory (Strictly keyed by warehouseUid, list disabled)
+    match /warehouseDirectory/{warehouseUid} {
+      allow get: if isValidId(warehouseUid) && isSignedIn() && (request.auth.uid == warehouseUid || resource == null || existing().ownerUid == request.auth.uid);
+      allow list: if false;
+
+      allow create: if isValidId(warehouseUid) &&
+        isValidWarehouseDirectory(incoming()) &&
+        isWorkspaceOwner(incoming().ownerUid) &&
+        incoming().uid == warehouseUid &&
+        incoming().serverUpdatedAt == request.time;
+
+      allow update: if isValidId(warehouseUid) &&
+        isValidWarehouseDirectory(incoming()) &&
+        isWorkspaceOwner(existing().ownerUid) &&
+        incoming().uid == existing().uid &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().serverUpdatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'masterEmail', 'warehouseEmail', 'name', 'assignedAdminEmail', 'active', 'serverUpdatedAt'
+        ]);
+
+      allow delete: if isValidId(warehouseUid) && isWorkspaceOwner(existing().ownerUid);
     }
 
     // Server-Managed Developer License & Email-Gate Registry (Keyed by capability vaultId, list disabled)
@@ -578,7 +694,7 @@ service cloud.firestore {
           (
             incoming().vaultId == existing().vaultId &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'telegramUrl', 'masterAdmins', 'subAdminEmails', 'otpChallenges', 'updatedAt', 'serverUpdatedAt'
+              'telegramUrl', 'masterAdmins', 'subAdminEmails', 'warehouseEmails', 'otpChallenges', 'updatedAt', 'serverUpdatedAt'
             ])
           )
         );

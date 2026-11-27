@@ -54,6 +54,8 @@ export interface TranslationDict {
     unscheduled: string;
     remaining: string;
     general: string;
+    signOut: string;
+    warehouseManager: string;
   };
   header: {
     notifications: string;
@@ -745,6 +747,27 @@ export interface TranslationDict {
     settingsMenusTitle: string;
     settingsMenusSubtitle: string;
     savedFeedbackMsg: string;
+    warehouseMgmtHeading: string;
+    warehouseMgmtHint: string;
+    warehouseCountLabel: string;
+    warehouseNameLabel: string;
+    warehouseNamePlaceholder: string;
+    warehouseGmailLabel: string;
+    warehouseGmailPlaceholder: string;
+    warehousePasswordLabel: string;
+    warehouseConfirmPasswordLabel: string;
+    warehouseAssignAdminLabel: string;
+    createWarehouseBtn: string;
+    warehouseStatusActive: string;
+    warehouseStatusDisabled: string;
+    warehouseDisableBtn: string;
+    warehouseEnableBtn: string;
+    warehouseAssignedPrefix: string;
+    warehouseCreatedMsg: string;
+    emptyWarehouseManagers: string;
+    errWarehouseNameRequired: string;
+    errWarehouseGmailInvalid: string;
+    errWarehouseGmailDuplicate: string;
   };
   about: {
     tagline: string;
@@ -828,6 +851,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       unscheduled: 'មិនទាន់កំណត់',
       remaining: 'សល់',
       general: 'ទូទៅ',
+      signOut: 'ចាកចេញ',
+      warehouseManager: 'អ្នកគ្រប់គ្រងឃ្លាំង',
     },
     header: {
       notifications: 'ការជូនដំណឹងប្រព័ន្ធ (Notifications)',
@@ -1528,6 +1553,30 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       settingsMenusTitle: 'កំណត់ប្រព័ន្ធតាមប្រភេទ',
       settingsMenusSubtitle: 'ចុចលើប៊ូតុងប្រភេទនីមួយៗខាងក្រោម ដើម្បីបើកផ្ទាំងកំណត់',
       savedFeedbackMsg: 'បានរក្សាទុកព័ត៌មានផ្ទាល់ខ្លួនជោគជ័យ!',
+      warehouseMgmtHeading: 'បង្កើត និងគ្រប់គ្រងអ្នកគ្រប់គ្រងឃ្លាំង',
+      warehouseMgmtHint:
+        'អ្នកគ្រប់គ្រងឃ្លាំងមើលឃើញតែទំព័រទំនិញ (Products) និងការបញ្ជាទិញ (Orders) របស់ Admin ដែលបានកំណត់ប៉ុណ្ណោះ (មិនអាចមើលតម្លៃ ឬរបាយការណ៍លុយទេ)។ Gmail ១ បង្កើតបានតែម្ដងគត់។',
+      warehouseCountLabel: 'ចំនួនអ្នកគ្រប់គ្រងឃ្លាំង៖',
+      warehouseNameLabel: 'ឈ្មោះ អ្នកគ្រប់គ្រងឃ្លាំងថ្មី',
+      warehouseNamePlaceholder: 'ឧ. ឃ្លាំង សុខា / Warehouse Sokha',
+      warehouseGmailLabel: 'Gmail ថ្មី (ប្រើបានតែម្ដង)',
+      warehouseGmailPlaceholder: 'example@gmail.com',
+      warehousePasswordLabel: 'Password ថ្មី (>= 6 តួអក្សរ)',
+      warehouseConfirmPasswordLabel: 'បញ្ជាក់ Password ម្ដងទៀត',
+      warehouseAssignAdminLabel: 'កំណត់ Admin ដែលត្រូវមើលឃ្លាំង',
+      createWarehouseBtn: 'បង្កើតអ្នកគ្រប់គ្រងឃ្លាំង',
+      warehouseStatusActive: 'កំពុងបើកសិទ្ធិ',
+      warehouseStatusDisabled: 'បានផ្អាកសិទ្ធិ',
+      warehouseDisableBtn: 'ផ្អាកសិទ្ធិ',
+      warehouseEnableBtn: 'បើកសិទ្ធិវិញ',
+      warehouseAssignedPrefix: 'ទិន្នន័យ Admin៖',
+      warehouseCreatedMsg:
+        'បានបង្កើតអ្នកគ្រប់គ្រងឃ្លាំង "{name}" ({email}) ជោគជ័យ! អាចយកឈ្មោះ Gmail និង Password នេះទៅ Login នៅផ្នែក «ចូលគណនី Sale» បានហើយ។',
+      emptyWarehouseManagers: 'មិនទាន់មានគណនីអ្នកគ្រប់គ្រងឃ្លាំងនៅឡើយទេ។',
+      errWarehouseNameRequired: 'សូមបញ្ចូលឈ្មោះ អ្នកគ្រប់គ្រងឃ្លាំងថ្មី ជាមុនសិន។',
+      errWarehouseGmailInvalid: 'សូមបញ្ចូលអាសយដ្ឋាន Gmail ថ្មី អោយបានត្រឹមត្រូវ។',
+      errWarehouseGmailDuplicate:
+        'Gmail នេះមាននៅក្នុងប្រព័ន្ធរួចរាល់ហើយ! Gmail ១ អាចបង្កើតបានតែម្ដងគត់ មិនអាចបង្កើតបាន ២ ឬច្រើនដងជាដាច់ខាត។',
     },
     about: {
       tagline: 'ប្រព័ន្ធគ្រប់គ្រងការលក់ស្តង់ដារអាជីវកម្ម',
@@ -1618,6 +1667,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       unscheduled: 'Unscheduled',
       remaining: 'Left',
       general: 'General',
+      signOut: 'Sign out',
+      warehouseManager: 'Warehouse Manager',
     },
     header: {
       notifications: 'System Notifications',
@@ -2321,6 +2372,30 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       settingsMenusTitle: 'System Settings Categories',
       settingsMenusSubtitle: 'Click any category button below to open its settings form',
       savedFeedbackMsg: 'Personal information saved successfully!',
+      warehouseMgmtHeading: 'Create & Manage Warehouse Managers',
+      warehouseMgmtHint:
+        'Warehouse Managers can only view Products & Orders of their assigned Admin (zero prices or financial reports). Each Gmail can only be created once.',
+      warehouseCountLabel: 'Warehouse Managers:',
+      warehouseNameLabel: 'New Warehouse Manager Name',
+      warehouseNamePlaceholder: 'e.g. Warehouse Sokha',
+      warehouseGmailLabel: 'New Gmail (Single-Use)',
+      warehouseGmailPlaceholder: 'example@gmail.com',
+      warehousePasswordLabel: 'New Password (>= 6 chars)',
+      warehouseConfirmPasswordLabel: 'Confirm Password',
+      warehouseAssignAdminLabel: 'Assign Admin Scope',
+      createWarehouseBtn: 'Create Warehouse Manager',
+      warehouseStatusActive: 'Active',
+      warehouseStatusDisabled: 'Disabled',
+      warehouseDisableBtn: 'Disable',
+      warehouseEnableBtn: 'Enable',
+      warehouseAssignedPrefix: 'Assigned Admin:',
+      warehouseCreatedMsg:
+        'Created Warehouse Manager "{name}" ({email})! They can sign in with Name, Gmail, and Password under Sale Sign-In.',
+      emptyWarehouseManagers: 'No Warehouse Manager accounts created yet.',
+      errWarehouseNameRequired: 'Please enter a Warehouse Manager name.',
+      errWarehouseGmailInvalid: 'Please enter a valid Gmail address.',
+      errWarehouseGmailDuplicate:
+        'This Gmail is already registered! Each Gmail can only be created once.',
     },
     about: {
       tagline: 'Business-Grade Realtime Multi-Device POS System',
@@ -2411,6 +2486,8 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       unscheduled: '미정',
       remaining: '남음',
       general: '일반',
+      signOut: '로그아웃',
+      warehouseManager: '창고 관리자',
     },
     header: {
       notifications: '시스템 알림 (Notifications)',
@@ -3114,6 +3191,30 @@ export const TRANSLATIONS: Record<LanguageCode, TranslationDict> = {
       settingsMenusTitle: '시스템 설정 항목',
       settingsMenusSubtitle: '아래 각 설정 버튼을 클릭하여 설정 창을 여세요',
       savedFeedbackMsg: '개인 정보가 저장되었습니다!',
+      warehouseMgmtHeading: '창고 관리자 생성 및 관리',
+      warehouseMgmtHint:
+        '창고 관리자는 지정된 Admin의 상품(Products)과 주문(Orders)만 조회할 수 있습니다(가격 및 매출 리포트 비공개). Gmail 1개당 1회만 생성 가능합니다.',
+      warehouseCountLabel: '창고 관리자 수:',
+      warehouseNameLabel: '새 창고 관리자 이름',
+      warehouseNamePlaceholder: '예: 창고 담당자 이름',
+      warehouseGmailLabel: '새 Gmail (1회 생성 전용)',
+      warehouseGmailPlaceholder: 'example@gmail.com',
+      warehousePasswordLabel: '새 비밀번호 (6자 이상)',
+      warehouseConfirmPasswordLabel: '비밀번호 확인',
+      warehouseAssignAdminLabel: '조회할 Admin 지정',
+      createWarehouseBtn: '창고 관리자 생성',
+      warehouseStatusActive: '활성',
+      warehouseStatusDisabled: '차단됨',
+      warehouseDisableBtn: '차단',
+      warehouseEnableBtn: '허용',
+      warehouseAssignedPrefix: '담당 Admin:',
+      warehouseCreatedMsg:
+        '창고 관리자 "{name}" ({email}) 생성 완료! Sale 로그인 화면에서 이름, Gmail, 비밀번호로 로그인할 수 있습니다.',
+      emptyWarehouseManagers: '등록된 창고 관리자가 아직 없습니다.',
+      errWarehouseNameRequired: '창고 관리자 이름을 입력하세요.',
+      errWarehouseGmailInvalid: '올바른 Gmail 주소를 입력하세요.',
+      errWarehouseGmailDuplicate:
+        '이 Gmail은 이미 등록되어 있습니다! Gmail 1개당 1회만 생성할 수 있습니다.',
     },
     about: {
       tagline: '비즈니스 표준 실시간 멀티 디바이스 POS 시스템',

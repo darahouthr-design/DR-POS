@@ -9,6 +9,9 @@ const AUTH_EXTERNAL_ERROR_KEY = 'drpos_auth_external_error_v1';
 export interface StoredRolePref {
   role: UserRole;
   saleName?: string;
+  warehouseName?: string;
+  masterUid?: string;
+  assignedAdminEmail?: string;
 }
 
 export const DUPLICATE_GMAIL_KHMER_ERROR =
@@ -16,6 +19,12 @@ export const DUPLICATE_GMAIL_KHMER_ERROR =
 
 export const SUB_ADMIN_EXTERNAL_BLOCK_ERROR =
   '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings ដូចនេះមិនអាចយកមកបង្កើត Master Admin ឬ Sign In នៅផ្នែកខាងក្រៅបានជាដាច់ខាត! សូមប្រើ Gmail របស់ «Master Admin» ដំបូងដើម្បីចូលប្រើ រួចប្ដូរគណនី (Switch Account) នៅខាងក្នុងប្រព័ន្ធវិញ។';
+
+export const WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR =
+  '⚠️ គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings! Gmail នេះមិនអាចប្រើបង្កើត Master Admin ឬចូលនៅផ្នែក Admin បានទេ។ សូមចូលប្រើនៅផ្នែក «ចូលគណនី Sale» វិញ។';
+
+export const WAREHOUSE_MANAGER_DUPLICATE_GMAIL_ERROR =
+  '⚠️ គណនី Gmail នេះមាននៅក្នុងប្រព័ន្ធរួចរាល់ហើយ! Gmail ១ អាចបង្កើតបានតែម្ដងប៉ុណ្ណោះ មិនអាចបង្កើតបាន ២ ឬច្រើនដងជាដាច់ខាត។';
 
 export function saveOperatorEmailPref(uid: string, operatorEmail: string): void {
   try {
@@ -74,10 +83,20 @@ export function loadRolePref(uid: string): StoredRolePref | null {
     const raw = localStorage.getItem(`${ROLE_PREF_PREFIX}${uid}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredRolePref;
-    if (parsed && (parsed.role === 'admin' || parsed.role === 'sale')) {
+    if (
+      parsed &&
+      (parsed.role === 'admin' || parsed.role === 'sale' || parsed.role === 'warehouse')
+    ) {
       return {
         role: parsed.role,
         saleName: typeof parsed.saleName === 'string' ? parsed.saleName : undefined,
+        warehouseName:
+          typeof parsed.warehouseName === 'string' ? parsed.warehouseName : undefined,
+        masterUid: typeof parsed.masterUid === 'string' ? parsed.masterUid : undefined,
+        assignedAdminEmail:
+          typeof parsed.assignedAdminEmail === 'string'
+            ? parsed.assignedAdminEmail
+            : undefined,
       };
     }
     return null;
@@ -112,10 +131,20 @@ export function consumePendingRolePref(): StoredRolePref | null {
     sessionStorage.removeItem(PENDING_ROLE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredRolePref;
-    if (parsed && (parsed.role === 'admin' || parsed.role === 'sale')) {
+    if (
+      parsed &&
+      (parsed.role === 'admin' || parsed.role === 'sale' || parsed.role === 'warehouse')
+    ) {
       return {
         role: parsed.role,
         saleName: typeof parsed.saleName === 'string' ? parsed.saleName : undefined,
+        warehouseName:
+          typeof parsed.warehouseName === 'string' ? parsed.warehouseName : undefined,
+        masterUid: typeof parsed.masterUid === 'string' ? parsed.masterUid : undefined,
+        assignedAdminEmail:
+          typeof parsed.assignedAdminEmail === 'string'
+            ? parsed.assignedAdminEmail
+            : undefined,
       };
     }
     return null;

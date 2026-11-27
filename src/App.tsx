@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   Bell,
+  LogOut,
   Menu,
   Send,
   Wifi,
@@ -24,6 +25,7 @@ import {
   deleteProblemCustomerFs,
   deleteProductFs,
   deleteStaffFs,
+  deleteWarehouseMemberDocsFs,
   fetchLatestWorkspaceSaleProfilesFromServer,
   isTimestampExpired,
   logSaleActivityFs,
@@ -31,12 +33,15 @@ import {
   purgeExpiredActivityLogsFs,
   purgeExpiredStockLogsFs,
   reorderProductsFs,
+  resolveWarehouseDirectoryForUid,
   savePriceRecordFs,
   saveProductFs,
   saveStaffFs,
+  saveWarehouseMemberDocsFs,
   subscribeToSaleActivityLogs,
   subscribeToSalePresence,
   subscribeToWorkspace,
+  syncWarehouseUidsInFirestore,
   updateOrderFs,
   updateProductImageFs,
   updateSalePreferencesFs,
@@ -56,6 +61,7 @@ import {
   saveRolePref,
   setExternalAuthError,
   SUB_ADMIN_EXTERNAL_BLOCK_ERROR,
+  WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR,
   type StoredRolePref,
 } from './utils/authPrefs';
 import {
@@ -149,6 +155,7 @@ import type {
   SaleProfile,
   SaleUserPreferences,
   StaffMember,
+  WarehouseManagerProfile,
   WorkspaceData,
   WorkspacePaginationState,
   WorkspaceSettings,
@@ -300,6 +307,8 @@ const SALE_ALLOWED_PAGES: PageId[] = [
   'privacy-policy',
   'about',
 ];
+
+const WAREHOUSE_ALLOWED_PAGES: PageId[] = ['products', 'orders'];
 
 const EMPTY_COLLECTION_READINESS: WorkspaceCollectionReadiness = {
   products: false,
@@ -583,24 +592,88 @@ export function App() {
       if (pendingRole) {
         saveRolePref(fbUser.uid, pendingRole);
       }
-      const resolvedRole: StoredRolePref = pendingRole || loadRolePref(fbUser.uid) || { role: 'admin' };
+      let resolvedRole: StoredRolePref = pendingRole || loadRolePref(fbUser.uid) || { role: 'admin' };
+
+      const whDir = await resolveWarehouseDirectoryForUid(fbUser.uid).catch(() => null);
+      if (currentRun !== activeRunId) return;
+
+      if (whDir) {
+        if (whDir.active === false) {
+          clearRolePref(fbUser.uid);
+          saveOperatorEmailPref(fbUser.uid, '');
+          clearWorkspaceBootSnapshot(fbUser.uid);
+          setExternalAuthError(
+            'គណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមទាក់ទង Master Admin។'
+          );
+          setWorkspace(null);
+          setProblemCustomers([]);
+          setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+          setInitializing(false);
+          await signOut(auth).catch(() => {});
+          return;
+        }
+        if (
+          pendingRole?.saleName &&
+          whDir.name &&
+          normalizeSaleKey(pendingRole.saleName) !== normalizeSaleKey(whDir.name)
+        ) {
+          clearRolePref(fbUser.uid);
+          saveOperatorEmailPref(fbUser.uid, '');
+          clearWorkspaceBootSnapshot(fbUser.uid);
+          setExternalAuthError(
+            'ឈ្មោះអ្នកគ្រប់គ្រងឃ្លាំងមិនត្រឹមត្រូវតាមដែល Master Admin បានបង្កើតទេ! សូមពិនិត្យឈ្មោះឡើងវិញ។'
+          );
+          setWorkspace(null);
+          setProblemCustomers([]);
+          setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+          setInitializing(false);
+          await signOut(auth).catch(() => {});
+          return;
+        }
+
+        resolvedRole = {
+          role: 'warehouse',
+          saleName: whDir.name || resolvedRole.warehouseName || resolvedRole.saleName,
+          warehouseName: whDir.name || resolvedRole.warehouseName || resolvedRole.saleName,
+          masterUid: whDir.masterUid,
+          assignedAdminEmail: whDir.assignedAdminEmail,
+        };
+        saveRolePref(fbUser.uid, resolvedRole);
+        saveOperatorEmailPref(fbUser.uid, whDir.assignedAdminEmail);
+      } else if (resolvedRole.role === 'warehouse') {
+        clearRolePref(fbUser.uid);
+        saveOperatorEmailPref(fbUser.uid, '');
+        clearWorkspaceBootSnapshot(fbUser.uid);
+        setExternalAuthError(
+          'គណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះត្រូវបានលុប ឬបិទសិទ្ធិប្រើប្រាស់! សូមទាក់ទង Master Admin។'
+        );
+        setWorkspace(null);
+        setProblemCustomers([]);
+        setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+        setInitializing(false);
+        await signOut(auth).catch(() => {});
+        return;
+      }
+
       setRoleState(resolvedRole);
       activeRoleRef.current = resolvedRole;
 
       const pendingOp = consumePendingOperatorEmail();
-      if (pendingOp) {
+      if (pendingOp && resolvedRole.role !== 'warehouse') {
         saveOperatorEmailPref(fbUser.uid, pendingOp);
       }
       const savedOp = pendingOp || loadOperatorEmailPref(fbUser.uid);
       const initialOp = (
-        savedOp || (resolvedRole.role === 'sale' ? '' : cleanEmail)
+        resolvedRole.role === 'warehouse'
+          ? whDir?.assignedAdminEmail || resolvedRole.assignedAdminEmail || ''
+          : savedOp || (resolvedRole.role === 'sale' ? '' : cleanEmail)
       )
         .trim()
         .toLowerCase();
       setOperatorEmailState(initialOp);
       activeAdminEmailRef.current = initialOp;
 
-      setActivePage('dashboard');
+      setActivePage(resolvedRole.role === 'warehouse' ? 'products' : 'dashboard');
 
       saleVerifyInFlightRef.current = null;
       serverVerifiedSaleProfilesRef.current = null;
@@ -608,7 +681,8 @@ export function App() {
 
       // Instant boot hydration from compact per-uid localStorage snapshot so mobile PWA
       // opens immediately without waiting on network round-trips while live Firestore syncs.
-      const cachedBoot = loadWorkspaceBootSnapshot(fbUser.uid);
+      const cachedBoot =
+        resolvedRole.role === 'warehouse' ? null : loadWorkspaceBootSnapshot(fbUser.uid);
       let hydratedFromCache = false;
       if (cachedBoot) {
         let cacheAllowed = true;
@@ -637,18 +711,22 @@ export function App() {
         setInitializing(true);
       }
 
-      // Parallel non-blocking Sub-Admin gate check (never stalls startup waterfall)
-      if (fbUser.email) {
+      // Parallel non-blocking Sub-Admin & Warehouse gate check (never stalls startup waterfall)
+      if (fbUser.email && resolvedRole.role !== 'warehouse') {
         void checkEmailAuthGate(cleanEmail)
           .then(async (gate) => {
             if (currentRun !== activeRunId) return;
-            if (gate.isSubAdmin) {
+            if (gate.isSubAdmin || gate.isWarehouseManager) {
               if (wsSubRef.current) {
                 wsSubRef.current.unsubscribe();
                 wsSubRef.current = null;
               }
               clearWorkspaceBootSnapshot(fbUser.uid);
-              setExternalAuthError(SUB_ADMIN_EXTERNAL_BLOCK_ERROR);
+              setExternalAuthError(
+                gate.isWarehouseManager
+                  ? WAREHOUSE_MANAGER_EXTERNAL_BLOCK_ERROR
+                  : SUB_ADMIN_EXTERNAL_BLOCK_ERROR
+              );
               clearRolePref(fbUser.uid);
               setWorkspace(null);
               setProblemCustomers([]);
@@ -687,32 +765,113 @@ export function App() {
           signOut(auth).catch(() => {});
         };
 
-        wsSubRef.current = subscribeToWorkspace(fbUser.uid, cleanEmail, displayName, {
-          onUpdate: ({
-            workspace: ws,
-            problemCustomers: pc,
-            newOrders,
-            pagination: nextPag,
-            rootFromCache,
-            collectionsLoaded: nextCollections,
-          }) => {
-            if (currentRun !== activeRunId) return;
-            if (nextCollections) {
-              setCollectionsLoaded((prev) =>
-                prev.products === nextCollections.products &&
-                prev.orders === nextCollections.orders &&
-                prev.staff === nextCollections.staff &&
-                prev.priceRecords === nextCollections.priceRecords &&
-                prev.stockLogs === nextCollections.stockLogs &&
-                prev.problemCustomers === nextCollections.problemCustomers
-                  ? prev
-                  : nextCollections
-              );
-            }
+        const rejectWarehouseLogin = (reason: string) => {
+          licenseSyncSeqRef.current += 1;
+          if (wsSubRef.current) {
+            wsSubRef.current.unsubscribe();
+            wsSubRef.current = null;
+          }
+          clearWorkspaceBootSnapshot(fbUser.uid);
+          setExternalAuthError(reason);
+          clearRolePref(fbUser.uid);
+          saveOperatorEmailPref(fbUser.uid, '');
+          setWorkspace(null);
+          setProblemCustomers([]);
+          setPagination({ hasMoreOrders: false, hasMoreStockLogs: false });
+          setInitializing(false);
+          signOut(auth).catch(() => {});
+        };
 
-            let effectiveWs = ws;
-            const currentRole = activeRoleRef.current;
-            if (currentRole.role === 'sale') {
+        const targetWsUid =
+          resolvedRole.role === 'warehouse' && whDir ? whDir.masterUid : fbUser.uid;
+        const targetWsEmail =
+          resolvedRole.role === 'warehouse' && whDir ? whDir.masterEmail : cleanEmail;
+        const targetDisplayName =
+          resolvedRole.role === 'warehouse' && whDir
+            ? whDir.name || displayName
+            : displayName;
+        const wsSubOptions =
+          resolvedRole.role === 'warehouse' && whDir
+            ? {
+                isWarehouseViewer: true,
+                warehouseUid: fbUser.uid,
+                assignedAdminEmail: whDir.assignedAdminEmail,
+              }
+            : undefined;
+
+        wsSubRef.current = subscribeToWorkspace(
+          targetWsUid,
+          targetWsEmail,
+          targetDisplayName,
+          {
+            onUpdate: ({
+              workspace: ws,
+              problemCustomers: pc,
+              newOrders,
+              pagination: nextPag,
+              rootFromCache,
+              collectionsLoaded: nextCollections,
+            }) => {
+              if (currentRun !== activeRunId) return;
+              if (nextCollections) {
+                setCollectionsLoaded((prev) =>
+                  prev.products === nextCollections.products &&
+                  prev.orders === nextCollections.orders &&
+                  prev.staff === nextCollections.staff &&
+                  prev.priceRecords === nextCollections.priceRecords &&
+                  prev.stockLogs === nextCollections.stockLogs &&
+                  prev.problemCustomers === nextCollections.problemCustomers
+                    ? prev
+                    : nextCollections
+                );
+              }
+
+              let effectiveWs = ws;
+              const currentRole = activeRoleRef.current;
+              if (currentRole.role === 'warehouse') {
+                const whList = ws.settings.warehouseProfiles || [];
+                const matchedWh = whList.find(
+                  (wp) =>
+                    wp.uid === fbUser.uid ||
+                    wp.email.trim().toLowerCase() === cleanEmail
+                );
+                if (!rootFromCache && (!matchedWh || matchedWh.active === false)) {
+                  rejectWarehouseLogin(
+                    'គណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះត្រូវបានបិទសិទ្ធិប្រើប្រាស់ ឬលុបចេញពីប្រព័ន្ធ! សូមទាក់ទង Master Admin។'
+                  );
+                  return;
+                }
+                if (matchedWh) {
+                  if (matchedWh.active === false) {
+                    rejectWarehouseLogin(
+                      'គណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះត្រូវបានបិទសិទ្ធិប្រើប្រាស់! សូមទាក់ទង Master Admin។'
+                    );
+                    return;
+                  }
+                  const liveAssigned = (matchedWh.assignedAdminEmail || ws.email)
+                    .trim()
+                    .toLowerCase();
+                  if (
+                    liveAssigned !==
+                      (currentRole.assignedAdminEmail || '').trim().toLowerCase() ||
+                    matchedWh.name !== currentRole.warehouseName
+                  ) {
+                    const updatedWhRole: StoredRolePref = {
+                      role: 'warehouse',
+                      saleName: matchedWh.name,
+                      warehouseName: matchedWh.name,
+                      masterUid: targetWsUid,
+                      assignedAdminEmail: liveAssigned,
+                    };
+                    saveRolePref(fbUser.uid, updatedWhRole);
+                    saveOperatorEmailPref(fbUser.uid, liveAssigned);
+                    setRoleState(updatedWhRole);
+                    activeRoleRef.current = updatedWhRole;
+                    setOperatorEmailState(liveAssigned);
+                    activeAdminEmailRef.current = liveAssigned;
+                  }
+                }
+              } else if (currentRole.role === 'sale') {
               const targetSale = normalizeSaleKey(currentRole.saleName || '');
               const currentSaleList = ws.settings.saleProfiles || [];
               let matchedSale = currentSaleList.find(
@@ -810,6 +969,7 @@ export function App() {
             // Persist compact boot snapshot (throttled to at most once every 2.5s)
             const nowMs = Date.now();
             if (
+              currentRole.role !== 'warehouse' &&
               !deletingAccountRef.current &&
               (bootCacheSavedAtRef.current === 0 || nowMs - bootCacheSavedAtRef.current >= 2500)
             ) {
@@ -858,7 +1018,7 @@ export function App() {
             );
             setInitializing(false);
           },
-        });
+        }, wsSubOptions);
       } catch (err) {
         if (currentRun !== activeRunId) return;
         setApiError(
@@ -887,8 +1047,9 @@ export function App() {
       token: firebaseUser.uid,
       email,
       displayName:
-        roleState.role === 'sale' && roleState.saleName
-          ? roleState.saleName
+        (roleState.role === 'sale' || roleState.role === 'warehouse') &&
+        (roleState.warehouseName || roleState.saleName)
+          ? roleState.warehouseName || roleState.saleName || ''
           : firebaseUser.displayName ||
             workspace?.settings.personalName ||
             email.split('@')[0] ||
@@ -896,30 +1057,68 @@ export function App() {
       operatorEmail: operatorEmailState || email,
       role: roleState.role,
       saleName: roleState.saleName,
+      warehouseName: roleState.warehouseName,
+      masterUid: roleState.masterUid,
+      assignedAdminEmail: roleState.assignedAdminEmail,
       createdAt: firebaseUser.metadata.creationTime || new Date().toISOString(),
     };
   }, [firebaseUser, workspace?.settings.personalName, operatorEmailState, roleState]);
 
-  const runFsMutation = useCallback(async (action: () => Promise<void>): Promise<boolean> => {
-    if (isWorkspaceExpired(latestWorkspaceRef.current?.license)) {
-      setApiError(
-        'គណនីរបស់អ្នកបានផុតកំណត់ (Expired)! លោកអ្នកអាចមើលបានតែរបាយការណ៍លក់ និង Export Excel ប៉ុណ្ណោះ។ សូមទាក់ទង Developer តាម Telegram ដើម្បីបន្តសុពលភាព។'
-      );
-      return false;
+  const formatFsErrorMessage = useCallback((err: unknown): string => {
+    const raw = err instanceof Error ? err.message : String(err || '');
+    if (raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw) as {
+          error?: string;
+          operationType?: string;
+          path?: string | null;
+        };
+        const detail = String(parsed.error || '').trim();
+        const pathLabel = parsed.path ? ` [${parsed.path}]` : '';
+        if (
+          detail.toLowerCase().includes('missing or insufficient permissions') ||
+          detail.toLowerCase().includes('permission-denied')
+        ) {
+          return `គ្មានសិទ្ធិរក្សាទុកទិន្នន័យទៅកាន់ Cloud Firestore ទេ (Permission Denied${pathLabel})! សូមប្រាកដថា Firestore Security Rules ត្រូវបាន Publish រួចរាល់។`;
+        }
+        if (detail) {
+          return `${detail}${pathLabel}`;
+        }
+      } catch {
+        // Fallback below
+      }
     }
-    setApiError('');
-    try {
-      await action();
-      return true;
-    } catch (err) {
-      setApiError(
-        err instanceof Error && !err.message.startsWith('{')
-          ? err.message
-          : 'ប្រតិបត្តិការរក្សាទុកទិន្នន័យមិនជោគជ័យទេ។ សូមព្យាយាមម្ដងទៀត។'
-      );
-      return false;
-    }
+    return raw || 'ប្រតិបត្តិការរក្សាទុកទិន្នន័យមិនជោគជ័យទេ។ សូមព្យាយាមម្ដងទៀត។';
   }, []);
+
+  const runFsMutationWithError = useCallback(
+    async (action: () => Promise<void>): Promise<{ ok: boolean; error?: string }> => {
+      if (isWorkspaceExpired(latestWorkspaceRef.current?.license)) {
+        const expMsg =
+          'គណនីរបស់អ្នកបានផុតកំណត់ (Expired)! លោកអ្នកអាចមើលបានតែរបាយការណ៍លក់ និង Export Excel ប៉ុណ្ណោះ។ សូមទាក់ទង Developer តាម Telegram ដើម្បីបន្តសុពលភាព។';
+        setApiError(expMsg);
+        return { ok: false, error: expMsg };
+      }
+      setApiError('');
+      try {
+        await action();
+        return { ok: true };
+      } catch (err) {
+        const msg = formatFsErrorMessage(err);
+        setApiError(msg);
+        return { ok: false, error: msg };
+      }
+    },
+    [formatFsErrorMessage]
+  );
+
+  const runFsMutation = useCallback(
+    async (action: () => Promise<void>): Promise<boolean> => {
+      const res = await runFsMutationWithError(action);
+      return res.ok;
+    },
+    [runFsMutationWithError]
+  );
 
   const handleLoadMoreOrders = useCallback(async () => {
     if (!wsSubRef.current || loadingMoreOrders) return;
@@ -983,7 +1182,13 @@ export function App() {
   const revalidateLicenseInBackground = useCallback(
     async (forceServer = false) => {
       const ws = latestWorkspaceRef.current;
-      if (deletingAccountRef.current || !firebaseUser || !ws || auth.currentUser?.uid !== firebaseUser.uid) {
+      if (
+        deletingAccountRef.current ||
+        !firebaseUser ||
+        !ws ||
+        activeRoleRef.current.role === 'warehouse' ||
+        auth.currentUser?.uid !== firebaseUser.uid
+      ) {
         return;
       }
       const seqId = ++licenseSyncSeqRef.current;
@@ -1001,6 +1206,7 @@ export function App() {
             'DR-POS Admin',
           license: ws.license,
           subAdmins: ws.settings.adminProfiles || [],
+          warehouseProfiles: ws.settings.warehouseProfiles || [],
         },
         { forceServer }
       );
@@ -1046,7 +1252,7 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!firebaseUser || !hasWorkspace) return;
+    if (!firebaseUser || !hasWorkspace || session?.role === 'warehouse') return;
     // Defer initial background license check so mobile cold-boot bandwidth stays 100% free for UI
     const bootTimer = window.setTimeout(() => {
       void revalidateLicenseInBackground(false);
@@ -1070,14 +1276,14 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearInterval(interval);
     };
-  }, [firebaseUser, hasWorkspace, adminProfilesFingerprint, revalidateLicenseInBackground]);
+  }, [firebaseUser, hasWorkspace, session?.role, adminProfilesFingerprint, revalidateLicenseInBackground]);
 
   // Forced background license re-validation when switching to POS or Orders
   useEffect(() => {
-    if (!firebaseUser || !hasWorkspace) return;
+    if (!firebaseUser || !hasWorkspace || session?.role === 'warehouse') return;
     if (activePage !== 'pos' && activePage !== 'orders') return;
     void revalidateLicenseInBackground(true);
-  }, [activePage, firebaseUser, hasWorkspace, revalidateLicenseInBackground]);
+  }, [activePage, firebaseUser, hasWorkspace, session?.role, revalidateLicenseInBackground]);
 
   // Access Control Rules for active operator email
   const activeAccessRule = useMemo(() => {
@@ -1195,6 +1401,21 @@ export function App() {
 
   const effectiveAdminEmail = useMemo(() => {
     if (!workspace || !session) return '';
+    if (session.role === 'warehouse') {
+      const liveWh = (workspace.settings.warehouseProfiles || []).find(
+        (wp) =>
+          wp.uid === firebaseUser?.uid ||
+          wp.email.trim().toLowerCase() === session.email.trim().toLowerCase()
+      );
+      return (
+        liveWh?.assignedAdminEmail ||
+        session.assignedAdminEmail ||
+        operatorEmailState ||
+        workspace.email
+      )
+        .trim()
+        .toLowerCase();
+    }
     if (session.role === 'sale') {
       const explicitOp = operatorEmailState.trim().toLowerCase();
       if (explicitOp && knownAdminEmails.has(explicitOp)) {
@@ -1203,14 +1424,22 @@ export function App() {
       return (matchedSaleProfile?.ownerAdminEmail || workspace.email).trim().toLowerCase();
     }
     return activeAdminEmail || workspace.email.trim().toLowerCase();
-  }, [workspace, session, operatorEmailState, knownAdminEmails, matchedSaleProfile, activeAdminEmail]);
+  }, [
+    workspace,
+    session,
+    firebaseUser?.uid,
+    operatorEmailState,
+    knownAdminEmails,
+    matchedSaleProfile,
+    activeAdminEmail,
+  ]);
 
   useEffect(() => {
     activeAdminEmailRef.current = effectiveAdminEmail;
   }, [effectiveAdminEmail]);
 
   const masterEmailLowerComputed = useMemo(
-    () => (firebaseUser?.email || workspace?.email || '').trim().toLowerCase(),
+    () => (workspace?.email || firebaseUser?.email || '').trim().toLowerCase(),
     [firebaseUser?.email, workspace?.email]
   );
 
@@ -1420,6 +1649,7 @@ export function App() {
         !uid ||
         !hasWorkspace ||
         session?.role === 'sale' ||
+        session?.role === 'warehouse' ||
         deletingAccountRef.current ||
         auth.currentUser?.uid !== uid ||
         stockPurgeInFlightRef.current
@@ -1528,7 +1758,12 @@ export function App() {
 
   // Automatic 30-day cleanup scheduler for Stock Logs (deferred on mount, on Stock Log page visit, and every 6 hours)
   useEffect(() => {
-    if (!firebaseUser?.uid || !hasWorkspace || session?.role === 'sale') {
+    if (
+      !firebaseUser?.uid ||
+      !hasWorkspace ||
+      session?.role === 'sale' ||
+      session?.role === 'warehouse'
+    ) {
       return;
     }
     const bootTimer = window.setTimeout(() => {
@@ -1565,6 +1800,30 @@ export function App() {
   // Price Records, Stock Logs, and Sale Profiles. ONLY Problem Customers is shared across all Admins.
   const visibleOrders = useMemo(() => {
     if (!workspace || !session) return [];
+    if (session.role === 'warehouse') {
+      const targetAdmin = effectiveAdminEmail;
+      const masterWsEmail = workspace.email.trim().toLowerCase();
+      if (!targetAdmin) return [];
+      return workspace.orders
+        .filter((o) => {
+          const op = (o.operatorEmail || o.createdByEmail || '').trim().toLowerCase();
+          return (op || masterWsEmail) === targetAdmin;
+        })
+        .map((o) => ({
+          ...o,
+          subtotalAmount: 0,
+          discountValue: 0,
+          discountAmount: 0,
+          totalAmount: 0,
+          totalCost: 0,
+          items: o.items.map((it) => ({
+            ...it,
+            unitPrice: 0,
+            catalogUnitPrice: undefined,
+            costPrice: 0,
+          })),
+        }));
+    }
     if (session.role === 'sale') {
       const targetSale = normalizeSaleKey(session.saleName || '');
       if (!targetSale) return [];
@@ -1584,27 +1843,43 @@ export function App() {
 
   const visibleProducts = useMemo(() => {
     if (!workspace || !session) return [];
+    if (session.role === 'warehouse') {
+      const targetAdmin = effectiveAdminEmail;
+      const masterWsEmail = workspace.email.trim().toLowerCase();
+      if (!targetAdmin) return [];
+      return workspace.products
+        .filter((p) => {
+          const op = (p.operatorEmail || '').trim().toLowerCase();
+          return (op || masterWsEmail) === targetAdmin;
+        })
+        .map((p) => ({
+          ...p,
+          costPrice: 0,
+          sellingPrice: 0,
+          promotion: 0,
+        }));
+    }
     return workspace.products.filter(
       (p) => (p.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail
     );
   }, [workspace, session, effectiveAdminEmail]);
 
   const visibleStaff = useMemo(() => {
-    if (!workspace || !session) return [];
+    if (!workspace || !session || session.role === 'warehouse') return [];
     return workspace.staff.filter(
       (s) => (s.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail
     );
   }, [workspace, session, effectiveAdminEmail]);
 
   const visiblePriceRecords = useMemo(() => {
-    if (!workspace || !session) return [];
+    if (!workspace || !session || session.role === 'warehouse') return [];
     return workspace.priceRecords.filter(
       (r) => (r.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail
     );
   }, [workspace, session, effectiveAdminEmail]);
 
   const visibleSaleProfiles = useMemo(() => {
-    if (!workspace || !session) return [];
+    if (!workspace || !session || session.role === 'warehouse') return [];
     return (workspace.settings.saleProfiles || []).filter(
       (sp) => (sp.ownerAdminEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail
     );
@@ -1623,7 +1898,7 @@ export function App() {
 
   const visibleStockLogs = useMemo(() => {
     if (!workspace || !session) return [];
-    if (session.role === 'sale') return [];
+    if (session.role === 'sale' || session.role === 'warehouse') return [];
     return workspace.stockLogs.filter(
       (l) =>
         (l.operatorEmail || workspace.email).trim().toLowerCase() === effectiveAdminEmail &&
@@ -1633,11 +1908,20 @@ export function App() {
 
   const hideWarehouse = Boolean(activeAccessRule?.hideWarehouseReports);
   const blockedPages = useMemo(
-    () => (session?.role === 'sale' ? [] : activeAccessRule?.blockedPages || []),
+    () =>
+      session?.role === 'sale' || session?.role === 'warehouse'
+        ? []
+        : activeAccessRule?.blockedPages || [],
     [activeAccessRule, session?.role]
   );
 
   useEffect(() => {
+    if (session?.role === 'warehouse') {
+      if (!WAREHOUSE_ALLOWED_PAGES.includes(activePage)) {
+        setActivePage('products');
+      }
+      return;
+    }
     if (session?.role === 'sale') {
       if (!SALE_ALLOWED_PAGES.includes(activePage)) {
         setActivePage('dashboard');
@@ -1662,8 +1946,11 @@ export function App() {
   );
 
   const duePaymentItems = useMemo(
-    () => visibleOrders.filter((o) => o.paymentStatus === 'unpaid' || Boolean(o.dueDate)),
-    [visibleOrders]
+    () =>
+      session?.role === 'warehouse'
+        ? []
+        : visibleOrders.filter((o) => o.paymentStatus === 'unpaid' || Boolean(o.dueDate)),
+    [visibleOrders, session?.role]
   );
 
   const activePageDbDeps = PAGE_DB_DEPS[activePage] || [];
@@ -1724,13 +2011,16 @@ export function App() {
     todayOrdersForBell.length + lowStockItems.length + duePaymentItems.length;
 
   const isSaleRole = session.role === 'sale';
-  const allowedNavItems = isSaleRole
+  const isWarehouseRole = session.role === 'warehouse';
+  const allowedNavItems = isWarehouseRole
+    ? NAV_ITEMS.filter((item) => WAREHOUSE_ALLOWED_PAGES.includes(item.id))
+    : isSaleRole
     ? NAV_ITEMS.filter((item) => SALE_ALLOWED_PAGES.includes(item.id))
     : NAV_ITEMS.filter(
         (item) => item.id === 'settings' || !blockedPages.includes(item.id)
       );
 
-  const masterEmailLower = session.email.trim().toLowerCase();
+  const masterEmailLower = workspace.email.trim().toLowerCase();
   const rawAdminProfiles = workspace.settings.adminProfiles || [];
   const adminSwitchOptions: AdminProfile[] = rawAdminProfiles.some(
     (a) => a.email.trim().toLowerCase() === masterEmailLower
@@ -1756,6 +2046,7 @@ export function App() {
   const activeAdminLabel = activeAdminOption?.name || effectiveAdminEmail;
 
   const handleQuickSwitchAdmin = (nextEmail: string) => {
+    if (isWarehouseRole) return;
     const clean = nextEmail.trim().toLowerCase() || masterEmailLower;
     saveOperatorEmailPref(firebaseUser.uid, clean);
     activeAdminEmailRef.current = clean;
@@ -1763,6 +2054,26 @@ export function App() {
     setBellOpen(false);
     setMobileMenuOpen(false);
     setZoomState({ url: null, title: '' });
+  };
+
+  const handleSignOut = async () => {
+    licenseSyncSeqRef.current += 1;
+    if (activeSalePresenceRef.current) {
+      await markSalePresenceOfflineFs(
+        activeSalePresenceRef.current.uid,
+        activeSalePresenceRef.current.presenceId
+      ).catch(() => {});
+      activeSalePresenceRef.current = null;
+    }
+    clearSalePresenceSessionKeys();
+    if (wsSubRef.current) {
+      wsSubRef.current.unsubscribe();
+      wsSubRef.current = null;
+    }
+    saveOperatorEmailPref(firebaseUser.uid, '');
+    clearRolePref(firebaseUser.uid);
+    clearWorkspaceBootSnapshot(firebaseUser.uid);
+    await signOut(auth);
   };
 
   const activeSaleAvatarUrl = (() => {
@@ -1839,7 +2150,9 @@ export function App() {
                           {o.customerName} ({o.staffName}){o.time ? ` · ${o.time}` : ''}
                         </span>
                         <strong className="tabular-nums shrink-0">
-                          {formatMoney(o.totalAmount, currency)}
+                          {isWarehouseRole
+                            ? `${o.items.reduce((s, it) => s + it.quantity, 0)} ${t.dashboard.itemsUnit}`
+                            : formatMoney(o.totalAmount, currency)}
                         </strong>
                       </div>
                     ))}
@@ -1873,33 +2186,35 @@ export function App() {
                 )}
               </div>
 
-              {/* 3. Due Payment Customers */}
-              <div className="space-y-1.5">
-                <button
-                  type="button"
-                  onClick={() => navigatePage('due-payments')}
-                  className="text-xs font-semibold text-accent hover:underline cursor-pointer"
-                >
-                  {t.header.dueCustomerReport} ({duePaymentItems.length})
-                </button>
-                {duePaymentItems.length === 0 ? (
-                  <p className="text-xs text-muted">{t.header.noDueCustomers}</p>
-                ) : (
-                  duePaymentItems.slice(0, 4).map((d) => (
-                    <div
-                      key={d.id}
-                      className="flex justify-between text-xs py-1.5 border-b border-border/30"
-                    >
-                      <span className="truncate pr-2">
-                        {d.customerName} ({d.dueDate || t.common.unscheduled})
-                      </span>
-                      <strong className="tabular-nums shrink-0">
-                        {formatMoney(d.totalAmount, currency)}
-                      </strong>
-                    </div>
-                  ))
-                )}
-              </div>
+              {/* 3. Due Payment Customers (Hidden for Warehouse Manager) */}
+              {!isWarehouseRole && (
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => navigatePage('due-payments')}
+                    className="text-xs font-semibold text-accent hover:underline cursor-pointer"
+                  >
+                    {t.header.dueCustomerReport} ({duePaymentItems.length})
+                  </button>
+                  {duePaymentItems.length === 0 ? (
+                    <p className="text-xs text-muted">{t.header.noDueCustomers}</p>
+                  ) : (
+                    duePaymentItems.slice(0, 4).map((d) => (
+                      <div
+                        key={d.id}
+                        className="flex justify-between text-xs py-1.5 border-b border-border/30"
+                      >
+                        <span className="truncate pr-2">
+                          {d.customerName} ({d.dueDate || t.common.unscheduled})
+                        </span>
+                        <strong className="tabular-nums shrink-0">
+                          {formatMoney(d.totalAmount, currency)}
+                        </strong>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </Surface>
           </motion.div>
         </>
@@ -2021,8 +2336,8 @@ export function App() {
             })}
           </nav>
 
-          <div className="p-3.5 border-t border-border/60 text-xs space-y-2">
-            {!isSaleRole && adminSwitchOptions.length > 1 && (
+          <div className="p-3.5 border-t border-border/60 text-xs space-y-2.5">
+            {!isSaleRole && !isWarehouseRole && adminSwitchOptions.length > 1 && (
               <div className="space-y-1">
                 <label className="flex items-center gap-1 text-[11px] font-semibold text-muted">
                   <ArrowLeftRight className="h-3 w-3 text-primary" /> {t.common.switchAccount}
@@ -2054,8 +2369,10 @@ export function App() {
                   )}
                   {isNetworkOnline ? 'Realtime Sync' : 'Offline'}
                 </span>
-                <span className="font-semibold text-primary">
-                  {session.role === 'sale'
+                <span className="font-semibold text-primary truncate max-w-[130px]">
+                  {isWarehouseRole
+                    ? t.common.warehouseManager
+                    : session.role === 'sale'
                     ? `Sale: ${session.saleName}`
                     : activeAdminEmail === masterEmailLower
                     ? t.common.masterAdmin
@@ -2063,15 +2380,28 @@ export function App() {
                 </span>
               </div>
               <p className="truncate font-medium text-foreground" title={effectiveAdminEmail}>
-                {effectiveAdminEmail}
+                {isWarehouseRole
+                  ? `${session.warehouseName || session.displayName} · ${activeAdminLabel}`
+                  : effectiveAdminEmail}
               </p>
             </div>
+            {isWarehouseRole && (
+              <Button
+                type="button"
+                tone="danger"
+                onClick={handleSignOut}
+                className="w-full min-h-10 text-xs justify-center"
+              >
+                <LogOut className="h-3.5 w-3.5 shrink-0" />
+                <span>{t.common.signOut}</span>
+              </Button>
+            )}
           </div>
         </aside>
 
-        {/* Mobile Sidebar Drawer (Admin only; Sale uses clean 5-page bottom bar) */}
+        {/* Mobile Sidebar Drawer (Admin only; Sale uses 2x4 Home / 8-tab, Warehouse uses 3-tab bar) */}
         <AnimatePresence>
-          {!isSaleRole && mobileMenuOpen && (
+          {!isSaleRole && !isWarehouseRole && mobileMenuOpen && (
             <div className="fixed inset-0 z-50 md:hidden flex">
               <div
                 className="fixed inset-0 bg-foreground/55 backdrop-blur-[2px]"
@@ -2189,7 +2519,11 @@ export function App() {
                   type="button"
                   onClick={() =>
                     setActivePage(
-                      !isSaleRole && blockedPages.includes('about') ? 'dashboard' : 'about'
+                      isWarehouseRole
+                        ? 'products'
+                        : !isSaleRole && blockedPages.includes('about')
+                        ? 'dashboard'
+                        : 'about'
                     )
                   }
                   title="DR-POS App Profile"
@@ -2203,12 +2537,16 @@ export function App() {
                   />
                 </button>
               )}
-              <div className={isSaleRole ? 'min-w-0 flex-1' : 'hidden md:block min-w-0 flex-1'}>
+              <div
+                className={
+                  isSaleRole || isWarehouseRole ? 'min-w-0 flex-1' : 'hidden md:block min-w-0 flex-1'
+                }
+              >
                 <div className="flex items-center gap-2.5 lg:gap-3 min-w-0 flex-wrap">
                   <h1 className="text-sm sm:text-base md:text-lg font-semibold text-foreground truncate leading-tight">
                     {t.nav[activePage]}
                   </h1>
-                  {isDesktop && workspace.license?.expireAt && (
+                  {!isWarehouseRole && isDesktop && workspace.license?.expireAt && (
                     <LicenseCountdown
                       license={workspace.license}
                       variant="desktop-header"
@@ -2217,7 +2555,9 @@ export function App() {
                   )}
                 </div>
                 <p className="text-[11px] sm:text-xs text-muted truncate">
-                  {session.role === 'sale'
+                  {isWarehouseRole
+                    ? `${t.common.warehouseManager}: ${session.warehouseName || session.displayName} · ${activeAdminLabel}`
+                    : session.role === 'sale'
                     ? `Sale: ${session.saleName} · ${activeAdminLabel}`
                     : `${workspace.settings.businessName} · ${
                         activeAdminEmail === masterEmailLower ? t.common.masterAdmin : t.common.subAdmin
@@ -2317,7 +2657,7 @@ export function App() {
                     />
                   }
                 >
-            {activePage === 'dashboard' && (
+            {!isWarehouseRole && activePage === 'dashboard' && (
               <DashboardView
                 orders={visibleOrders}
                 products={visibleProducts}
@@ -2336,7 +2676,7 @@ export function App() {
               />
             )}
 
-            {activePage === 'pos' && scopedSettings && (
+            {!isWarehouseRole && activePage === 'pos' && scopedSettings && (
               <PosView
                 products={visibleProducts}
                 orders={visibleOrders}
@@ -2408,24 +2748,30 @@ export function App() {
                 settings={scopedSettings}
                 currency={currency}
                 hideWarehouse={hideWarehouse}
+                hidePrices={isWarehouseRole}
                 lockedSaleName={session.role === 'sale' ? session.saleName : undefined}
-                readOnly={isExpired}
+                readOnly={isWarehouseRole || isExpired}
                 hasMoreOrders={pagination.hasMoreOrders}
                 loadingMoreOrders={loadingMoreOrders}
                 onLoadMoreOrders={handleLoadMoreOrders}
-                onSearchOrdersServer={async (q) => {
-                  if (!wsSubRef.current) return;
-                  await wsSubRef.current.searchOrdersFromMongo({
-                    search: q,
-                    operatorEmail: effectiveAdminEmail,
-                    ...(isSaleRole && session.saleName
-                      ? { staffName: session.saleName.trim() }
-                      : {}),
-                    limit: 60,
-                  });
-                }}
+                onSearchOrdersServer={
+                  isWarehouseRole
+                    ? undefined
+                    : async (q) => {
+                        if (!wsSubRef.current) return;
+                        await wsSubRef.current.searchOrdersFromMongo({
+                          search: q,
+                          operatorEmail: effectiveAdminEmail,
+                          ...(isSaleRole && session.saleName
+                            ? { staffName: session.saleName.trim() }
+                            : {}),
+                          limit: 60,
+                        });
+                      }
+                }
                 onZoomImage={(url, title) => setZoomState({ url, title })}
                 onUpdateOrder={async (id, payload) => {
+                  if (isWarehouseRole) return false;
                   const targetOrder = visibleOrders.find((o) => o.id === id);
                   const ok = await runFsMutation(() =>
                     updateOrderFs(
@@ -2471,6 +2817,7 @@ export function App() {
                   return ok;
                 }}
                 onDeleteOrder={async (id) => {
+                  if (isWarehouseRole) return false;
                   const targetOrder = visibleOrders.find((o) => o.id === id);
                   const ok = await runFsMutation(() => deleteOrderFs(firebaseUser.uid, id));
                   if (ok) {
@@ -2489,6 +2836,7 @@ export function App() {
                   return ok;
                 }}
                 onDeleteAllOrders={async (ids, options) => {
+                  if (isWarehouseRole) return false;
                   const deleteScope = options?.deleteAllInScope
                     ? {
                         operatorEmail: effectiveAdminEmail,
@@ -2519,10 +2867,11 @@ export function App() {
                 settings={scopedSettings}
                 currency={currency}
                 hideWarehouse={hideWarehouse}
-                readOnly={isSaleRole || isExpired}
+                hidePrices={isWarehouseRole}
+                readOnly={isWarehouseRole || isSaleRole || isExpired}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
                 onSaveProduct={async (payload: Partial<Product>) => {
-                  if (isSaleRole || isExpired) return false;
+                  if (isWarehouseRole || isSaleRole || isExpired) return false;
                   return runFsMutation(() =>
                     saveProductFs(
                       firebaseUser.uid,
@@ -2534,23 +2883,23 @@ export function App() {
                   );
                 }}
                 onUpdateProductImage={async (productId, imageUrl) => {
-                  if (isSaleRole || isExpired) return false;
+                  if (isWarehouseRole || isSaleRole || isExpired) return false;
                   return runFsMutation(() =>
                     updateProductImageFs(firebaseUser.uid, productId, imageUrl)
                   );
                 }}
                 onDeleteProduct={async (id) => {
-                  if (isSaleRole || isExpired) return false;
+                  if (isWarehouseRole || isSaleRole || isExpired) return false;
                   return runFsMutation(() => deleteProductFs(firebaseUser.uid, id));
                 }}
                 onReorderProducts={async (orderedIds) => {
-                  if (isSaleRole || isExpired) return;
+                  if (isWarehouseRole || isSaleRole || isExpired) return;
                   await runFsMutation(() => reorderProductsFs(firebaseUser.uid, orderedIds));
                 }}
               />
             )}
 
-            {!isSaleRole && activePage === 'track-staff' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'track-staff' && (
               <TrackStaffView
                 orders={visibleOrders}
                 staff={visibleStaff}
@@ -2558,11 +2907,11 @@ export function App() {
               />
             )}
 
-            {!isSaleRole && activePage === 'analytics' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'analytics' && (
               <AnalyticsView orders={visibleOrders} currency={currency} />
             )}
 
-            {!isSaleRole && activePage === 'problem-customers' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'problem-customers' && (
               <ProblemCustomersView
                 problemCustomers={problemCustomers}
                 orders={visibleOrders}
@@ -2576,7 +2925,7 @@ export function App() {
               />
             )}
 
-            {activePage === 'due-payments' && (
+            {!isWarehouseRole && activePage === 'due-payments' && (
               <DuePaymentsView
                 orders={visibleOrders}
                 currency={currency}
@@ -2602,14 +2951,14 @@ export function App() {
               />
             )}
 
-            {!isSaleRole && activePage === 'staff-info' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'staff-info' && (
               <StaffInfoView
                 staff={visibleStaff}
                 onZoomImage={(url, title) => setZoomState({ url, title })}
               />
             )}
 
-            {!isSaleRole && activePage === 'price-record' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'price-record' && (
               <PriceRecordView
                 records={visiblePriceRecords}
                 currency={currency}
@@ -2631,7 +2980,7 @@ export function App() {
               />
             )}
 
-            {!isSaleRole && activePage === 'stock-log' && (
+            {!isSaleRole && !isWarehouseRole && activePage === 'stock-log' && (
               <StockLogView
                 stockLogs={visibleStockLogs}
                 products={visibleProducts}
@@ -2649,7 +2998,7 @@ export function App() {
               />
             )}
 
-            {activePage === 'settings' && scopedSettings && (
+            {!isWarehouseRole && activePage === 'settings' && scopedSettings && (
               <SettingsView
                 session={{
                   ...session,
@@ -2819,30 +3168,148 @@ export function App() {
                     };
                   }
                 }}
+                onCreateWarehouseManager={async (payload) => {
+                  if (!isMasterAdmin || isExpired || !firebaseUser?.uid) {
+                    return {
+                      ok: false,
+                      error: 'មានតែ Master Admin ដែលមានសុពលភាពប៉ុណ្ណោះដែលអាចបង្កើតបាន។',
+                    };
+                  }
+                  const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
+                  const newProfile: WarehouseManagerProfile = {
+                    id: `wh-${payload.uid}`,
+                    uid: payload.uid,
+                    name: payload.name.trim(),
+                    email: payload.email.trim().toLowerCase(),
+                    assignedAdminEmail:
+                      (payload.assignedAdminEmail || masterEmailLower).trim().toLowerCase() ||
+                      masterEmailLower,
+                    active: true,
+                    createdAt: new Date().toISOString(),
+                  };
+                  const nextProfiles = [...(baseSettings.warehouseProfiles || []), newProfile];
+                  const res = await runFsMutationWithError(async () => {
+                    await saveWarehouseMemberDocsFs(
+                      firebaseUser.uid,
+                      masterEmailLower,
+                      newProfile
+                    );
+                    try {
+                      await updateSettingsFs(firebaseUser.uid, baseSettings, {
+                        warehouseProfiles: nextProfiles,
+                      });
+                    } catch (settingsErr) {
+                      await deleteWarehouseMemberDocsFs(firebaseUser.uid, newProfile.uid).catch(
+                        () => {}
+                      );
+                      throw settingsErr;
+                    }
+                    await syncWarehouseUidsInFirestore(
+                      firebaseUser.uid,
+                      nextProfiles,
+                      masterEmailLower
+                    );
+                  });
+                  if (res.ok && latestWorkspaceRef.current) {
+                    latestWorkspaceRef.current = {
+                      ...latestWorkspaceRef.current,
+                      settings: {
+                        ...latestWorkspaceRef.current.settings,
+                        warehouseProfiles: nextProfiles,
+                      },
+                    };
+                    void revalidateLicenseInBackground(true);
+                  }
+                  return res;
+                }}
+                onUpdateWarehouseManager={async (id, patch) => {
+                  if (!isMasterAdmin || isExpired || !firebaseUser?.uid) {
+                    return { ok: false, error: 'មានតែ Master Admin ប៉ុណ្ណោះដែលអាចកែប្រែបាន។' };
+                  }
+                  const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
+                  const prevList = baseSettings.warehouseProfiles || [];
+                  let updatedTarget: WarehouseManagerProfile | null = null;
+                  const nextProfiles = prevList.map((wp) => {
+                    if (wp.id !== id && wp.uid !== id) return wp;
+                    updatedTarget = {
+                      ...wp,
+                      ...(patch.assignedAdminEmail !== undefined
+                        ? {
+                            assignedAdminEmail:
+                              patch.assignedAdminEmail.trim().toLowerCase() || masterEmailLower,
+                          }
+                        : {}),
+                      ...(patch.active !== undefined ? { active: patch.active } : {}),
+                      updatedAt: new Date().toISOString(),
+                    };
+                    return updatedTarget;
+                  });
+                  if (!updatedTarget) return { ok: false, error: 'រកមិនឃើញគណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះទេ។' };
+                  const targetRef = updatedTarget;
+                  const res = await runFsMutationWithError(async () => {
+                    await saveWarehouseMemberDocsFs(
+                      firebaseUser.uid,
+                      masterEmailLower,
+                      targetRef
+                    );
+                    await updateSettingsFs(firebaseUser.uid, baseSettings, {
+                      warehouseProfiles: nextProfiles,
+                    });
+                    await syncWarehouseUidsInFirestore(
+                      firebaseUser.uid,
+                      nextProfiles,
+                      masterEmailLower
+                    );
+                  });
+                  if (res.ok && latestWorkspaceRef.current) {
+                    latestWorkspaceRef.current = {
+                      ...latestWorkspaceRef.current,
+                      settings: {
+                        ...latestWorkspaceRef.current.settings,
+                        warehouseProfiles: nextProfiles,
+                      },
+                    };
+                    void revalidateLicenseInBackground(true);
+                  }
+                  return res;
+                }}
+                onDeleteWarehouseManager={async (profile) => {
+                  if (!isMasterAdmin || isExpired || !firebaseUser?.uid) {
+                    return { ok: false, error: 'មានតែ Master Admin ប៉ុណ្ណោះដែលអាចលុបបាន។' };
+                  }
+                  const baseSettings = latestWorkspaceRef.current?.settings || workspace.settings;
+                  const nextProfiles = (baseSettings.warehouseProfiles || []).filter(
+                    (wp) => wp.id !== profile.id && wp.uid !== profile.uid
+                  );
+                  const res = await runFsMutationWithError(async () => {
+                    await deleteWarehouseMemberDocsFs(firebaseUser.uid, profile.uid);
+                    await updateSettingsFs(firebaseUser.uid, baseSettings, {
+                      warehouseProfiles: nextProfiles,
+                    });
+                    await syncWarehouseUidsInFirestore(
+                      firebaseUser.uid,
+                      nextProfiles,
+                      masterEmailLower
+                    );
+                  });
+                  if (res.ok && latestWorkspaceRef.current) {
+                    latestWorkspaceRef.current = {
+                      ...latestWorkspaceRef.current,
+                      settings: {
+                        ...latestWorkspaceRef.current.settings,
+                        warehouseProfiles: nextProfiles,
+                      },
+                    };
+                    void revalidateLicenseInBackground(true);
+                  }
+                  return res;
+                }}
                 onSwitchOperatorEmail={async (operatorEmail) => {
                   handleQuickSwitchAdmin(operatorEmail);
                 }}
-                onLogout={async () => {
-                  licenseSyncSeqRef.current += 1;
-                  if (activeSalePresenceRef.current) {
-                    await markSalePresenceOfflineFs(
-                      activeSalePresenceRef.current.uid,
-                      activeSalePresenceRef.current.presenceId
-                    ).catch(() => {});
-                    activeSalePresenceRef.current = null;
-                  }
-                  clearSalePresenceSessionKeys();
-                  if (wsSubRef.current) {
-                    wsSubRef.current.unsubscribe();
-                    wsSubRef.current = null;
-                  }
-                  saveOperatorEmailPref(firebaseUser.uid, '');
-                  clearRolePref(firebaseUser.uid);
-                  clearWorkspaceBootSnapshot(firebaseUser.uid);
-                  await signOut(auth);
-                }}
+                onLogout={handleSignOut}
                 onDeleteAccount={async () => {
-                  if (isSaleRole || activeAdminEmail !== masterEmailLower || deletingAccountRef.current) {
+                  if (isSaleRole || isWarehouseRole || activeAdminEmail !== masterEmailLower || deletingAccountRef.current) {
                     return;
                   }
                   setApiError('');
@@ -2862,6 +3329,9 @@ export function App() {
                   const subAdminEmails = (workspace.settings.adminProfiles || [])
                     .map((a) => (a.email || '').trim().toLowerCase())
                     .filter((e) => e.includes('@') && e !== masterEmail);
+                  const warehouseEmails = (workspace.settings.warehouseProfiles || [])
+                    .map((w) => (w.email || '').trim().toLowerCase())
+                    .filter((e) => e.includes('@') && e !== masterEmail);
 
                   deletingAccountRef.current = true;
                   licenseSyncSeqRef.current += 1;
@@ -2869,6 +3339,7 @@ export function App() {
                     await deleteAccountWorkspaceFs(firebaseUser.uid, {
                       masterEmail,
                       subAdminEmails,
+                      warehouseEmails,
                     });
                     if (wsSubRef.current) {
                       wsSubRef.current.unsubscribe();
@@ -2899,12 +3370,13 @@ export function App() {
               />
             )}
 
-            {(isSaleRole || !blockedPages.includes('privacy-policy')) &&
+            {!isWarehouseRole &&
+              (isSaleRole || !blockedPages.includes('privacy-policy')) &&
               activePage === 'privacy-policy' && <PrivacyPolicyView />}
 
-            {(isSaleRole || !blockedPages.includes('about')) && activePage === 'about' && (
-              <AboutView />
-            )}
+            {!isWarehouseRole &&
+              (isSaleRole || !blockedPages.includes('about')) &&
+              activePage === 'about' && <AboutView />}
                 </Suspense>
               </>
             )}
@@ -2922,14 +3394,20 @@ export function App() {
         >
           <div
             className={`grid ${
-              isSaleRole ? 'grid-cols-8 max-w-3xl mx-auto' : 'grid-cols-5'
+              isWarehouseRole
+                ? 'grid-cols-3'
+                : isSaleRole
+                ? 'grid-cols-8 max-w-3xl mx-auto'
+                : 'grid-cols-5'
             } items-stretch h-12 sm:h-14 px-0.5 sm:px-1`}
           >
-            {(isSaleRole
+            {(isWarehouseRole
+              ? WAREHOUSE_ALLOWED_PAGES
+              : isSaleRole
               ? SALE_ALLOWED_PAGES
               : (['dashboard', 'pos', 'orders', 'products'] as PageId[])
             ).map((pid) => {
-              const allowed = isSaleRole || !blockedPages.includes(pid);
+              const allowed = isWarehouseRole || isSaleRole || !blockedPages.includes(pid);
               if (!allowed) {
                 return <div key={pid} aria-hidden="true" />;
               }
@@ -2977,7 +3455,22 @@ export function App() {
               );
             })}
 
-            {!isSaleRole && (() => {
+            {isWarehouseRole && (
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="relative flex flex-col items-center justify-center gap-0.5 h-full w-full min-w-0 px-0.5 pt-1 pb-0.5 select-none text-danger hover:text-danger/80 transition-colors cursor-pointer"
+              >
+                <span className="inline-flex h-[18px] w-[18px] sm:h-5 sm:w-5 items-center justify-center shrink-0">
+                  <LogOut className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
+                </span>
+                <span className="block w-full text-center h-[12px] sm:h-[13px] leading-[12px] sm:leading-[13px] text-[9.5px] sm:text-[10.5px] font-medium truncate whitespace-nowrap">
+                  {t.common.signOut}
+                </span>
+              </button>
+            )}
+
+            {!isSaleRole && !isWarehouseRole && (() => {
               const isMenuActive = !['dashboard', 'pos', 'orders', 'products'].includes(activePage);
               return (
                 <button

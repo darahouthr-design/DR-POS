@@ -537,7 +537,8 @@ export async function tryBluetoothPrintKoreanReceipt(
   order: Order,
   paperWidth: '58mm' | '70mm' | '80mm',
   currency: CurrencyCode,
-  language: LanguageCode = 'kh'
+  language: LanguageCode = 'kh',
+  options?: { hidePrices?: boolean }
 ): Promise<{ sentViaBluetooth: boolean; message: string }> {
   const btMsgs: Record<
     LanguageCode,
@@ -625,7 +626,7 @@ export async function tryBluetoothPrintKoreanReceipt(
       `매장 / 그룹: ${order.storeName || '-'} / ${order.groupName || '-'}`,
       `담당직원: ${order.staffName || '-'}`,
       `--------------------------------`,
-      `총 합계금액: ${formatMoney(order.totalAmount, currency)}`,
+      ...(options?.hidePrices ? [] : [`총 합계금액: ${formatMoney(order.totalAmount, currency)}`]),
       `결제상태: ${order.paymentStatus === 'paid' ? '결제완료' : '미결제'}`,
       `--------------------------------`,
       `이용해 주셔서 감사합니다 · DR-POS`,
@@ -714,8 +715,10 @@ export async function downloadOrderInvoiceAsPng(
   order: Order,
   currency: CurrencyCode,
   paperWidth: '58mm' | '70mm' | '80mm' = '80mm',
-  bluetoothOnly = false
+  bluetoothOnly = false,
+  options?: { hidePrices?: boolean }
 ): Promise<void> {
+  const hidePrices = Boolean(options?.hidePrices);
   if (typeof document !== 'undefined' && 'fonts' in document) {
     try {
       await document.fonts.ready;
@@ -821,17 +824,19 @@ export async function downloadOrderInvoiceAsPng(
         ctx.font = `700 11px ${fontFamily}`;
         ctx.textAlign = 'left';
         ctx.fillText('품목명 / 수량', padding, y);
-        ctx.textAlign = 'right';
-        ctx.fillText('금액', width - padding, y);
+        if (!hidePrices) {
+          ctx.textAlign = 'right';
+          ctx.fillText('금액', width - padding, y);
+        }
       }
       y += 18;
 
       // Items List (wraps long product names cleanly across lines)
       for (const item of order.items) {
-        const priceText = formatMoney(item.unitPrice * item.quantity, currency);
+        const priceText = hidePrices ? '' : formatMoney(item.unitPrice * item.quantity, currency);
         ctx.font = `500 11px ${fontFamily}`;
-        const priceWidth = ctx.measureText(priceText).width;
-        const maxTitleWidth = Math.max(88, contentWidth - priceWidth - 10);
+        const priceWidth = hidePrices ? 0 : ctx.measureText(priceText).width;
+        const maxTitleWidth = hidePrices ? contentWidth : Math.max(88, contentWidth - priceWidth - 10);
 
         ctx.font = `400 11px ${fontFamily}`;
         const titleLines = wrapCanvasText(
@@ -848,9 +853,11 @@ export async function downloadOrderInvoiceAsPng(
             ctx.fillText(line, padding, y + idx * 16);
           });
 
-          ctx.font = `500 11px ${fontFamily}`;
-          ctx.textAlign = 'right';
-          ctx.fillText(priceText, width - padding, y);
+          if (!hidePrices) {
+            ctx.font = `500 11px ${fontFamily}`;
+            ctx.textAlign = 'right';
+            ctx.fillText(priceText, width - padding, y);
+          }
         }
         y += titleLines.length * 16 + 3;
       }
@@ -861,7 +868,7 @@ export async function downloadOrderInvoiceAsPng(
     y += 18;
 
     // Totals & Payment Status (exact match to Bluetooth Korean Receipt)
-    if (!bluetoothOnly && (order.discountAmount || 0) > 0) {
+    if (!hidePrices && !bluetoothOnly && (order.discountAmount || 0) > 0) {
       const subtotal =
         order.subtotalAmount ??
         order.items.reduce((s, it) => s + it.unitPrice * it.quantity, 0);
@@ -891,15 +898,17 @@ export async function downloadOrderInvoiceAsPng(
       y += 19;
     }
 
-    if (draw) {
-      ctx.fillStyle = '#000000';
-      ctx.font = `700 14px ${fontFamily}`;
-      ctx.textAlign = 'left';
-      ctx.fillText('총 합계금액:', padding, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(order.totalAmount, currency), width - padding, y);
+    if (!hidePrices) {
+      if (draw) {
+        ctx.fillStyle = '#000000';
+        ctx.font = `700 14px ${fontFamily}`;
+        ctx.textAlign = 'left';
+        ctx.fillText('총 합계금액:', padding, y);
+        ctx.textAlign = 'right';
+        ctx.fillText(formatMoney(order.totalAmount, currency), width - padding, y);
+      }
+      y += 20;
     }
-    y += 20;
 
     if (draw) {
       ctx.fillStyle = '#000000';

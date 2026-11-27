@@ -399,6 +399,7 @@ async function startServer() {
       seedMemoryVaultFallback,
     },
     {
+      resolveEmailDeliveryConfig,
       runDeveloperIssueMasterOtp,
       runGetDeveloperEmailConfig,
       runRequestMasterOtp,
@@ -433,6 +434,7 @@ async function startServer() {
     otpChallenges: db.developer?.otpChallenges || {},
     updatedAt: '',
   });
+  void resolveEmailDeliveryConfig().catch(() => {});
 
   const app = express();
   const server = http.createServer(app);

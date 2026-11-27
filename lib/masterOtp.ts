@@ -169,6 +169,7 @@ export type EmailDeliveryMode = 'gmail' | 'smtp' | 'resend';
 
 export interface ResolvedEmailDeliveryConfig {
   source: 'console' | 'env';
+  origin?: 'console' | 'env-mirror';
   mode: EmailDeliveryMode;
   gmailUser?: string;
   gmailAppPassword?: string;
@@ -184,6 +185,8 @@ export interface ResolvedEmailDeliveryConfig {
 interface StoredEncryptedEmailDoc {
   secretId: string;
   payloadEnc: string;
+  origin?: 'console' | 'env-mirror';
+  envDigest?: string;
   updatedAt: string;
 }
 
@@ -191,11 +194,14 @@ const EMAIL_SECRET_COLLECTION = 'drpos_server_secrets';
 const EMAIL_SECRET_DOC_ID = 'master_otp_email_delivery_v1';
 const LOCAL_EMAIL_SECRET_FILE = path.resolve(process.cwd(), 'data', 'email_delivery.enc.json');
 const EMAIL_ENC_PREFIX = 'gcm1:';
+const EMAIL_CACHE_HIT_TTL_MS = 60 * 1000;
+const EMAIL_CACHE_MISS_TTL_MS = 3 * 1000;
 
-let cachedEmailConfig: { loaded: boolean; value: ResolvedEmailDeliveryConfig | null } = {
-  loaded: false,
+let cachedEmailConfig: { expiresAt: number; value: ResolvedEmailDeliveryConfig | null } = {
+  expiresAt: 0,
   value: null,
 };
+let lastMirroredEnvDigest = '';
 
 function getEmailSecretEncryptionKey(): Buffer {
   const secret = String(
@@ -230,13 +236,20 @@ function decryptEmailPayload(encoded: string): string {
   }
 }
 
-function parseSavedEmailConfig(rawJson: string): ResolvedEmailDeliveryConfig | null {
+function parseSavedEmailConfig(
+  rawJson: string,
+  docOrigin?: 'console' | 'env-mirror'
+): ResolvedEmailDeliveryConfig | null {
   if (!rawJson) return null;
   try {
     const parsed = JSON.parse(rawJson) as Partial<ResolvedEmailDeliveryConfig>;
+    const origin: 'console' | 'env-mirror' =
+      parsed.origin === 'env-mirror' || docOrigin === 'env-mirror' ? 'env-mirror' : 'console';
+    const source: 'console' | 'env' = origin === 'env-mirror' ? 'env' : 'console';
     if (parsed.mode === 'gmail' && parsed.gmailUser && parsed.gmailAppPassword) {
       return {
-        source: 'console',
+        source,
+        origin,
         mode: 'gmail',
         gmailUser: normalizeEmail(parsed.gmailUser),
         gmailAppPassword: String(parsed.gmailAppPassword).replace(/\s+/g, ''),
@@ -246,7 +259,8 @@ function parseSavedEmailConfig(rawJson: string): ResolvedEmailDeliveryConfig | n
     }
     if (parsed.mode === 'smtp' && parsed.smtpHost && parsed.smtpUser && parsed.smtpPass) {
       return {
-        source: 'console',
+        source,
+        origin,
         mode: 'smtp',
         smtpHost: String(parsed.smtpHost).trim(),
         smtpPort: Number(parsed.smtpPort) || 587,
@@ -258,7 +272,8 @@ function parseSavedEmailConfig(rawJson: string): ResolvedEmailDeliveryConfig | n
     }
     if (parsed.mode === 'resend' && parsed.resendApiKey && parsed.fromEmail) {
       return {
-        source: 'console',
+        source,
+        origin,
         mode: 'resend',
         resendApiKey: String(parsed.resendApiKey).trim(),
         fromEmail: String(parsed.fromEmail).trim(),
@@ -311,8 +326,15 @@ function writeLocalEncryptedEmailDoc(doc: StoredEncryptedEmailDoc | null): boole
   }
 }
 
-async function readConsoleEmailConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
-  if (cachedEmailConfig.loaded) {
+function setEmailConfigCache(value: ResolvedEmailDeliveryConfig | null): void {
+  cachedEmailConfig = {
+    value,
+    expiresAt: Date.now() + (value ? EMAIL_CACHE_HIT_TTL_MS : EMAIL_CACHE_MISS_TTL_MS),
+  };
+}
+
+async function readStoredEmailConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
+  if (Date.now() < cachedEmailConfig.expiresAt) {
     return cachedEmailConfig.value;
   }
 
@@ -327,68 +349,153 @@ async function readConsoleEmailConfig(): Promise<ResolvedEmailDeliveryConfig | n
           latestDoc = {
             secretId: EMAIL_SECRET_DOC_ID,
             payloadEnc: found.payloadEnc,
+            origin: found.origin === 'env-mirror' ? 'env-mirror' : 'console',
+            envDigest: typeof found.envDigest === 'string' ? found.envDigest : '',
             updatedAt: String(found.updatedAt || ''),
           };
         }
       }
     }
   } catch {
-    // Continue with local file fallback
+    // Continue with local file fallback; short miss TTL allows fast retry
   }
 
-  const parsed = latestDoc ? parseSavedEmailConfig(decryptEmailPayload(latestDoc.payloadEnc)) : null;
-  cachedEmailConfig = { loaded: true, value: parsed };
+  const parsed = latestDoc
+    ? parseSavedEmailConfig(decryptEmailPayload(latestDoc.payloadEnc), latestDoc.origin)
+    : null;
+  setEmailConfigCache(parsed);
   return parsed;
 }
 
+function cleanEnvValue(raw: unknown): string {
+  const s = String(raw || '').replace(/\r/g, '').trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
+  ) {
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
 function readEnvEmailConfig(): ResolvedEmailDeliveryConfig | null {
-  const smtpHost = String(process.env.SMTP_HOST || '').trim();
-  const smtpUser = String(process.env.SMTP_USER || '').trim();
-  let smtpPass = String(process.env.SMTP_PASS || '').trim();
+  let smtpHost = cleanEnvValue(process.env.SMTP_HOST);
+  const smtpUser = cleanEnvValue(process.env.SMTP_USER);
+  let smtpPass = cleanEnvValue(process.env.SMTP_PASS);
+  const fromEmail = cleanEnvValue(process.env.OTP_FROM_EMAIL);
+
+  if (!smtpHost && smtpUser.toLowerCase().endsWith('@gmail.com') && smtpPass) {
+    smtpHost = 'smtp.gmail.com';
+  }
   if (smtpHost.toLowerCase().includes('gmail') && /^[a-z0-9]{4}(?:\s+[a-z0-9]{4}){3}$/i.test(smtpPass)) {
     smtpPass = smtpPass.replace(/\s+/g, '');
   }
   if (smtpHost && smtpUser && smtpPass) {
     return {
       source: 'env',
+      origin: 'env-mirror',
       mode: 'smtp',
       smtpHost,
-      smtpPort: Number(process.env.SMTP_PORT || 587) || 587,
+      smtpPort: Number(cleanEnvValue(process.env.SMTP_PORT) || 587) || 587,
       smtpUser,
       smtpPass,
-      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim(),
+      fromEmail,
     };
   }
 
-  const gmailUser = normalizeEmail(process.env.GMAIL_USER || '');
-  const gmailPass = String(process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, '').trim();
+  const gmailUser = normalizeEmail(
+    cleanEnvValue(process.env.GMAIL_USER) ||
+      (smtpUser.includes('@') ? smtpUser : '') ||
+      (fromEmail.includes('@') && !fromEmail.includes('<') ? fromEmail : '')
+  );
+  const gmailPass = cleanEnvValue(process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS).replace(
+    /\s+/g,
+    ''
+  );
   if (gmailUser && gmailPass) {
     return {
       source: 'env',
+      origin: 'env-mirror',
       mode: 'gmail',
       gmailUser,
       gmailAppPassword: gmailPass,
-      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim(),
+      fromEmail,
     };
   }
 
-  const resendKey = String(process.env.RESEND_API_KEY || '').trim();
+  const resendKey = cleanEnvValue(process.env.RESEND_API_KEY);
   if (resendKey) {
     return {
       source: 'env',
+      origin: 'env-mirror',
       mode: 'resend',
       resendApiKey: resendKey,
-      fromEmail: String(process.env.OTP_FROM_EMAIL || '').trim() || 'DR-POS <onboarding@resend.dev>',
+      fromEmail: fromEmail || 'DR-POS <onboarding@resend.dev>',
     };
   }
 
   return null;
 }
 
+async function mirrorEnvConfigToMongoIfNeeded(envCfg: ResolvedEmailDeliveryConfig): Promise<void> {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify({ ...envCfg, updatedAt: '' }))
+    .digest('hex')
+    .slice(0, 24);
+  if (digest === lastMirroredEnvDigest) return;
+  lastMirroredEnvDigest = digest;
+  try {
+    const db = await getMongoDb();
+    if (!db) return;
+    const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
+    const existing = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
+    if (existing && existing.origin !== 'env-mirror') {
+      // Respect explicit Console config stored by Developer
+      return;
+    }
+    if (existing && existing.envDigest === digest) {
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const mirrorPayload: ResolvedEmailDeliveryConfig = {
+      ...envCfg,
+      source: 'env',
+      origin: 'env-mirror',
+      updatedAt: nowIso,
+    };
+    await col.updateOne(
+      { secretId: EMAIL_SECRET_DOC_ID },
+      {
+        $set: {
+          secretId: EMAIL_SECRET_DOC_ID,
+          origin: 'env-mirror',
+          envDigest: digest,
+          payloadEnc: encryptEmailPayload(JSON.stringify(mirrorPayload)),
+          updatedAt: nowIso,
+        },
+      },
+      { upsert: true }
+    );
+  } catch {
+    // Non-fatal: env mirror is best-effort for multi-instance deployments
+  }
+}
+
 export async function resolveEmailDeliveryConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
-  const fromConsole = await readConsoleEmailConfig();
-  if (fromConsole) return fromConsole;
-  return readEnvEmailConfig();
+  const stored = await readStoredEmailConfig();
+  if (stored && stored.origin !== 'env-mirror') {
+    return stored;
+  }
+  const envCfg = readEnvEmailConfig();
+  if (envCfg) {
+    void mirrorEnvConfigToMongoIfNeeded(envCfg);
+    return envCfg;
+  }
+  if (stored) {
+    return stored;
+  }
+  return null;
 }
 
 export async function isEmailDeliveryConfigured(): Promise<boolean> {
@@ -652,7 +759,8 @@ export async function runSaveDeveloperEmailConfig(
       // Ignore Mongo clear errors
     }
     const localCleared = writeLocalEncryptedEmailDoc(null);
-    cachedEmailConfig = { loaded: true, value: null };
+    cachedEmailConfig = { expiresAt: 0, value: null };
+    lastMirroredEnvDigest = '';
     const envCfg = await resolveEmailDeliveryConfig();
     return {
       status: 200,
@@ -686,6 +794,7 @@ export async function runSaveDeveloperEmailConfig(
     }
     candidate = {
       source: 'console',
+      origin: 'console',
       mode: 'gmail',
       gmailUser,
       gmailAppPassword,
@@ -696,12 +805,16 @@ export async function runSaveDeveloperEmailConfig(
     const smtpHost = String(payload?.smtpHost || '').trim();
     const smtpPort = Number(payload?.smtpPort || 587) || 587;
     const smtpUser = String(payload?.smtpUser || '').trim();
-    const smtpPass = String(payload?.smtpPass || '').trim();
+    let smtpPass = String(payload?.smtpPass || '').trim();
+    if (smtpHost.toLowerCase().includes('gmail') && /^[a-z0-9]{4}(?:\s+[a-z0-9]{4}){3}$/i.test(smtpPass)) {
+      smtpPass = smtpPass.replace(/\s+/g, '');
+    }
     if (!smtpHost || !smtpUser || !smtpPass) {
       return { status: 400, body: { error: 'សូមបំពេញ SMTP Host, SMTP Username និង SMTP Password អោយបានគ្រប់គ្រាន់។' } };
     }
     candidate = {
       source: 'console',
+      origin: 'console',
       mode: 'smtp',
       smtpHost,
       smtpPort,
@@ -717,6 +830,7 @@ export async function runSaveDeveloperEmailConfig(
     }
     candidate = {
       source: 'console',
+      origin: 'console',
       mode: 'resend',
       resendApiKey,
       fromEmail: fromEmail || 'DR-POS <onboarding@resend.dev>',
@@ -764,6 +878,7 @@ export async function runSaveDeveloperEmailConfig(
 
   const encryptedDoc: StoredEncryptedEmailDoc = {
     secretId: EMAIL_SECRET_DOC_ID,
+    origin: 'console',
     payloadEnc: encryptEmailPayload(JSON.stringify(candidate)),
     updatedAt: nowIso,
   };
@@ -785,7 +900,7 @@ export async function runSaveDeveloperEmailConfig(
     persistedIn = 'local-file';
   }
 
-  cachedEmailConfig = { loaded: true, value: candidate };
+  setEmailConfigCache(candidate);
 
   return {
     status: 200,
@@ -819,6 +934,16 @@ export async function runRequestMasterOtp(
       body: {
         error:
           'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
+      },
+    };
+  }
+
+  if (state.warehouseEmails?.[email]) {
+    return {
+      status: 403,
+      body: {
+        error:
+          'គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
       },
     };
   }
@@ -970,6 +1095,16 @@ export async function runDeveloperIssueMasterOtp(
     };
   }
 
+  if (state.warehouseEmails?.[email]) {
+    return {
+      status: 403,
+      body: {
+        error:
+          'Gmail នេះជាអ្នកគ្រប់គ្រងឃ្លាំងនៅក្នុង Setting មិនអាចបង្កើតគណនី Master Admin បានទេ។',
+      },
+    };
+  }
+
   if (state.masterAdmins[email]) {
     return {
       status: 409,
@@ -1069,6 +1204,16 @@ export async function runVerifyMasterOtp(
       body: {
         error:
           'គណនី Gmail នេះត្រូវបានបង្កើតជា Admin រង (Admin 2, 3...) នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
+      },
+    };
+  }
+
+  if (state.warehouseEmails?.[email]) {
+    return {
+      status: 403,
+      body: {
+        error:
+          'គណនី Gmail នេះត្រូវបានបង្កើតជា «អ្នកគ្រប់គ្រងឃ្លាំង» នៅក្នុង Settings មិនអាចបង្កើត Master Admin បានទេ!',
       },
     };
   }
