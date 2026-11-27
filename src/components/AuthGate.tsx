@@ -972,6 +972,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       const storageNote =
         saved.persistedIn === 'memory'
           ? ' (ចំណាំ៖ រក្សាទុកក្នុង RAM បណ្ដោះអាសន្ន — សូមកំណត់ Env Vars លើ Host ប្រសិនបើត្រូវការរក្សាទុកជាអចិន្ត្រៃយ៍)'
+          : saved.persistedIn === 'cloud-vault'
+          ? ' (បានរក្សាទុកដោយសុវត្ថិភាពក្នុង Cloud Vault សម្រាប់គ្រប់ម៉ាស៊ីន និង Vercel!)'
           : '';
       const testNote = saved.testedEmail
         ? ` និងបានផ្ញើ Email សាកល្បងទៅ ${saved.testedEmail} ជោគជ័យ!`

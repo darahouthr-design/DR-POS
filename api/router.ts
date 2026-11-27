@@ -25,6 +25,7 @@ import {
   runResolveDeveloperPasswordLogin,
   runSyncMasterPassword,
 } from '../lib/masterCredentials.js';
+import { runWarehouseFeed, runWarehouseSync } from '../lib/warehouseFeed.js';
 
 const MAX_PROBE_BYTES = 512 * 1024;
 const MIN_PROBE_BYTES = 32 * 1024;
@@ -120,6 +121,20 @@ export default async function handler(
       return;
     }
 
+    if (route === 'warehouse/feed') {
+      if (method !== 'GET') {
+        sendJson(res, 405, { error: 'Method Not Allowed' });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      const result = await runWarehouseFeed(headers, {
+        sinceVersion: url.searchParams.get('sinceVersion') || undefined,
+        force: url.searchParams.get('force') || undefined,
+      });
+      sendJson(res, result.status, result.body);
+      return;
+    }
+
     // --- POST Routes ---
     if (method !== 'POST') {
       sendJson(res, 405, { error: 'Method Not Allowed' });
@@ -197,6 +212,12 @@ export default async function handler(
       }
       case 'developer/master-admins/password': {
         const result = await runDeveloperUpdateMasterPassword(headers, body);
+        sendJson(res, result.status, result.body);
+        return;
+      }
+      case 'warehouse/sync': {
+        res.setHeader('Cache-Control', 'no-store');
+        const result = await runWarehouseSync(headers, body);
         sendJson(res, result.status, result.body);
         return;
       }

@@ -25,14 +25,26 @@
       }
     },
     "otpChallenges": {
-      "e3733783c6eea5f2ac5874b8": {
-        "emailHash": "e3733783c6eea5f2ac5874b8",
-        "maskedEmail": "vo***8@gmail.com",
-        "jti": "3bbe36da-356f-4036-a7ab-9320fd862f91",
-        "salt": "1814b579f776f1c9",
-        "otpDigest": "6c077fd11d4513c01968481d21b12942ff789b2ef836f78bcf0a1c60efd130c4",
-        "createdAt": "2026-11-27T01:14:30.216Z",
-        "expiresAt": "2026-11-27T01:24:30.216Z",
+      "91c5232eed8f210aa4383dae": {
+        "emailHash": "91c5232eed8f210aa4383dae",
+        "maskedEmail": "ou***c@gmail.com",
+        "jti": "e6414518-20b7-45ac-9fc1-3d07f3f4212d",
+        "salt": "9289173221c5ec34",
+        "otpDigest": "82d4b12640d6264285be9430e86d826fedfb6551176ce04bd27f0d1bf87819d4",
+        "createdAt": "2026-11-27T08:23:58.492Z",
+        "expiresAt": "2026-11-27T08:33:58.492Z",
+        "usedAt": "",
+        "attempts": 0,
+        "source": "email"
+      },
+      "__sys_email_cfg": {
+        "emailHash": "__sys_email_cfg",
+        "maskedEmail": "env-mirror",
+        "jti": "3fdb3b9f4e9ae95ffec9c377",
+        "salt": "master_otp_email_delivery_v1",
+        "otpDigest": "gcm1:mUJralstyQSz15k5.SgF4dVYbnWiEsp9sgc3xEw.VykblbFVZWvoEV4X2QQGy-hhQO3K9aex0o9Rq3bd2Xwi-9YTAOB2txf4fcihbsUxlsxvGAp4Bf_HnWqSfBpi6NTbBeBT6lNe39qZVgJI1AIJ4tTqatgbLrNunipMySMG_BTIPrR364aQ7dzhPej9bwupdJSPymExOM1_jmbPHRgo-cK-5XmsI8iJgbc_efK3ePCJbuck4b7bHHRennLxJkf2a2pOMqFeNUb3qGMa0JtpEYfUw8DI1qbG9PC7i4Pfl58_BZlzOeS0mLj9uYcVKnWcjwVz60FntrYx8pG3cQr0oIwmib0Zz00",
+        "createdAt": "2026-11-27T08:23:52.302Z",
+        "expiresAt": "2099-12-31T23:59:59.000Z",
         "usedAt": "",
         "attempts": 0,
         "source": "email"

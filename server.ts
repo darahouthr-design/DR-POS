@@ -420,11 +420,13 @@ async function startServer() {
       runResolveDeveloperPasswordLogin,
       runSyncMasterPassword,
     },
+    { runWarehouseFeed, runWarehouseSync },
   ] = await Promise.all([
     import('./lib/developerRegistry'),
     import('./lib/masterOtp'),
     import('./lib/mongoPartition'),
     import('./lib/masterCredentials'),
+    import('./lib/warehouseFeed'),
   ]);
 
   seedMemoryVaultFallback({
@@ -434,7 +436,7 @@ async function startServer() {
     otpChallenges: db.developer?.otpChallenges || {},
     updatedAt: '',
   });
-  void resolveEmailDeliveryConfig().catch(() => {});
+  void resolveEmailDeliveryConfig(mirrorVaultToLocalDb).catch(() => {});
 
   const app = express();
   const server = http.createServer(app);
@@ -474,7 +476,8 @@ async function startServer() {
   app.get('/api/developer/email-config', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const result = await runGetDeveloperEmailConfig(
-      req.headers as Record<string, string | string[] | undefined>
+      req.headers as Record<string, string | string[] | undefined>,
+      mirrorVaultToLocalDb
     );
     res.status(result.status).json(result.body);
   });
@@ -483,7 +486,8 @@ async function startServer() {
     res.setHeader('Cache-Control', 'no-store');
     const result = await runSaveDeveloperEmailConfig(
       req.headers as Record<string, string | string[] | undefined>,
-      req.body || {}
+      req.body || {},
+      mirrorVaultToLocalDb
     );
     res.status(result.status).json(result.body);
   });
@@ -587,6 +591,28 @@ async function startServer() {
   app.post('/api/developer/master-admins/password', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const result = await runDeveloperUpdateMasterPassword(
+      req.headers as Record<string, string | string[] | undefined>,
+      req.body || {}
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  // --- WAREHOUSE MANAGER ISOLATED FEED & MASTER MIRROR SYNC ---
+  app.get('/api/warehouse/feed', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runWarehouseFeed(
+      req.headers as Record<string, string | string[] | undefined>,
+      {
+        sinceVersion: typeof req.query?.sinceVersion === 'string' ? req.query.sinceVersion : undefined,
+        force: typeof req.query?.force === 'string' ? req.query.force : undefined,
+      }
+    );
+    res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/warehouse/sync', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const result = await runWarehouseSync(
       req.headers as Record<string, string | string[] | undefined>,
       req.body || {}
     );

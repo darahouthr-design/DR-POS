@@ -25,23 +25,20 @@ import {
   deleteProblemCustomerFs,
   deleteProductFs,
   deleteStaffFs,
-  deleteWarehouseMemberDocsFs,
   fetchLatestWorkspaceSaleProfilesFromServer,
   isTimestampExpired,
   logSaleActivityFs,
   markSalePresenceOfflineFs,
   purgeExpiredActivityLogsFs,
   purgeExpiredStockLogsFs,
+  pushWarehouseMirrorToServer,
   reorderProductsFs,
-  resolveWarehouseDirectoryForUid,
   savePriceRecordFs,
   saveProductFs,
   saveStaffFs,
-  saveWarehouseMemberDocsFs,
   subscribeToSaleActivityLogs,
   subscribeToSalePresence,
   subscribeToWorkspace,
-  syncWarehouseUidsInFirestore,
   updateOrderFs,
   updateProductImageFs,
   updateSalePreferencesFs,
@@ -594,8 +591,21 @@ export function App() {
       }
       let resolvedRole: StoredRolePref = pendingRole || loadRolePref(fbUser.uid) || { role: 'admin' };
 
-      const whDir = await resolveWarehouseDirectoryForUid(fbUser.uid).catch(() => null);
+      const gateCheck = await checkEmailAuthGate(cleanEmail).catch(() => null);
       if (currentRun !== activeRunId) return;
+      const whDir =
+        gateCheck && gateCheck.isWarehouseManager && gateCheck.warehouseMasterUid
+          ? {
+              warehouseUid: fbUser.uid,
+              masterUid: gateCheck.warehouseMasterUid,
+              masterEmail: gateCheck.warehouseMasterEmail || '',
+              name: gateCheck.warehouseName || '',
+              email: cleanEmail,
+              assignedAdminEmail:
+                gateCheck.assignedAdminEmail || gateCheck.warehouseMasterEmail || '',
+              active: gateCheck.warehouseActive !== false,
+            }
+          : null;
 
       if (whDir) {
         if (whDir.active === false) {
@@ -1284,6 +1294,18 @@ export function App() {
     if (activePage !== 'pos' && activePage !== 'orders') return;
     void revalidateLicenseInBackground(true);
   }, [activePage, firebaseUser, hasWorkspace, session?.role, revalidateLicenseInBackground]);
+
+  // Keep server warehouse mirror warm whenever workspace data updates and at least one warehouse manager exists
+  useEffect(() => {
+    if (!firebaseUser || !workspace || session?.role === 'warehouse') return;
+    if ((workspace.settings.warehouseProfiles || []).length === 0) return;
+    const timer = window.setTimeout(() => {
+      if (latestWorkspaceRef.current && auth.currentUser?.uid === firebaseUser.uid) {
+        void pushWarehouseMirrorToServer(latestWorkspaceRef.current);
+      }
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [firebaseUser, workspace, session?.role]);
 
   // Access Control Rules for active operator email
   const activeAccessRule = useMemo(() => {
@@ -3189,26 +3211,9 @@ export function App() {
                   };
                   const nextProfiles = [...(baseSettings.warehouseProfiles || []), newProfile];
                   const res = await runFsMutationWithError(async () => {
-                    await saveWarehouseMemberDocsFs(
-                      firebaseUser.uid,
-                      masterEmailLower,
-                      newProfile
-                    );
-                    try {
-                      await updateSettingsFs(firebaseUser.uid, baseSettings, {
-                        warehouseProfiles: nextProfiles,
-                      });
-                    } catch (settingsErr) {
-                      await deleteWarehouseMemberDocsFs(firebaseUser.uid, newProfile.uid).catch(
-                        () => {}
-                      );
-                      throw settingsErr;
-                    }
-                    await syncWarehouseUidsInFirestore(
-                      firebaseUser.uid,
-                      nextProfiles,
-                      masterEmailLower
-                    );
+                    await updateSettingsFs(firebaseUser.uid, baseSettings, {
+                      warehouseProfiles: nextProfiles,
+                    });
                   });
                   if (res.ok && latestWorkspaceRef.current) {
                     latestWorkspaceRef.current = {
@@ -3218,7 +3223,8 @@ export function App() {
                         warehouseProfiles: nextProfiles,
                       },
                     };
-                    void revalidateLicenseInBackground(true);
+                    await revalidateLicenseInBackground(true);
+                    void pushWarehouseMirrorToServer(latestWorkspaceRef.current);
                   }
                   return res;
                 }}
@@ -3245,21 +3251,10 @@ export function App() {
                     return updatedTarget;
                   });
                   if (!updatedTarget) return { ok: false, error: 'រកមិនឃើញគណនីអ្នកគ្រប់គ្រងឃ្លាំងនេះទេ។' };
-                  const targetRef = updatedTarget;
                   const res = await runFsMutationWithError(async () => {
-                    await saveWarehouseMemberDocsFs(
-                      firebaseUser.uid,
-                      masterEmailLower,
-                      targetRef
-                    );
                     await updateSettingsFs(firebaseUser.uid, baseSettings, {
                       warehouseProfiles: nextProfiles,
                     });
-                    await syncWarehouseUidsInFirestore(
-                      firebaseUser.uid,
-                      nextProfiles,
-                      masterEmailLower
-                    );
                   });
                   if (res.ok && latestWorkspaceRef.current) {
                     latestWorkspaceRef.current = {
@@ -3269,7 +3264,8 @@ export function App() {
                         warehouseProfiles: nextProfiles,
                       },
                     };
-                    void revalidateLicenseInBackground(true);
+                    await revalidateLicenseInBackground(true);
+                    void pushWarehouseMirrorToServer(latestWorkspaceRef.current);
                   }
                   return res;
                 }}
@@ -3282,15 +3278,9 @@ export function App() {
                     (wp) => wp.id !== profile.id && wp.uid !== profile.uid
                   );
                   const res = await runFsMutationWithError(async () => {
-                    await deleteWarehouseMemberDocsFs(firebaseUser.uid, profile.uid);
                     await updateSettingsFs(firebaseUser.uid, baseSettings, {
                       warehouseProfiles: nextProfiles,
                     });
-                    await syncWarehouseUidsInFirestore(
-                      firebaseUser.uid,
-                      nextProfiles,
-                      masterEmailLower
-                    );
                   });
                   if (res.ok && latestWorkspaceRef.current) {
                     latestWorkspaceRef.current = {
@@ -3300,7 +3290,8 @@ export function App() {
                         warehouseProfiles: nextProfiles,
                       },
                     };
-                    void revalidateLicenseInBackground(true);
+                    await revalidateLicenseInBackground(true);
+                    void pushWarehouseMirrorToServer(latestWorkspaceRef.current);
                   }
                   return res;
                 }}

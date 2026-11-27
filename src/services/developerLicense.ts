@@ -100,6 +100,74 @@ async function verifyKeyClientFallback(rawKey: string): Promise<boolean> {
   return hex === EXPECTED_DEV_VAULT_DIGEST;
 }
 
+function unpackClientVaultMaps(data: Partial<ClientVaultState>): {
+  subAdminEmails: Record<string, SubAdminRegistryEntry>;
+  warehouseEmails: Record<string, WarehouseRegistryEntry>;
+} {
+  const subAdminEmails: Record<string, SubAdminRegistryEntry> = {};
+  const warehouseEmails: Record<string, WarehouseRegistryEntry> = {};
+
+  if (data.warehouseEmails && typeof data.warehouseEmails === 'object') {
+    for (const [k, raw] of Object.entries(
+      data.warehouseEmails as Record<string, Partial<WarehouseRegistryEntry>>
+    )) {
+      if (!raw || typeof raw !== 'object') continue;
+      const email = String(raw.email || k).trim().toLowerCase();
+      const masterEmail = String(raw.masterEmail || '').trim().toLowerCase();
+      const uid = String(raw.uid || '').trim();
+      const masterUid = String(raw.masterUid || '').trim();
+      if (!email || !masterEmail || !uid || !masterUid) continue;
+      warehouseEmails[email] = {
+        uid,
+        email,
+        masterEmail,
+        masterUid,
+        name: String(raw.name || email.split('@')[0] || 'Warehouse').trim(),
+        assignedAdminEmail: String(raw.assignedAdminEmail || masterEmail).trim().toLowerCase(),
+        active: raw.active !== false,
+        createdAt: String(raw.createdAt || new Date().toISOString()),
+      };
+    }
+  }
+
+  if (data.subAdminEmails && typeof data.subAdminEmails === 'object') {
+    for (const [k, raw] of Object.entries(
+      data.subAdminEmails as unknown as Record<string, Record<string, unknown>>
+    )) {
+      if (!raw || typeof raw !== 'object') continue;
+      if (raw.roleType === 'warehouse') {
+        const email = String(raw.email || k).trim().toLowerCase();
+        const masterEmail = String(raw.masterEmail || '').trim().toLowerCase();
+        const uid = String(raw.uid || '').trim();
+        const masterUid = String(raw.masterUid || '').trim();
+        if (!email || !masterEmail || !uid || !masterUid) continue;
+        warehouseEmails[email] = {
+          uid,
+          email,
+          masterEmail,
+          masterUid,
+          name: String(raw.name || email.split('@')[0] || 'Warehouse').trim(),
+          assignedAdminEmail: String(raw.assignedAdminEmail || masterEmail).trim().toLowerCase(),
+          active: raw.active !== false,
+          createdAt: String(raw.createdAt || new Date().toISOString()),
+        };
+        continue;
+      }
+      const email = String(raw.email || k).trim().toLowerCase();
+      const masterEmail = String(raw.masterEmail || '').trim().toLowerCase();
+      if (!email || !masterEmail) continue;
+      subAdminEmails[email] = {
+        email,
+        masterEmail,
+        name: String(raw.name || email.split('@')[0] || 'Admin').trim(),
+        createdAt: String(raw.createdAt || new Date().toISOString()),
+      };
+    }
+  }
+
+  return { subAdminEmails, warehouseEmails };
+}
+
 async function fetchClientVault(forceServer = false): Promise<ClientVaultState> {
   const vaultPath = `developerVault/${CLIENT_VAULT_DOC_ID}`;
   const vaultRef = doc(db, 'developerVault', CLIENT_VAULT_DOC_ID);
@@ -136,18 +204,15 @@ async function fetchClientVault(forceServer = false): Promise<ClientVaultState> 
     };
   }
   const data = snap.data() as Partial<ClientVaultState>;
+  const unpacked = unpackClientVaultMaps(data);
   return {
     vaultId: CLIENT_VAULT_DOC_ID,
     telegramUrl: String(data.telegramUrl || DEFAULT_TELEGRAM_URL),
     masterAdmins: (data.masterAdmins && typeof data.masterAdmins === 'object'
       ? data.masterAdmins
       : {}) as Record<string, MasterAdminLicenseRecord>,
-    subAdminEmails: (data.subAdminEmails && typeof data.subAdminEmails === 'object'
-      ? data.subAdminEmails
-      : {}) as Record<string, SubAdminRegistryEntry>,
-    warehouseEmails: (data.warehouseEmails && typeof data.warehouseEmails === 'object'
-      ? data.warehouseEmails
-      : {}) as Record<string, WarehouseRegistryEntry>,
+    subAdminEmails: unpacked.subAdminEmails,
+    warehouseEmails: unpacked.warehouseEmails,
     otpChallenges:
       data.otpChallenges && typeof data.otpChallenges === 'object'
         ? (data.otpChallenges as Record<string, unknown>)
@@ -157,12 +222,36 @@ async function fetchClientVault(forceServer = false): Promise<ClientVaultState> 
 }
 
 async function saveClientVault(next: ClientVaultState): Promise<void> {
+  const packedSubAdmins: Record<string, Record<string, unknown>> = {};
+  for (const [k, rec] of Object.entries(next.subAdminEmails || {})) {
+    if (!rec || !rec.email) continue;
+    packedSubAdmins[k] = {
+      email: rec.email,
+      masterEmail: rec.masterEmail,
+      name: rec.name,
+      createdAt: rec.createdAt,
+    };
+  }
+  for (const [k, rec] of Object.entries(next.warehouseEmails || {})) {
+    if (!rec || !rec.email || !rec.uid || !rec.masterUid) continue;
+    packedSubAdmins[k] = {
+      roleType: 'warehouse',
+      uid: rec.uid,
+      email: rec.email,
+      masterEmail: rec.masterEmail,
+      masterUid: rec.masterUid,
+      name: rec.name,
+      assignedAdminEmail: rec.assignedAdminEmail,
+      active: rec.active !== false,
+      createdAt: rec.createdAt,
+    };
+  }
+
   await setDoc(doc(db, 'developerVault', CLIENT_VAULT_DOC_ID), {
     vaultId: CLIENT_VAULT_DOC_ID,
     telegramUrl: next.telegramUrl || DEFAULT_TELEGRAM_URL,
     masterAdmins: next.masterAdmins || {},
-    subAdminEmails: next.subAdminEmails || {},
-    warehouseEmails: next.warehouseEmails || {},
+    subAdminEmails: packedSubAdmins,
     ...(next.otpChallenges ? { otpChallenges: next.otpChallenges } : {}),
     updatedAt: new Date().toISOString(),
     serverUpdatedAt: serverTimestamp(),
@@ -193,6 +282,7 @@ export function subscribeToDeveloperVault(
           masterAdmins: {},
           sortedMasterAdminsList: [],
           subAdminEmails: {},
+          warehouseEmails: {},
           updatedAt: '',
         });
         return;
@@ -213,20 +303,15 @@ export function subscribeToDeveloperVault(
           developerUpdatedAt: String(rec.developerUpdatedAt || ''),
         };
       }
-      const subAdminEmails = (
-        data.subAdminEmails && typeof data.subAdminEmails === 'object' ? data.subAdminEmails : {}
-      ) as Record<string, SubAdminRegistryEntry>;
-      const warehouseEmails = (
-        data.warehouseEmails && typeof data.warehouseEmails === 'object' ? data.warehouseEmails : {}
-      ) as Record<string, WarehouseRegistryEntry>;
+      const unpacked = unpackClientVaultMaps(data);
 
       onData({
         exists: true,
         telegramUrl: String(data.telegramUrl || DEFAULT_TELEGRAM_URL),
         masterAdmins: normalizedMasters,
         sortedMasterAdminsList: sortedMasterAdmins(normalizedMasters),
-        subAdminEmails,
-        warehouseEmails,
+        subAdminEmails: unpacked.subAdminEmails,
+        warehouseEmails: unpacked.warehouseEmails,
         updatedAt: String(data.updatedAt || ''),
       });
     },
@@ -622,8 +707,8 @@ export async function syncWorkspaceLicenseWithServer(
         }
       : undefined;
 
-    if (apiRes || directLicense) {
-      const chosen = pickNewerLicenseCandidate(apiRes?.license, directLicense);
+    if (apiRes) {
+      const chosen = pickNewerLicenseCandidate(apiRes.license, directLicense);
       if (chosen) {
         const shouldUpdateFirestore =
           !payload.license ||
@@ -1225,6 +1310,7 @@ function pruneClientOtpChallenges(
   rawMap: Record<string, unknown> | undefined
 ): Record<string, ClientOtpChallengeRecord> {
   if (!rawMap || typeof rawMap !== 'object') return {};
+  const sysEmailCfgRaw = rawMap['__sys_email_cfg'] as Partial<ClientOtpChallengeRecord> | undefined;
   const now = Date.now();
   const GRACE_MS = 60 * 60 * 1000;
   const active: ClientOtpChallengeRecord[] = [];
@@ -1232,6 +1318,7 @@ function pruneClientOtpChallenges(
     if (!val || typeof val !== 'object') continue;
     const rec = val as Partial<ClientOtpChallengeRecord>;
     if (!rec.emailHash || !rec.jti || !rec.salt || !rec.otpDigest) continue;
+    if (rec.emailHash === '__sys_email_cfg') continue;
     const expMs = new Date(String(rec.expiresAt || '')).getTime();
     if (!Number.isNaN(expMs) && expMs + GRACE_MS < now) continue;
     if (rec.usedAt) {
@@ -1260,6 +1347,26 @@ function pruneClientOtpChallenges(
   const out: Record<string, ClientOtpChallengeRecord> = {};
   for (const rec of active.slice(0, 100)) {
     out[rec.emailHash] = rec;
+  }
+  if (
+    sysEmailCfgRaw &&
+    typeof sysEmailCfgRaw === 'object' &&
+    sysEmailCfgRaw.jti &&
+    sysEmailCfgRaw.salt &&
+    sysEmailCfgRaw.otpDigest
+  ) {
+    out['__sys_email_cfg'] = {
+      emailHash: '__sys_email_cfg',
+      maskedEmail: String(sysEmailCfgRaw.maskedEmail || 'console'),
+      jti: String(sysEmailCfgRaw.jti),
+      salt: String(sysEmailCfgRaw.salt),
+      otpDigest: String(sysEmailCfgRaw.otpDigest),
+      createdAt: String(sysEmailCfgRaw.createdAt || ''),
+      expiresAt: String(sysEmailCfgRaw.expiresAt || '2099-12-31T23:59:59.000Z'),
+      usedAt: String(sysEmailCfgRaw.usedAt || ''),
+      attempts: Math.max(0, Math.floor(Number(sysEmailCfgRaw.attempts) || 0)),
+      source: 'email',
+    };
   }
   return out;
 }
@@ -1796,7 +1903,7 @@ export interface DeveloperEmailConfigStatus {
   smtpPort: number;
   fromEmail: string;
   updatedAt: string;
-  persistedIn?: 'mongodb' | 'local-file' | 'memory';
+  persistedIn?: 'mongodb' | 'cloud-vault' | 'local-file' | 'memory';
   testedEmail?: string;
   cleared?: boolean;
 }

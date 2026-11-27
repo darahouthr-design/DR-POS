@@ -33,6 +33,7 @@ export interface DecryptedMasterPasswordInfo {
 
 const COLLECTION_NAME = 'drpos_master_admin_credentials';
 const LOCAL_ENC_FILE = path.resolve(process.cwd(), 'data', 'master_credentials.enc.json');
+const TMP_ENC_FILE = '/tmp/drpos_master_credentials.enc.json';
 const ENC_PREFIX = 'gcm1:';
 
 // In-memory rate limiter for password resolution (anti-brute-force)
@@ -88,17 +89,19 @@ function constantTimeEquals(aStr: string, bStr: string): boolean {
 
 function readLocalFileStore(): Record<string, StoredMasterCredentialDoc> {
   if (memoryCache) return memoryCache;
-  try {
-    if (fs.existsSync(LOCAL_ENC_FILE)) {
-      const raw = fs.readFileSync(LOCAL_ENC_FILE, 'utf8');
-      const parsed = JSON.parse(raw) as Record<string, StoredMasterCredentialDoc>;
-      if (parsed && typeof parsed === 'object') {
-        memoryCache = parsed;
-        return memoryCache;
+  for (const filePath of [LOCAL_ENC_FILE, TMP_ENC_FILE]) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(raw) as Record<string, StoredMasterCredentialDoc>;
+        if (parsed && typeof parsed === 'object') {
+          memoryCache = parsed;
+          return memoryCache;
+        }
       }
+    } catch {
+      // Ignore corrupt or unavailable local fallback file
     }
-  } catch {
-    // Ignore corrupt or unavailable local fallback file
   }
   memoryCache = {};
   return memoryCache;
@@ -106,17 +109,20 @@ function readLocalFileStore(): Record<string, StoredMasterCredentialDoc> {
 
 function writeLocalFileStore(map: Record<string, StoredMasterCredentialDoc>): void {
   memoryCache = map;
-  try {
-    const dir = path.dirname(LOCAL_ENC_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  const serialized = JSON.stringify(map, null, 2);
+  for (const filePath of [LOCAL_ENC_FILE, TMP_ENC_FILE]) {
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(filePath, serialized, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+    } catch {
+      // Serverless read-only filesystem on process.cwd(): /tmp fallback still persists per warm container
     }
-    fs.writeFileSync(LOCAL_ENC_FILE, JSON.stringify(map, null, 2), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-  } catch {
-    // Serverless read-only filesystem: rely on MongoDB + in-memory cache
   }
 }
 
@@ -241,6 +247,19 @@ export async function getAllDecryptedMasterPasswordsMap(): Promise<
     };
   }
   return out;
+}
+
+/**
+ * Internal server-only helper for live Firestore REST refresh on behalf of authorized
+ * Warehouse Managers belonging to this Master Admin. Never exposed over HTTP.
+ */
+export async function getMasterPasswordForServerSync(email: string): Promise<string | null> {
+  const cleanEmail = normalizeEmail(email);
+  if (!cleanEmail) return null;
+  const doc = await getCredentialDoc(cleanEmail);
+  if (!doc) return null;
+  const pass = decryptSecret(doc.firebaseSyncedPasswordEnc) || decryptSecret(doc.currentPasswordEnc);
+  return pass || null;
 }
 
 function checkResolveRateLimit(key: string): boolean {

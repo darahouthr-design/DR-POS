@@ -4,6 +4,7 @@ import path from 'path';
 import { getMongoDb } from './mongoPartition.js';
 import {
   DEFAULT_TELEGRAM_URL,
+  EMAIL_CONFIG_CHALLENGE_KEY,
   getDeveloperAccessKey,
   getDeveloperTokenFromHeaders,
   mutateVaultState,
@@ -193,6 +194,7 @@ interface StoredEncryptedEmailDoc {
 const EMAIL_SECRET_COLLECTION = 'drpos_server_secrets';
 const EMAIL_SECRET_DOC_ID = 'master_otp_email_delivery_v1';
 const LOCAL_EMAIL_SECRET_FILE = path.resolve(process.cwd(), 'data', 'email_delivery.enc.json');
+const TMP_EMAIL_SECRET_FILE = path.join('/tmp', 'drpos_email_delivery.enc.json');
 const EMAIL_ENC_PREFIX = 'gcm1:';
 const EMAIL_CACHE_HIT_TTL_MS = 60 * 1000;
 const EMAIL_CACHE_MISS_TTL_MS = 3 * 1000;
@@ -202,6 +204,13 @@ let cachedEmailConfig: { expiresAt: number; value: ResolvedEmailDeliveryConfig |
   value: null,
 };
 let lastMirroredEnvDigest = '';
+
+async function getNodemailer() {
+  const mod = (await import('nodemailer')) as unknown as {
+    default?: typeof import('nodemailer');
+  } & typeof import('nodemailer');
+  return mod.default || mod;
+}
 
 function getEmailSecretEncryptionKey(): Buffer {
   const secret = String(
@@ -286,44 +295,101 @@ function parseSavedEmailConfig(
   return null;
 }
 
+function pickPreferredEncryptedDoc(
+  candidates: Array<StoredEncryptedEmailDoc | null | undefined>
+): StoredEncryptedEmailDoc | null {
+  const valid = candidates.filter(
+    (c): c is StoredEncryptedEmailDoc =>
+      Boolean(c && typeof c.payloadEnc === 'string' && c.payloadEnc.startsWith(EMAIL_ENC_PREFIX))
+  );
+  if (valid.length === 0) return null;
+  const consoleDocs = valid.filter((c) => c.origin !== 'env-mirror');
+  const pool = consoleDocs.length > 0 ? consoleDocs : valid;
+  pool.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  return pool[0] || null;
+}
+
 function readLocalEncryptedEmailDoc(): StoredEncryptedEmailDoc | null {
-  try {
-    if (!fs.existsSync(LOCAL_EMAIL_SECRET_FILE)) return null;
-    const raw = fs.readFileSync(LOCAL_EMAIL_SECRET_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<StoredEncryptedEmailDoc>;
-    if (parsed && parsed.secretId === EMAIL_SECRET_DOC_ID && typeof parsed.payloadEnc === 'string') {
-      return {
-        secretId: EMAIL_SECRET_DOC_ID,
-        payloadEnc: parsed.payloadEnc,
-        updatedAt: String(parsed.updatedAt || ''),
-      };
+  const found: StoredEncryptedEmailDoc[] = [];
+  for (const filePath of [LOCAL_EMAIL_SECRET_FILE, TMP_EMAIL_SECRET_FILE]) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<StoredEncryptedEmailDoc>;
+      if (parsed && parsed.secretId === EMAIL_SECRET_DOC_ID && typeof parsed.payloadEnc === 'string') {
+        found.push({
+          secretId: EMAIL_SECRET_DOC_ID,
+          payloadEnc: parsed.payloadEnc,
+          origin: parsed.origin === 'env-mirror' ? 'env-mirror' : 'console',
+          envDigest: typeof parsed.envDigest === 'string' ? parsed.envDigest : '',
+          updatedAt: String(parsed.updatedAt || ''),
+        });
+      }
+    } catch {
+      // Ignore local file read failure
     }
-  } catch {
-    // Ignore local file read failure
   }
-  return null;
+  return pickPreferredEncryptedDoc(found);
 }
 
 function writeLocalEncryptedEmailDoc(doc: StoredEncryptedEmailDoc | null): boolean {
-  try {
-    if (!doc) {
-      if (fs.existsSync(LOCAL_EMAIL_SECRET_FILE)) {
-        fs.unlinkSync(LOCAL_EMAIL_SECRET_FILE);
+  let wroteAny = false;
+  for (const filePath of [LOCAL_EMAIL_SECRET_FILE, TMP_EMAIL_SECRET_FILE]) {
+    try {
+      if (!doc) {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        wroteAny = true;
+        continue;
       }
-      return true;
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(filePath, JSON.stringify(doc, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      wroteAny = true;
+    } catch {
+      // Ignore read-only filesystem errors (e.g. /var/task on Vercel)
     }
-    const dir = path.dirname(LOCAL_EMAIL_SECRET_FILE);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(LOCAL_EMAIL_SECRET_FILE, JSON.stringify(doc, null, 2), {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    return true;
-  } catch {
-    return false;
   }
+  return wroteAny;
+}
+
+function toVaultEmailChallenge(doc: StoredEncryptedEmailDoc): OtpChallengeRecord {
+  return {
+    emailHash: EMAIL_CONFIG_CHALLENGE_KEY,
+    maskedEmail: doc.origin === 'env-mirror' ? 'env-mirror' : 'console',
+    jti: doc.envDigest || 'console',
+    salt: EMAIL_SECRET_DOC_ID,
+    otpDigest: doc.payloadEnc,
+    createdAt: doc.updatedAt || new Date().toISOString(),
+    expiresAt: '2099-12-31T23:59:59.000Z',
+    usedAt: '',
+    attempts: 0,
+    source: 'email',
+  };
+}
+
+function fromVaultEmailChallenge(rec: OtpChallengeRecord | undefined): StoredEncryptedEmailDoc | null {
+  if (
+    !rec ||
+    rec.salt !== EMAIL_SECRET_DOC_ID ||
+    typeof rec.otpDigest !== 'string' ||
+    !rec.otpDigest.startsWith(EMAIL_ENC_PREFIX)
+  ) {
+    return null;
+  }
+  return {
+    secretId: EMAIL_SECRET_DOC_ID,
+    payloadEnc: rec.otpDigest,
+    origin: rec.maskedEmail === 'env-mirror' ? 'env-mirror' : 'console',
+    envDigest: rec.jti && rec.jti !== 'console' ? rec.jti : '',
+    updatedAt: String(rec.createdAt || ''),
+  };
 }
 
 function setEmailConfigCache(value: ResolvedEmailDeliveryConfig | null): void {
@@ -333,20 +399,24 @@ function setEmailConfigCache(value: ResolvedEmailDeliveryConfig | null): void {
   };
 }
 
-async function readStoredEmailConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
+async function readStoredEmailConfig(
+  onMirrorLocal?: (state: DeveloperVaultState) => void
+): Promise<ResolvedEmailDeliveryConfig | null> {
   if (Date.now() < cachedEmailConfig.expiresAt) {
     return cachedEmailConfig.value;
   }
 
-  let latestDoc: StoredEncryptedEmailDoc | null = readLocalEncryptedEmailDoc();
-  try {
-    const db = await getMongoDb();
-    if (db) {
-      const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
-      const found = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
-      if (found && typeof found.payloadEnc === 'string') {
-        if (!latestDoc || String(found.updatedAt || '') >= String(latestDoc.updatedAt || '')) {
-          latestDoc = {
+  const localDoc = readLocalEncryptedEmailDoc();
+
+  const [mongoSettled, vaultSettled] = await Promise.allSettled([
+    (async (): Promise<StoredEncryptedEmailDoc | null> => {
+      try {
+        const db = await getMongoDb();
+        if (!db) return null;
+        const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
+        const found = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
+        if (found && typeof found.payloadEnc === 'string') {
+          return {
             secretId: EMAIL_SECRET_DOC_ID,
             payloadEnc: found.payloadEnc,
             origin: found.origin === 'env-mirror' ? 'env-mirror' : 'console',
@@ -354,15 +424,45 @@ async function readStoredEmailConfig(): Promise<ResolvedEmailDeliveryConfig | nu
             updatedAt: String(found.updatedAt || ''),
           };
         }
+      } catch {
+        // Continue with other storage backends
       }
-    }
-  } catch {
-    // Continue with local file fallback; short miss TTL allows fast retry
-  }
+      return null;
+    })(),
+    (async (): Promise<StoredEncryptedEmailDoc | null> => {
+      try {
+        const state = await readVaultState(onMirrorLocal);
+        return fromVaultEmailChallenge(state.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY]);
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
+
+  const mongoDoc = mongoSettled.status === 'fulfilled' ? mongoSettled.value : null;
+  const vaultDoc = vaultSettled.status === 'fulfilled' ? vaultSettled.value : null;
+  const latestDoc = pickPreferredEncryptedDoc([localDoc, mongoDoc, vaultDoc]);
 
   const parsed = latestDoc
     ? parseSavedEmailConfig(decryptEmailPayload(latestDoc.payloadEnc), latestDoc.origin)
     : null;
+
+  if (
+    parsed &&
+    latestDoc &&
+    (!vaultDoc ||
+      (latestDoc.origin !== 'env-mirror' &&
+        (vaultDoc.origin === 'env-mirror' || latestDoc.updatedAt > vaultDoc.updatedAt)))
+  ) {
+    void mutateVaultState<boolean>((working) => {
+      working.otpChallenges = {
+        ...(working.otpChallenges || {}),
+        [EMAIL_CONFIG_CHALLENGE_KEY]: toVaultEmailChallenge(latestDoc),
+      };
+      return { changed: true, result: true };
+    }, onMirrorLocal).catch(() => {});
+  }
+
   setEmailConfigCache(parsed);
   return parsed;
 }
@@ -437,7 +537,10 @@ function readEnvEmailConfig(): ResolvedEmailDeliveryConfig | null {
   return null;
 }
 
-async function mirrorEnvConfigToMongoIfNeeded(envCfg: ResolvedEmailDeliveryConfig): Promise<void> {
+async function mirrorEnvConfigToCloudIfNeeded(
+  envCfg: ResolvedEmailDeliveryConfig,
+  onMirrorLocal?: (state: DeveloperVaultState) => void
+): Promise<void> {
   const digest = crypto
     .createHash('sha256')
     .update(JSON.stringify({ ...envCfg, updatedAt: '' }))
@@ -445,51 +548,73 @@ async function mirrorEnvConfigToMongoIfNeeded(envCfg: ResolvedEmailDeliveryConfi
     .slice(0, 24);
   if (digest === lastMirroredEnvDigest) return;
   lastMirroredEnvDigest = digest;
-  try {
-    const db = await getMongoDb();
-    if (!db) return;
-    const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
-    const existing = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
-    if (existing && existing.origin !== 'env-mirror') {
-      // Respect explicit Console config stored by Developer
-      return;
-    }
-    if (existing && existing.envDigest === digest) {
-      return;
-    }
-    const nowIso = new Date().toISOString();
-    const mirrorPayload: ResolvedEmailDeliveryConfig = {
-      ...envCfg,
-      source: 'env',
-      origin: 'env-mirror',
-      updatedAt: nowIso,
-    };
-    await col.updateOne(
-      { secretId: EMAIL_SECRET_DOC_ID },
-      {
-        $set: {
-          secretId: EMAIL_SECRET_DOC_ID,
-          origin: 'env-mirror',
-          envDigest: digest,
-          payloadEnc: encryptEmailPayload(JSON.stringify(mirrorPayload)),
-          updatedAt: nowIso,
-        },
-      },
-      { upsert: true }
-    );
-  } catch {
-    // Non-fatal: env mirror is best-effort for multi-instance deployments
-  }
+
+  const nowIso = new Date().toISOString();
+  const mirrorPayload: ResolvedEmailDeliveryConfig = {
+    ...envCfg,
+    source: 'env',
+    origin: 'env-mirror',
+    updatedAt: nowIso,
+  };
+  const encryptedDoc: StoredEncryptedEmailDoc = {
+    secretId: EMAIL_SECRET_DOC_ID,
+    origin: 'env-mirror',
+    envDigest: digest,
+    payloadEnc: encryptEmailPayload(JSON.stringify(mirrorPayload)),
+    updatedAt: nowIso,
+  };
+
+  await Promise.allSettled([
+    (async () => {
+      try {
+        const db = await getMongoDb();
+        if (!db) return;
+        const col = db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION);
+        const existing = await col.findOne({ secretId: EMAIL_SECRET_DOC_ID });
+        if (existing && existing.origin !== 'env-mirror') return;
+        if (existing && existing.envDigest === digest) return;
+        await col.updateOne(
+          { secretId: EMAIL_SECRET_DOC_ID },
+          { $set: encryptedDoc },
+          { upsert: true }
+        );
+      } catch {
+        // Non-fatal
+      }
+    })(),
+    (async () => {
+      try {
+        await mutateVaultState<boolean>((working) => {
+          const cur = fromVaultEmailChallenge(working.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY]);
+          if (cur && cur.origin !== 'env-mirror') {
+            return { changed: false, result: false };
+          }
+          if (cur && cur.envDigest === digest) {
+            return { changed: false, result: false };
+          }
+          working.otpChallenges = {
+            ...(working.otpChallenges || {}),
+            [EMAIL_CONFIG_CHALLENGE_KEY]: toVaultEmailChallenge(encryptedDoc),
+          };
+          return { changed: true, result: true };
+        }, onMirrorLocal);
+      } catch {
+        // Non-fatal
+      }
+    })(),
+  ]);
 }
 
-export async function resolveEmailDeliveryConfig(): Promise<ResolvedEmailDeliveryConfig | null> {
-  const stored = await readStoredEmailConfig();
+export async function resolveEmailDeliveryConfig(
+  onMirrorLocal?: (state: DeveloperVaultState) => void
+): Promise<ResolvedEmailDeliveryConfig | null> {
+  const stored = await readStoredEmailConfig(onMirrorLocal);
   if (stored && stored.origin !== 'env-mirror') {
     return stored;
   }
   const envCfg = readEnvEmailConfig();
   if (envCfg) {
-    void mirrorEnvConfigToMongoIfNeeded(envCfg);
+    await mirrorEnvConfigToCloudIfNeeded(envCfg, onMirrorLocal);
     return envCfg;
   }
   if (stored) {
@@ -498,8 +623,10 @@ export async function resolveEmailDeliveryConfig(): Promise<ResolvedEmailDeliver
   return null;
 }
 
-export async function isEmailDeliveryConfigured(): Promise<boolean> {
-  const cfg = await resolveEmailDeliveryConfig();
+export async function isEmailDeliveryConfigured(
+  onMirrorLocal?: (state: DeveloperVaultState) => void
+): Promise<boolean> {
+  const cfg = await resolveEmailDeliveryConfig(onMirrorLocal);
   return Boolean(cfg);
 }
 
@@ -604,18 +731,18 @@ async function sendOtpEmailWithConfig(
     return;
   }
 
-  const nodemailer = await import('nodemailer');
+  const nodemailer = await getNodemailer();
 
   if (cfg.mode === 'smtp' && cfg.smtpHost && cfg.smtpUser && cfg.smtpPass) {
     const port = Number(cfg.smtpPort || 587);
-    const transporter = nodemailer.default.createTransport({
+    const transporter = nodemailer.createTransport({
       host: cfg.smtpHost,
       port,
       secure: port === 465,
       auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
+      connectionTimeout: 7_000,
+      greetingTimeout: 7_000,
+      socketTimeout: 9_000,
     });
     const rawFrom = cfg.fromEmail || cfg.smtpUser;
     const fromAddr = rawFrom.includes('<') ? rawFrom : `DR-POS <${rawFrom}>`;
@@ -630,12 +757,12 @@ async function sendOtpEmailWithConfig(
   }
 
   if (cfg.mode === 'gmail' && cfg.gmailUser && cfg.gmailAppPassword) {
-    const transporter = nodemailer.default.createTransport({
+    const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user: cfg.gmailUser, pass: cfg.gmailAppPassword },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
+      connectionTimeout: 7_000,
+      greetingTimeout: 7_000,
+      socketTimeout: 9_000,
     });
     const rawFrom = cfg.fromEmail || cfg.gmailUser;
     const fromAddr = rawFrom.includes('<') ? rawFrom : `DR-POS <${rawFrom}>`;
@@ -652,8 +779,12 @@ async function sendOtpEmailWithConfig(
   throw new Error('OTP_EMAIL_NOT_CONFIGURED');
 }
 
-async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
-  const cfg = await resolveEmailDeliveryConfig();
+async function sendOtpEmail(
+  toEmail: string,
+  otpCode: string,
+  onMirrorLocal?: (state: DeveloperVaultState) => void
+): Promise<void> {
+  const cfg = await resolveEmailDeliveryConfig(onMirrorLocal);
   if (!cfg) {
     throw new Error('OTP_EMAIL_NOT_CONFIGURED');
   }
@@ -661,13 +792,14 @@ async function sendOtpEmail(toEmail: string, otpCode: string): Promise<void> {
 }
 
 export async function runGetDeveloperEmailConfig(
-  headers: Record<string, string | string[] | undefined>
+  headers: Record<string, string | string[] | undefined>,
+  onMirrorLocal?: (state: DeveloperVaultState) => void
 ): Promise<ApiResult> {
   const token = getDeveloperTokenFromHeaders(headers);
   if (!verifyDeveloperToken(token)) {
     return { status: 401, body: { error: 'Developer session expired or invalid' } };
   }
-  const cfg = await resolveEmailDeliveryConfig();
+  const cfg = await resolveEmailDeliveryConfig(onMirrorLocal);
   return {
     status: 200,
     body: {
@@ -679,7 +811,8 @@ export async function runGetDeveloperEmailConfig(
 
 export async function runSaveDeveloperEmailConfig(
   headers: Record<string, string | string[] | undefined>,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  onMirrorLocal?: (state: DeveloperVaultState) => void
 ): Promise<ApiResult> {
   const token = getDeveloperTokenFromHeaders(headers);
   if (!verifyDeveloperToken(token)) {
@@ -700,24 +833,24 @@ export async function runSaveDeveloperEmailConfig(
       if (testToEmail && isValidEmailFormat(testToEmail)) {
         await sendOtpEmailWithConfig(activeCfg, testToEmail, '123456', true);
       } else if (activeCfg.mode !== 'resend') {
-        const nodemailer = await import('nodemailer');
+        const nodemailer = await getNodemailer();
         const transporter =
           activeCfg.mode === 'gmail'
-            ? nodemailer.default.createTransport({
+            ? nodemailer.createTransport({
                 service: 'gmail',
                 auth: { user: activeCfg.gmailUser, pass: activeCfg.gmailAppPassword },
-                connectionTimeout: 10_000,
-                greetingTimeout: 10_000,
-                socketTimeout: 15_000,
+                connectionTimeout: 7_000,
+                greetingTimeout: 7_000,
+                socketTimeout: 9_000,
               })
-            : nodemailer.default.createTransport({
+            : nodemailer.createTransport({
                 host: activeCfg.smtpHost,
                 port: Number(activeCfg.smtpPort || 587),
                 secure: Number(activeCfg.smtpPort || 587) === 465,
                 auth: { user: activeCfg.smtpUser, pass: activeCfg.smtpPass },
-                connectionTimeout: 10_000,
-                greetingTimeout: 10_000,
-                socketTimeout: 15_000,
+                connectionTimeout: 7_000,
+                greetingTimeout: 7_000,
+                socketTimeout: 9_000,
               });
         await transporter.verify();
       } else {
@@ -747,21 +880,43 @@ export async function runSaveDeveloperEmailConfig(
 
   if (action === 'clear') {
     let persisted = false;
-    try {
-      const db = await getMongoDb();
-      if (db) {
-        await db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION).deleteOne({
-          secretId: EMAIL_SECRET_DOC_ID,
-        });
-        persisted = true;
-      }
-    } catch {
-      // Ignore Mongo clear errors
-    }
+    await Promise.allSettled([
+      (async () => {
+        try {
+          const db = await getMongoDb();
+          if (db) {
+            await db.collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION).deleteOne({
+              secretId: EMAIL_SECRET_DOC_ID,
+            });
+            persisted = true;
+          }
+        } catch {
+          // Ignore Mongo clear errors
+        }
+      })(),
+      (async () => {
+        try {
+          const res = await mutateVaultState<boolean>((working) => {
+            if (!working.otpChallenges?.[EMAIL_CONFIG_CHALLENGE_KEY]) {
+              return { changed: false, result: false };
+            }
+            const nextChallenges = { ...(working.otpChallenges || {}) };
+            delete nextChallenges[EMAIL_CONFIG_CHALLENGE_KEY];
+            working.otpChallenges = nextChallenges;
+            return { changed: true, result: true };
+          }, onMirrorLocal);
+          if (res.persistedToCloud) {
+            persisted = true;
+          }
+        } catch {
+          // Ignore cloud vault clear errors
+        }
+      })(),
+    ]);
     const localCleared = writeLocalEncryptedEmailDoc(null);
     cachedEmailConfig = { expiresAt: 0, value: null };
     lastMirroredEnvDigest = '';
-    const envCfg = await resolveEmailDeliveryConfig();
+    const envCfg = await resolveEmailDeliveryConfig(onMirrorLocal);
     return {
       status: 200,
       body: {
@@ -845,24 +1000,24 @@ export async function runSaveDeveloperEmailConfig(
     if (testToEmail && isValidEmailFormat(testToEmail)) {
       await sendOtpEmailWithConfig(candidate, testToEmail, '123456', true);
     } else if (candidate.mode !== 'resend') {
-      const nodemailer = await import('nodemailer');
+      const nodemailer = await getNodemailer();
       const transporter =
         candidate.mode === 'gmail'
-          ? nodemailer.default.createTransport({
+          ? nodemailer.createTransport({
               service: 'gmail',
               auth: { user: candidate.gmailUser, pass: candidate.gmailAppPassword },
-              connectionTimeout: 10_000,
-              greetingTimeout: 10_000,
-              socketTimeout: 15_000,
+              connectionTimeout: 7_000,
+              greetingTimeout: 7_000,
+              socketTimeout: 9_000,
             })
-          : nodemailer.default.createTransport({
+          : nodemailer.createTransport({
               host: candidate.smtpHost,
               port: Number(candidate.smtpPort || 587),
               secure: Number(candidate.smtpPort || 587) === 465,
               auth: { user: candidate.smtpUser, pass: candidate.smtpPass },
-              connectionTimeout: 10_000,
-              greetingTimeout: 10_000,
-              socketTimeout: 15_000,
+              connectionTimeout: 7_000,
+              greetingTimeout: 7_000,
+              socketTimeout: 9_000,
             });
       await transporter.verify();
     }
@@ -883,22 +1038,48 @@ export async function runSaveDeveloperEmailConfig(
     updatedAt: nowIso,
   };
 
-  let persistedIn: 'mongodb' | 'local-file' | 'memory' = 'memory';
-  try {
-    const db = await getMongoDb();
-    if (db) {
-      await db
-        .collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION)
-        .updateOne({ secretId: EMAIL_SECRET_DOC_ID }, { $set: encryptedDoc }, { upsert: true });
-      persistedIn = 'mongodb';
-    }
-  } catch {
-    // Fallback to local encrypted file
-  }
+  let mongoSaved = false;
+  let cloudVaultSaved = false;
 
-  if (writeLocalEncryptedEmailDoc(encryptedDoc) && persistedIn === 'memory') {
-    persistedIn = 'local-file';
-  }
+  await Promise.allSettled([
+    (async () => {
+      try {
+        const db = await getMongoDb();
+        if (db) {
+          await db
+            .collection<StoredEncryptedEmailDoc>(EMAIL_SECRET_COLLECTION)
+            .updateOne({ secretId: EMAIL_SECRET_DOC_ID }, { $set: encryptedDoc }, { upsert: true });
+          mongoSaved = true;
+        }
+      } catch {
+        // Fallback to Cloud Vault / local file
+      }
+    })(),
+    (async () => {
+      try {
+        const vaultChallenge = toVaultEmailChallenge(encryptedDoc);
+        const res = await mutateVaultState<boolean>((working) => {
+          working.otpChallenges = {
+            ...(working.otpChallenges || {}),
+            [EMAIL_CONFIG_CHALLENGE_KEY]: vaultChallenge,
+          };
+          return { changed: true, result: true };
+        }, onMirrorLocal);
+        cloudVaultSaved = res.persistedToCloud;
+      } catch {
+        // Fallback to local file
+      }
+    })(),
+  ]);
+
+  const localSaved = writeLocalEncryptedEmailDoc(encryptedDoc);
+  const persistedIn: 'mongodb' | 'cloud-vault' | 'local-file' | 'memory' = mongoSaved
+    ? 'mongodb'
+    : cloudVaultSaved
+    ? 'cloud-vault'
+    : localSaved
+    ? 'local-file'
+    : 'memory';
 
   setEmailConfigCache(candidate);
 
@@ -958,7 +1139,12 @@ export async function runRequestMasterOtp(
     };
   }
 
-  if (!(await isEmailDeliveryConfigured())) {
+  let emailConfigured = await isEmailDeliveryConfigured(onMirrorLocal);
+  if (!emailConfigured) {
+    cachedEmailConfig = { expiresAt: 0, value: null };
+    emailConfigured = await isEmailDeliveryConfigured(onMirrorLocal);
+  }
+  if (!emailConfigured) {
     return {
       status: 503,
       body: {

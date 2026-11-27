@@ -53,6 +53,7 @@ import {
   type DeveloperVaultSnapshotData,
 } from './developerLicense';
 import type {
+  AdminProfile,
   Order,
   OrderItem,
   PriceRecordItem,
@@ -66,6 +67,7 @@ import type {
   SaleUserPreferences,
   StaffMember,
   StockLogEntry,
+  UserAccessRule,
   WarehouseManagerProfile,
   WorkspaceData,
   WorkspaceLicense,
@@ -103,180 +105,147 @@ export interface WarehouseDirectoryRecord {
 }
 
 export async function resolveWarehouseDirectoryForUid(
-  warehouseUid: string
+  _warehouseUid: string
 ): Promise<WarehouseDirectoryRecord | null> {
-  const cleanUid = String(warehouseUid || '').trim();
-  if (!cleanUid) return null;
-  try {
-    const ref = doc(db, 'warehouseDirectory', cleanUid);
-    const snap = await getDocFromServer(ref).catch(() => getDoc(ref));
-    if (!snap.exists()) return null;
-    const d = snap.data() as Record<string, unknown>;
-    const masterUid = String(d.ownerUid || d.masterUid || '').trim();
-    const masterEmail = String(d.masterEmail || '').trim().toLowerCase();
-    if (!masterUid || !masterEmail) return null;
-    return {
-      warehouseUid: cleanUid,
-      masterUid,
-      masterEmail,
-      name: String(d.name || '').trim(),
-      email: String(d.warehouseEmail || d.email || '').trim().toLowerCase(),
-      assignedAdminEmail: String(d.assignedAdminEmail || masterEmail).trim().toLowerCase(),
-      active: d.active !== false,
-    };
-  } catch {
-    return null;
-  }
+  // Warehouse identity & assignment is resolved via /api/auth/gate-check and developerVault
+  return null;
 }
 
 export async function saveWarehouseMemberDocsFs(
-  masterUid: string,
-  masterEmail: string,
-  profile: WarehouseManagerProfile
+  _masterUid: string,
+  _masterEmail: string,
+  _profile: WarehouseManagerProfile
 ): Promise<void> {
-  if (!auth.currentUser || auth.currentUser.uid !== masterUid) {
-    throw new Error('មានតែ Master Admin ប៉ុណ្ណោះដែលអាចគ្រប់គ្រងអ្នកគ្រប់គ្រងឃ្លាំងបាន។');
-  }
-  const cleanMasterEmail = masterEmail.trim().toLowerCase().slice(0, 200);
-  const cleanWhEmail = profile.email.trim().toLowerCase().slice(0, 200);
-  const cleanAssigned = ((profile.assignedAdminEmail || cleanMasterEmail).trim().toLowerCase()).slice(
-    0,
-    200
-  );
-  const cleanName = profile.name.trim().slice(0, 200);
-  const cleanUid = profile.uid.trim();
-  if (!cleanUid || !cleanWhEmail || !cleanName || !cleanMasterEmail) {
-    throw new Error('ទិន្នន័យអ្នកគ្រប់គ្រងឃ្លាំងមិនគ្រប់គ្រាន់ទេ។');
-  }
-
-  const memRef = doc(db, 'workspaces', masterUid, 'warehouseMembers', cleanUid);
-  const dirRef = doc(db, 'warehouseDirectory', cleanUid);
-
-  const [existingMemSnap, existingDirSnap] = await Promise.all([
-    getDocFromServer(memRef).catch(() => getDoc(memRef)).catch(() => null),
-    getDocFromServer(dirRef).catch(() => getDoc(dirRef)).catch(() => null),
-  ]);
-
-  const fallbackCreatedAt = String(profile.createdAt || new Date().toISOString()).slice(0, 64);
-  const memCreatedAt =
-    existingMemSnap && existingMemSnap.exists()
-      ? String(existingMemSnap.data()?.createdAt || fallbackCreatedAt).slice(0, 64)
-      : fallbackCreatedAt;
-  const dirCreatedAt =
-    existingDirSnap && existingDirSnap.exists()
-      ? String(existingDirSnap.data()?.createdAt || fallbackCreatedAt).slice(0, 64)
-      : fallbackCreatedAt;
-
-  const batch = writeBatch(db);
-  batch.set(memRef, {
-    uid: cleanUid,
-    ownerUid: masterUid,
-    email: cleanWhEmail,
-    name: cleanName,
-    assignedAdminEmail: cleanAssigned,
-    active: profile.active !== false,
-    createdAt: memCreatedAt,
-    serverUpdatedAt: serverTimestamp(),
-  });
-  batch.set(dirRef, {
-    uid: cleanUid,
-    ownerUid: masterUid,
-    masterEmail: cleanMasterEmail,
-    warehouseEmail: cleanWhEmail,
-    name: cleanName,
-    assignedAdminEmail: cleanAssigned,
-    active: profile.active !== false,
-    createdAt: dirCreatedAt,
-    serverUpdatedAt: serverTimestamp(),
-  });
-  try {
-    await batch.commit();
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `workspaces/${masterUid}/warehouseMembers/${cleanUid}`);
-  }
+  // Warehouse profiles are persisted inside settings.accessRules and developerVault.subAdminEmails
 }
 
 export async function deleteWarehouseMemberDocsFs(
-  masterUid: string,
-  warehouseUid: string
+  _masterUid: string,
+  _warehouseUid: string
 ): Promise<void> {
-  if (!auth.currentUser || auth.currentUser.uid !== masterUid) {
-    throw new Error('មានតែ Master Admin ប៉ុណ្ណោះដែលអាចលុបអ្នកគ្រប់គ្រងឃ្លាំងបាន។');
-  }
-  const cleanUid = warehouseUid.trim();
-  if (!cleanUid) return;
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'workspaces', masterUid, 'warehouseMembers', cleanUid));
-  batch.delete(doc(db, 'warehouseDirectory', cleanUid));
-  try {
-    await batch.commit();
-  } catch (err) {
-    handleFirestoreError(err, OperationType.DELETE, `workspaces/${masterUid}/warehouseMembers/${cleanUid}`);
-  }
-}
-
-function sameStringArray(a: unknown, b: string[]): boolean {
-  if (!Array.isArray(a)) return b.length === 0;
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].map((x) => String(x)).sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((val, idx) => val === sortedB[idx]);
+  // Warehouse profiles are removed via settings.accessRules and developerVault.subAdminEmails
 }
 
 export async function syncWarehouseUidsInFirestore(
-  masterUid: string,
-  warehouseProfiles: WarehouseManagerProfile[],
-  masterEmail: string
+  _masterUid: string,
+  _warehouseProfiles: WarehouseManagerProfile[],
+  _masterEmail: string
 ): Promise<void> {
-  if (!auth.currentUser || auth.currentUser.uid !== masterUid) return;
-  const cleanMasterEmail = masterEmail.trim().toLowerCase();
-  const [prodSnap, ordSnap] = await Promise.all([
-    getDocs(query(collection(db, 'workspaces', masterUid, 'products'), where('ownerUid', '==', masterUid))),
-    getDocs(query(collection(db, 'workspaces', masterUid, 'orders'), where('ownerUid', '==', masterUid))),
-  ]);
+  // Warehouse isolation is enforced strictly server-side by /api/warehouse/feed
+}
 
-  const updates: Array<{ ref: QueryDocumentSnapshot<DocumentData>['ref']; warehouseUids: string[] }> = [];
-  for (const d of prodSnap.docs) {
-    const data = d.data();
-    const op = String(data.operatorEmail || cleanMasterEmail).trim().toLowerCase();
-    const expected = computeWarehouseUidsForOperator(warehouseProfiles, op, cleanMasterEmail);
-    if (!sameStringArray(data.warehouseUids, expected)) {
-      updates.push({ ref: d.ref, warehouseUids: expected });
-    }
-  }
-  for (const d of ordSnap.docs) {
-    const data = d.data();
-    const op = String(data.operatorEmail || data.createdByEmail || cleanMasterEmail).trim().toLowerCase();
-    const expected = computeWarehouseUidsForOperator(warehouseProfiles, op, cleanMasterEmail);
-    if (!sameStringArray(data.warehouseUids, expected)) {
-      updates.push({ ref: d.ref, warehouseUids: expected });
-    }
-  }
+function unpackSettingsFromFirestore(
+  raw: Record<string, unknown> | undefined,
+  email: string,
+  displayName: string
+): WorkspaceSettings {
+  const base = defaultSettings(email, displayName);
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const rawAccess = Array.isArray(src.accessRules) ? src.accessRules : [];
+  const cleanAccessRules: UserAccessRule[] = [];
+  const whMap = new Map<string, WarehouseManagerProfile>();
 
-  const BATCH_LIMIT = 400;
-  for (let i = 0; i < updates.length; i += BATCH_LIMIT) {
-    const chunk = updates.slice(i, i + BATCH_LIMIT);
-    const batch = writeBatch(db);
-    for (const item of chunk) {
-      batch.update(item.ref, {
-        warehouseUids: item.warehouseUids,
-        serverUpdatedAt: serverTimestamp(),
+  if (Array.isArray(src.warehouseProfiles)) {
+    for (const wp of src.warehouseProfiles as Partial<WarehouseManagerProfile>[]) {
+      if (!wp || typeof wp !== 'object') continue;
+      const wpUid = String(wp.uid || '').trim();
+      const wpEmail = String(wp.email || '').trim().toLowerCase();
+      if (!wpUid || !wpEmail) continue;
+      whMap.set(wpUid, {
+        id: String(wp.id || `wh-${wpUid}`),
+        uid: wpUid,
+        name: String(wp.name || '').trim(),
+        email: wpEmail,
+        assignedAdminEmail: String(wp.assignedAdminEmail || email).trim().toLowerCase(),
+        active: wp.active !== false,
+        createdAt: String(wp.createdAt || ''),
+        ...(wp.updatedAt ? { updatedAt: String(wp.updatedAt) } : {}),
       });
     }
-    try {
-      await batch.commit();
-    } catch {
-      // Fallback per-document so a single legacy record with non-standard fields does not block all others
-      await Promise.allSettled(
-        chunk.map((item) =>
-          updateDoc(item.ref, {
-            warehouseUids: item.warehouseUids,
-            serverUpdatedAt: serverTimestamp(),
-          })
-        )
-      );
+  }
+
+  for (const item of rawAccess) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.__whProfile === true) {
+      const wpUid = String(obj.uid || '').trim();
+      const wpEmail = String(obj.email || '').trim().toLowerCase();
+      if (!wpUid || !wpEmail) continue;
+      whMap.set(wpUid, {
+        id: String(obj.id || `wh-${wpUid}`),
+        uid: wpUid,
+        name: String(obj.name || '').trim(),
+        email: wpEmail,
+        assignedAdminEmail: String(obj.assignedAdminEmail || email).trim().toLowerCase(),
+        active: obj.active !== false,
+        createdAt: String(obj.createdAt || ''),
+        ...(obj.updatedAt ? { updatedAt: String(obj.updatedAt) } : {}),
+      });
+    } else {
+      cleanAccessRules.push(item as UserAccessRule);
     }
   }
+
+  return {
+    ...base,
+    ...(src as Partial<WorkspaceSettings>),
+    saleProfiles: Array.isArray(src.saleProfiles) ? (src.saleProfiles as SaleProfile[]) : [],
+    adminProfiles: Array.isArray(src.adminProfiles) ? (src.adminProfiles as AdminProfile[]) : [],
+    accessRules: cleanAccessRules,
+    warehouseProfiles: Array.from(whMap.values()),
+  };
+}
+
+function packSettingsForFirestore(settings: WorkspaceSettings): Record<string, unknown> {
+  const cleanAccess = (Array.isArray(settings.accessRules) ? settings.accessRules : [])
+    .filter((r) => Boolean(r && typeof r === 'object' && !(r as unknown as Record<string, unknown>).__whProfile))
+    .slice(0, 60);
+
+  const packedWh = (Array.isArray(settings.warehouseProfiles) ? settings.warehouseProfiles : [])
+    .filter((wp) => Boolean(wp && wp.uid && wp.email))
+    .slice(0, 40)
+    .map((wp) => ({
+      __whProfile: true,
+      id: String(wp.id || `wh-${wp.uid}`),
+      uid: String(wp.uid).trim(),
+      name: String(wp.name || '').trim().slice(0, 200),
+      email: String(wp.email || '').trim().toLowerCase().slice(0, 200),
+      assignedAdminEmail: String(wp.assignedAdminEmail || '')
+        .trim()
+        .toLowerCase()
+        .slice(0, 200),
+      active: wp.active !== false,
+      createdAt: String(wp.createdAt || ''),
+      ...(wp.updatedAt ? { updatedAt: String(wp.updatedAt).slice(0, 64) } : {}),
+    }));
+
+  return {
+    personalName: String(settings.personalName || '').slice(0, 200),
+    personalPhone: String(settings.personalPhone || '').slice(0, 64),
+    businessName: String(settings.businessName || 'DR-POS').slice(0, 200),
+    darkMode: Boolean(settings.darkMode),
+    language: settings.language === 'en' || settings.language === 'kr' ? settings.language : 'kh',
+    currency: settings.currency === 'kh' || settings.currency === 'kr' ? settings.currency : 'en',
+    soundEnabled: Boolean(settings.soundEnabled),
+    warehouses: (Array.isArray(settings.warehouses) ? settings.warehouses : [])
+      .map((x) => String(x || ''))
+      .slice(0, 100),
+    stores: (Array.isArray(settings.stores) ? settings.stores : [])
+      .map((x) => String(x || ''))
+      .slice(0, 100),
+    groups: (Array.isArray(settings.groups) ? settings.groups : [])
+      .map((x) => String(x || ''))
+      .slice(0, 100),
+    categories: (Array.isArray(settings.categories) ? settings.categories : [])
+      .map((x) => String(x || ''))
+      .slice(0, 100),
+    accessRules: [...cleanAccess, ...packedWh],
+    saleProfiles: (Array.isArray(settings.saleProfiles) ? settings.saleProfiles : []).slice(0, 100),
+    adminProfiles: (Array.isArray(settings.adminProfiles) ? settings.adminProfiles : []).slice(
+      0,
+      100
+    ),
+  };
 }
 
 export async function fetchLatestWorkspaceSaleProfilesFromServer(
@@ -466,21 +435,21 @@ async function cleanupLegacySampleDataIfNeeded(
       nextCategories.length !== curCategories.length ||
       hasSamplePhone
     ) {
+      const unpacked = unpackSettingsFromFirestore(
+        raw as Record<string, unknown>,
+        String(wsData.ownerEmail || ''),
+        String(raw.personalName || '')
+      );
       const cleanedSettings: WorkspaceSettings = {
-        ...defaultSettings(String(wsData.ownerEmail || ''), String(raw.personalName || '')),
-        ...raw,
+        ...unpacked,
         personalPhone: hasSamplePhone ? '' : String(raw.personalPhone || ''),
         warehouses: nextWarehouses,
         stores: nextStores,
         groups: nextGroups,
         categories: nextCategories,
-        accessRules: Array.isArray(raw.accessRules) ? raw.accessRules : [],
-        saleProfiles: Array.isArray(raw.saleProfiles) ? raw.saleProfiles : [],
-        adminProfiles: Array.isArray(raw.adminProfiles) ? raw.adminProfiles : [],
-        warehouseProfiles: Array.isArray(raw.warehouseProfiles) ? raw.warehouseProfiles : [],
       };
       batch.update(doc(targetDb, 'workspaces', uid), {
-        settings: cleanedSettings,
+        settings: packSettingsForFirestore(cleanedSettings),
         serverUpdatedAt: serverTimestamp(),
       });
       hasWrites = true;
@@ -551,7 +520,7 @@ export async function seedWorkspaceIfNeeded(
   batch.set(wsRef, {
     ownerUid: uid,
     ownerEmail: email,
-    settings: initialSettings,
+    settings: packSettingsForFirestore(initialSettings),
     license: initialLicense,
     serverCreatedAt: serverTimestamp(),
     serverUpdatedAt: serverTimestamp(),
@@ -947,6 +916,189 @@ export function subscribeToWorkspace(
   };
 
   const wsPath = `workspaces/${uid}`;
+
+  if (isWarehouseViewer) {
+    let lastFeedVersion = '';
+    let feedPollInFlight = false;
+    let pollTimerId: number | null = null;
+    let lastVaultSig = '';
+
+    const pollWarehouseFeed = async (forceRefresh = false) => {
+      if (disposed || feedPollInFlight) return;
+      feedPollInFlight = true;
+      try {
+        const token = await auth.currentUser?.getIdToken().catch(() => '');
+        if (!token || disposed) return;
+        const qp = new URLSearchParams();
+        if (lastFeedVersion && !forceRefresh) {
+          qp.set('sinceVersion', lastFeedVersion);
+        }
+        if (forceRefresh) {
+          qp.set('force', '1');
+        }
+        const res = await fetch(`/api/warehouse/feed?${qp.toString()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Cache-Control': 'no-cache',
+          },
+        });
+        if (disposed) return;
+
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          unchanged?: boolean;
+          version?: string;
+          masterEmail?: string;
+          settings?: WorkspaceSettings;
+          license?: WorkspaceLicense;
+          products?: Product[];
+          orders?: Order[];
+          error?: string;
+        };
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            if (pollTimerId !== null && typeof window !== 'undefined') {
+              window.clearInterval(pollTimerId);
+              pollTimerId = null;
+            }
+            callbacks.onError(
+              new Error(
+                data.error ||
+                  'គ្មានសិទ្ធិចូលប្រើទិន្នន័យឃ្លាំងនេះទេ។ សូមពិនិត្យការចូលគណនី Gmail ម្ដងទៀត។'
+              )
+            );
+          }
+          return;
+        }
+
+        if (data.version) {
+          lastFeedVersion = data.version;
+        }
+        if (data.unchanged) {
+          return;
+        }
+
+        if (data.masterEmail) {
+          currentEmail = String(data.masterEmail).toLowerCase();
+        }
+        if (data.settings) {
+          currentSettings = {
+            ...defaultSettings(currentEmail, displayName),
+            ...data.settings,
+          };
+        }
+        docLicense = data.license;
+
+        const nextProducts = Array.isArray(data.products) ? data.products : [];
+        const nextOrders = Array.isArray(data.orders) ? data.orders : [];
+
+        const newlyArrived: Order[] = [];
+        if (!initialOrdersLoaded) {
+          for (const o of nextOrders) {
+            if (o?.id) knownOrderIds.add(o.id);
+          }
+          initialOrdersLoaded = true;
+        } else {
+          for (const o of nextOrders) {
+            if (o?.id && !knownOrderIds.has(o.id)) {
+              knownOrderIds.add(o.id);
+              newlyArrived.push(o);
+            }
+          }
+        }
+
+        products = nextProducts;
+        productsDirty = true;
+        liveOrders = nextOrders;
+        olderOrders = [];
+        ordersDirty = true;
+        hasMoreOrders = false;
+        initialProductsLoaded = true;
+        initialStaffLoaded = true;
+        initialPricesLoaded = true;
+        initialStockLogsLoaded = true;
+        initialProblemsLoaded = true;
+        rootFromCache = false;
+        rootReady = true;
+
+        emit(newlyArrived);
+      } catch {
+        // Keep retrying smoothly on transient network blips
+      } finally {
+        feedPollInFlight = false;
+      }
+    };
+
+    const unsubDeveloperVault = subscribeToDeveloperVault(
+      (nextVault) => {
+        if (disposed) return;
+        vaultData = nextVault;
+        const myEntry = Object.values(nextVault.warehouseEmails || {}).find(
+          (w) => w.uid === warehouseViewerUid
+        );
+        const nextSig = myEntry
+          ? `${myEntry.name}|${myEntry.assignedAdminEmail}|${myEntry.active}|${nextVault.updatedAt}`
+          : `missing|${nextVault.updatedAt}`;
+        if (nextSig !== lastVaultSig) {
+          lastVaultSig = nextSig;
+          void pollWarehouseFeed(true);
+        }
+      },
+      () => {}
+    );
+
+    void pollWarehouseFeed(true);
+
+    const onWarehouseFocus = () => {
+      if (disposed) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void pollWarehouseFeed(true);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onWarehouseFocus);
+      window.addEventListener('online', onWarehouseFocus);
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', onWarehouseFocus);
+      }
+      pollTimerId = window.setInterval(() => {
+        if (disposed) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        void pollWarehouseFeed(false);
+      }, 3500);
+    }
+
+    return {
+      unsubscribe: () => {
+        disposed = true;
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('focus', onWarehouseFocus);
+          window.removeEventListener('online', onWarehouseFocus);
+          if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', onWarehouseFocus);
+          }
+          if (pollTimerId !== null) {
+            window.clearInterval(pollTimerId);
+            pollTimerId = null;
+          }
+          if (emitTimerId !== null) {
+            window.clearTimeout(emitTimerId);
+            emitTimerId = null;
+          }
+        }
+        unsubDeveloperVault();
+      },
+      loadMoreOrders: async () => false,
+      loadMoreStockLogs: async () => false,
+      searchOrdersFromMongo: async () => [],
+      evictOrders: () => {},
+      evictStockLogs: () => {},
+    };
+  }
+
   const unsubRoot = onSnapshot(
     doc(db, 'workspaces', uid),
     { includeMetadataChanges: true },
@@ -967,16 +1119,8 @@ export function subscribeToWorkspace(
       rootFromCache = Boolean(snap.metadata.fromCache);
       const d = snap.data();
       currentEmail = String(d.ownerEmail || email).toLowerCase();
-      const rawSettings = d.settings || {};
-      currentSettings = {
-        ...defaultSettings(currentEmail, displayName),
-        ...rawSettings,
-        saleProfiles: Array.isArray(rawSettings.saleProfiles) ? rawSettings.saleProfiles : [],
-        adminProfiles: Array.isArray(rawSettings.adminProfiles) ? rawSettings.adminProfiles : [],
-        warehouseProfiles: Array.isArray(rawSettings.warehouseProfiles)
-          ? rawSettings.warehouseProfiles
-          : [],
-      };
+      const rawSettings = (d.settings || {}) as Record<string, unknown>;
+      currentSettings = unpackSettingsFromFirestore(rawSettings, currentEmail, displayName);
       if (d.license && typeof d.license === 'object') {
         docLicense = {
           trialStartedAt: String(d.license.trialStartedAt || ''),
@@ -1862,17 +2006,10 @@ export async function saveProductFs(
   const cleanPromo = Math.max(0, Number(payload.promotion) || 0);
   const cleanOp = operatorEmail.trim().toLowerCase().slice(0, 200);
   const existing = payload.id ? currentProducts.find((p) => p.id === payload.id) : undefined;
-  const masterOwnerEmail = String(auth.currentUser?.email || cleanOp || '').trim().toLowerCase();
-
   if (existing) {
     const prodPath = `workspaces/${uid}/products/${existing.id}`;
     const prodRef = doc(db, 'workspaces', uid, 'products', existing.id);
     const delta = cleanStock - existing.stock;
-    const warehouseUids = computeWarehouseUidsForOperator(
-      settings.warehouseProfiles,
-      existing.operatorEmail || cleanOp || masterOwnerEmail,
-      masterOwnerEmail
-    );
     const batch = writeBatch(db);
     batch.update(prodRef, {
       name,
@@ -1884,7 +2021,6 @@ export async function saveProductFs(
       barcode: String(payload.barcode ?? existing.barcode).trim().slice(0, 120),
       category: String(payload.category ?? existing.category).trim().slice(0, 120),
       warehouse: String(payload.warehouse ?? existing.warehouse).trim().slice(0, 120),
-      warehouseUids,
       updatedAt: now.toISOString(),
       serverUpdatedAt: serverTimestamp(),
     });
@@ -1927,12 +2063,6 @@ export async function saveProductFs(
     .trim()
     .slice(0, 120);
 
-  const newWarehouseUids = computeWarehouseUidsForOperator(
-    settings.warehouseProfiles,
-    cleanOp || masterOwnerEmail,
-    masterOwnerEmail
-  );
-
   const batch = writeBatch(db);
   batch.set(doc(db, 'workspaces', uid, 'products', newId), {
     id: newId,
@@ -1946,7 +2076,6 @@ export async function saveProductFs(
     barcode: String(payload.barcode || '').trim().slice(0, 120),
     category: String(payload.category || settings.categories[0] || 'ទូទៅ').trim().slice(0, 120),
     warehouse,
-    warehouseUids: newWarehouseUids,
     sortOrder: maxSort + 1,
     updatedAt: now.toISOString(),
     ...(cleanOp ? { operatorEmail: cleanOp } : {}),
@@ -2253,12 +2382,6 @@ export async function createOrderFs(
     operatorEmail: operatorEmail || userEmail,
   };
 
-  const orderWarehouseUids = computeWarehouseUidsForOperator(
-    settings.warehouseProfiles,
-    operatorEmail || userEmail,
-    userEmail
-  );
-
   const batch = writeBatch(db);
   for (const [pid, { qtyUsed }] of usedQtyByProdId.entries()) {
     batch.update(doc(db, 'workspaces', uid, 'products', pid), {
@@ -2269,7 +2392,6 @@ export async function createOrderFs(
   }
   batch.set(orderRef, {
     ...createdOrder,
-    warehouseUids: orderWarehouseUids,
     ownerUid: uid,
     serverCreatedAt: serverTimestamp(),
     serverUpdatedAt: serverTimestamp(),
@@ -2885,7 +3007,7 @@ export async function updateSettingsFs(
   };
   try {
     await updateDoc(doc(db, 'workspaces', uid), {
-      settings: merged,
+      settings: packSettingsForFirestore(merged),
       serverUpdatedAt: serverTimestamp(),
     });
   } catch (err) {
@@ -2974,11 +3096,16 @@ export async function updateSalePreferencesFs(
           : sp
       );
 
+      const unpackedLatest = unpackSettingsFromFirestore(
+        latestSettings as Record<string, unknown>,
+        String(data.ownerEmail || ''),
+        String(latestSettings.personalName || '')
+      );
       tx.update(wsRef, {
-        settings: {
-          ...latestSettings,
+        settings: packSettingsForFirestore({
+          ...unpackedLatest,
           saleProfiles: nextProfiles.slice(0, 100),
-        },
+        }),
         serverUpdatedAt: serverTimestamp(),
       });
 
@@ -3070,17 +3197,16 @@ export async function deleteAccountWorkspaceFs(
           emailSet.add(cleanAdm);
         }
       }
-      const docWhs = Array.isArray(wsData?.settings?.warehouseProfiles)
-        ? wsData.settings!.warehouseProfiles!
-        : [];
+      const unpackedWs = unpackSettingsFromFirestore(
+        (wsData?.settings || {}) as Record<string, unknown>,
+        docOwnerEmail,
+        ''
+      );
+      const docWhs = unpackedWs.warehouseProfiles || [];
       for (const wh of docWhs) {
         const cleanWh = String(wh?.email || '').trim().toLowerCase();
         if (cleanWh && cleanWh.includes('@')) {
           whEmailSet.add(cleanWh);
-        }
-        const cleanWhUid = String(wh?.uid || '').trim();
-        if (cleanWhUid) {
-          whUidSet.add(cleanWhUid);
         }
       }
     }
@@ -3111,11 +3237,6 @@ export async function deleteAccountWorkspaceFs(
     warehouseEmails: allWhEmails,
   });
 
-  // Clean up warehouseDirectory docs
-  for (const whUid of whUidSet) {
-    await deleteDoc(doc(db, 'warehouseDirectory', whUid)).catch(() => {});
-  }
-
   // 3. Delete all Firestore subcollections
   const subcollections = [
     'products',
@@ -3126,7 +3247,6 @@ export async function deleteAccountWorkspaceFs(
     'problemCustomers',
     'salePresence',
     'activityLogs',
-    'warehouseMembers',
   ] as const;
 
   for (const sub of subcollections) {
@@ -3599,4 +3719,29 @@ export async function purgeExpiredActivityLogsFs(
     deletedCount: deletedIds.length,
     deletedIds,
   };
+}
+
+export async function pushWarehouseMirrorToServer(workspace: WorkspaceData): Promise<void> {
+  const masterUid = auth.currentUser?.uid;
+  if (!masterUid || !workspace) return;
+  try {
+    const token = await auth.currentUser?.getIdToken().catch(() => '');
+    if (!token) return;
+    await fetch('/api/warehouse/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        masterUid,
+        masterEmail: workspace.email,
+        settings: workspace.settings,
+        products: workspace.products,
+        orders: workspace.orders,
+      }),
+    });
+  } catch {
+    // Non-fatal background mirror sync
+  }
 }

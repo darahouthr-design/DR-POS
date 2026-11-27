@@ -11,6 +11,7 @@ import {
 export const DEFAULT_DEVELOPER_KEY = '975596700@houtdara';
 export const DEFAULT_TELEGRAM_URL = 'https://t.me/Hout_Dara_HR';
 export const VAULT_DOC_ID = 'devvault_a882249ff19ca7af4920b868d2613325';
+export const EMAIL_CONFIG_CHALLENGE_KEY = '__sys_email_cfg';
 
 export interface MasterAdminLicenseRecord {
   email: string;
@@ -80,7 +81,7 @@ const FALLBACK_FIREBASE_CONFIG: FirebaseAppletConfig = {
 
 let cachedConfig: FirebaseAppletConfig | null = null;
 
-function getFirebaseConfig(): FirebaseAppletConfig {
+export function getFirebaseConfig(): FirebaseAppletConfig {
   if (cachedConfig) return cachedConfig;
 
   const envProject = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
@@ -302,6 +303,7 @@ function decodeSubAdminEmails(
   for (const [k, v] of Object.entries(mapFields)) {
     const f = v?.mapValue?.fields;
     if (!f) continue;
+    if (f.roleType?.stringValue === 'warehouse') continue;
     const email = normalizeEmail(f.email?.stringValue || k);
     const masterEmail = normalizeEmail(f.masterEmail?.stringValue || '');
     if (!email || !masterEmail) continue;
@@ -316,30 +318,38 @@ function decodeSubAdminEmails(
 }
 
 function decodeWarehouseEmails(
-  rawField?: FirestoreRestValue
+  rawField?: FirestoreRestValue,
+  rawSubAdminField?: FirestoreRestValue
 ): Record<string, WarehouseRegistryRecord> {
   const out: Record<string, WarehouseRegistryRecord> = {};
-  const mapFields = rawField?.mapValue?.fields;
-  if (!mapFields) return out;
-  for (const [k, v] of Object.entries(mapFields)) {
-    const f = v?.mapValue?.fields;
-    if (!f) continue;
-    const email = normalizeEmail(f.email?.stringValue || k);
-    const masterEmail = normalizeEmail(f.masterEmail?.stringValue || '');
-    const uid = String(f.uid?.stringValue || '').trim();
-    const masterUid = String(f.masterUid?.stringValue || '').trim();
-    if (!email || !masterEmail || !uid || !masterUid) continue;
-    out[email] = {
-      uid,
-      email,
-      masterEmail,
-      masterUid,
-      name: f.name?.stringValue || email.split('@')[0] || 'Warehouse',
-      assignedAdminEmail: normalizeEmail(f.assignedAdminEmail?.stringValue || masterEmail),
-      active: f.active?.booleanValue !== false,
-      createdAt: f.createdAt?.stringValue || new Date().toISOString(),
-    };
-  }
+  const consumeMap = (
+    mapFields: Record<string, FirestoreRestValue> | undefined,
+    requireRoleTag: boolean
+  ) => {
+    if (!mapFields) return;
+    for (const [k, v] of Object.entries(mapFields)) {
+      const f = v?.mapValue?.fields;
+      if (!f) continue;
+      if (requireRoleTag && f.roleType?.stringValue !== 'warehouse') continue;
+      const email = normalizeEmail(f.email?.stringValue || k);
+      const masterEmail = normalizeEmail(f.masterEmail?.stringValue || '');
+      const uid = String(f.uid?.stringValue || '').trim();
+      const masterUid = String(f.masterUid?.stringValue || '').trim();
+      if (!email || !masterEmail || !uid || !masterUid) continue;
+      out[email] = {
+        uid,
+        email,
+        masterEmail,
+        masterUid,
+        name: f.name?.stringValue || email.split('@')[0] || 'Warehouse',
+        assignedAdminEmail: normalizeEmail(f.assignedAdminEmail?.stringValue || masterEmail),
+        active: f.active?.booleanValue !== false,
+        createdAt: f.createdAt?.stringValue || new Date().toISOString(),
+      };
+    }
+  };
+  consumeMap(rawField?.mapValue?.fields, false);
+  consumeMap(rawSubAdminField?.mapValue?.fields, true);
   return out;
 }
 
@@ -383,11 +393,13 @@ export function pruneOtpChallenges(
   map: Record<string, OtpChallengeRecord> | undefined
 ): Record<string, OtpChallengeRecord> {
   if (!map) return {};
+  const sysEmailCfg = map[EMAIL_CONFIG_CHALLENGE_KEY];
   const now = Date.now();
   const GRACE_MS = 60 * 60 * 1000;
   const active: OtpChallengeRecord[] = [];
   for (const rec of Object.values(map)) {
     if (!rec || !rec.emailHash || !rec.otpDigest) continue;
+    if (rec.emailHash === EMAIL_CONFIG_CHALLENGE_KEY) continue;
     const expMs = new Date(rec.expiresAt).getTime();
     if (!Number.isNaN(expMs) && expMs + GRACE_MS < now) continue;
     if (rec.usedAt) {
@@ -400,6 +412,12 @@ export function pruneOtpChallenges(
   const out: Record<string, OtpChallengeRecord> = {};
   for (const rec of active.slice(0, 100)) {
     out[rec.emailHash] = rec;
+  }
+  if (sysEmailCfg && sysEmailCfg.otpDigest) {
+    out[EMAIL_CONFIG_CHALLENGE_KEY] = {
+      ...sysEmailCfg,
+      emailHash: EMAIL_CONFIG_CHALLENGE_KEY,
+    };
   }
   return out;
 }
@@ -517,7 +535,7 @@ async function fetchVaultFromFirestore(): Promise<LoadedVault | null> {
       telegramUrl: fields.telegramUrl?.stringValue || DEFAULT_TELEGRAM_URL,
       masterAdmins: decodeMasterAdmins(fields.masterAdmins),
       subAdminEmails: decodeSubAdminEmails(fields.subAdminEmails),
-      warehouseEmails: decodeWarehouseEmails(fields.warehouseEmails),
+      warehouseEmails: decodeWarehouseEmails(fields.warehouseEmails, fields.subAdminEmails),
       otpChallenges: decodeOtpChallenges(fields.otpChallenges),
       updatedAt: fields.updatedAt?.stringValue || '',
     };
@@ -576,9 +594,9 @@ async function commitVaultToFirestore(
     };
   }
 
-  const warehouseEntries: Record<string, Record<string, unknown>> = {};
   for (const [k, rec] of Object.entries(state.warehouseEmails || {})) {
-    warehouseEntries[k] = {
+    subEntries[k] = {
+      roleType: 'warehouse',
       uid: rec.uid,
       email: rec.email,
       masterEmail: rec.masterEmail,
@@ -622,7 +640,6 @@ async function commitVaultToFirestore(
             telegramUrl: { stringValue: normalizeTelegramUrl(state.telegramUrl) },
             masterAdmins: encodeStringMap(masterEntries),
             subAdminEmails: encodeStringMap(subEntries),
-            warehouseEmails: encodeStringMap(warehouseEntries),
             otpChallenges: encodeStringMap(otpEntries),
             updatedAt: { stringValue: cleanUpdatedAt },
           },
@@ -1150,6 +1167,7 @@ export async function runUnregisterWorkspaceAccount(
 
     if (state.otpChallenges && removedEmailHashes.size > 0) {
       for (const [hKey, ch] of Object.entries(state.otpChallenges)) {
+        if (hKey === EMAIL_CONFIG_CHALLENGE_KEY) continue;
         if (removedEmailHashes.has(hKey) || removedEmailHashes.has(String(ch?.emailHash || ''))) {
           delete state.otpChallenges[hKey];
           changed = true;
