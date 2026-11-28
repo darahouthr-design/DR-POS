@@ -1,6 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowDown, ArrowUp, Camera, CheckCircle2, ChevronDown, GripVertical, PackagePlus, Plus, QrCode, Search, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Camera, CheckCircle2, ChevronDown, GripVertical, Link2, PackagePlus, Plus, QrCode, Search, Upload, X } from 'lucide-react';
 import { Icon3D } from './Icon3D';
 import { BarcodeScannerModal, Button, Field, ProductCameraModal, ProductImage, Surface, inputClass } from './ui';
 import {
@@ -60,6 +60,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
   const [costPrice, setCostPrice] = useState('0');
   const [sellingPrice, setSellingPrice] = useState('0');
   const [promotion, setPromotion] = useState('0');
@@ -229,6 +230,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setEditingId(null);
     setName('');
     setImageUrl('');
+    setShowUrlInput(false);
     setCostPrice('0');
     setSellingPrice('0');
     setPromotion('0');
@@ -305,6 +307,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     setEditingId(p.id);
     setName(p.name);
     setImageUrl(p.imageUrl);
+    setShowUrlInput(false);
     setCostPrice(String(usdToInputAmount(p.costPrice, currency)));
     setSellingPrice(String(usdToInputAmount(p.sellingPrice, currency)));
     setPromotion(String(usdToInputAmount(p.promotion || 0, currency)));
@@ -446,7 +449,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     const ok = await onSaveProduct({
       id: editingId || undefined,
       name: name.trim(),
-      imageUrl,
+      imageUrl: imageUrl.trim().slice(0, 2000),
       costPrice: inputAmountToUsd(Math.max(0, Number(costPrice) || 0), currency),
       sellingPrice: inputAmountToUsd(Math.max(0, Number(sellingPrice) || 0), currency),
       promotion: inputAmountToUsd(Math.max(0, Number(promotion) || 0), currency),
@@ -710,7 +713,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
               </div>
             </div>
           ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-1 gap-2.5 sm:gap-3.5 lg:gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4">
           {visibleProductsList.map((prod) => {
             const orderIdx = localOrder.findIndex((item) => item.id === prod.id);
             const idx = orderIdx >= 0 ? orderIdx : 0;
@@ -745,7 +748,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                 }}
                 onPointerUp={clearLongPressTimer}
                 onPointerLeave={clearLongPressTimer}
-                className={`rounded-card border p-2.5 sm:p-3.5 lg:p-4 flex flex-col justify-between transition-colors ${
+                className={`rounded-card border p-2.5 sm:p-4 flex flex-col justify-between h-full min-w-0 transition-colors ${
                   isReordering
                     ? 'border-primary bg-primary/8 shadow-float cursor-grabbing'
                     : prod.stock <= 0
@@ -753,9 +756,8 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     : 'border-border/80 bg-surface'
                 }`}
               >
-                {/* Mobile & Tablet (< lg): 2-Column POS-Style Product Card */}
-                <div className="flex flex-col justify-between h-full space-y-2.5 sm:space-y-3 lg:hidden">
-                  <div className="space-y-2 sm:space-y-2.5">
+                <div className="flex flex-col justify-between h-full space-y-2.5 sm:space-y-3 min-w-0">
+                  <div className="space-y-2 sm:space-y-2.5 min-w-0">
                     <div className="relative">
                       <ProductImage
                         src={prod.imageUrl}
@@ -792,7 +794,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="border-t border-border/50 pt-2 sm:pt-2.5 space-y-2">
+                  <div className="border-t border-border/50 pt-2 sm:pt-2.5 space-y-2 min-w-0">
                     <div className="flex flex-wrap items-baseline justify-between gap-1">
                       {!hidePrices && (
                         <div className="min-w-0">
@@ -834,184 +836,87 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                           e.stopPropagation();
                           clearLongPressTimer();
                         }}
-                        className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-border/40"
+                        className="space-y-1.5 pt-2 border-t border-border/40 min-w-0"
                       >
-                        <Button
-                          tone="quiet"
-                          onClick={() => moveItemByIndex(idx, -1)}
-                          disabled={idx === 0 || isFiltering}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                          title={t.products.moveUp}
-                          aria-label={t.products.moveUp}
-                        >
-                          <ArrowUp className="h-3.5 w-3.5 shrink-0" />
-                        </Button>
-                        <Button
-                          tone="quiet"
-                          onClick={() => moveItemByIndex(idx, 1)}
-                          disabled={idx === localOrder.length - 1 || isFiltering}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                          title={t.products.moveDown}
-                          aria-label={t.products.moveDown}
-                        >
-                          <ArrowDown className="h-3.5 w-3.5 shrink-0" />
-                        </Button>
-                        <Button
-                          tone="quiet"
-                          onClick={() => openItemCamera(prod)}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                          title={t.ui.cameraPhotoTitle}
-                          aria-label={t.products.capturePhotoBtn}
-                        >
-                          <Camera className="h-3.5 w-3.5 text-primary shrink-0" />
-                        </Button>
-                        <Button
-                          tone={quickStockId === prod.id ? 'primary' : 'quiet'}
-                          onClick={() => toggleQuickStock(prod)}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                          title={t.products.adjustStockBtn}
-                          aria-label={t.products.adjustStockBtn}
-                        >
-                          <PackagePlus
-                            className={`h-3.5 w-3.5 shrink-0 ${
-                              quickStockId === prod.id ? '' : 'text-primary'
-                            }`}
-                          />
-                        </Button>
-                        <Button
-                          tone="quiet"
-                          onClick={() => loadForEdit(prod)}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                        >
-                          <Icon3D name="edit" size={14} />{' '}
-                          <span className="truncate">{t.common.edit}</span>
-                        </Button>
-                        <Button
-                          tone="danger"
-                          onClick={() => onDeleteProduct(prod.id)}
-                          className="min-h-8 px-1.5 text-[11px] whitespace-nowrap"
-                        >
-                          <Icon3D name="trash" size={14} />{' '}
-                          <span className="truncate">{t.common.delete}</span>
-                        </Button>
+                        {/* 1. Reorder strip (ប្ដូរទីតាំង Product) */}
+                        <div className="flex items-center justify-between gap-1.5 rounded-control border border-border/60 bg-background/70 px-2 py-1 min-w-0">
+                          <span
+                            className="inline-flex items-center gap-1 text-[10.5px] sm:text-[11px] font-medium text-muted truncate min-w-0 cursor-grab"
+                            title={t.products.dragHint}
+                          >
+                            <GripVertical className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{t.products.reorderLabel}</span>
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              tone="quiet"
+                              onClick={() => moveItemByIndex(idx, -1)}
+                              disabled={idx === 0 || isFiltering}
+                              className="min-h-7 h-7 w-7 px-0"
+                              title={t.products.moveUp}
+                              aria-label={t.products.moveUp}
+                            >
+                              <ArrowUp className="h-3.5 w-3.5 shrink-0" />
+                            </Button>
+                            <Button
+                              tone="quiet"
+                              onClick={() => moveItemByIndex(idx, 1)}
+                              disabled={idx === localOrder.length - 1 || isFiltering}
+                              className="min-h-7 h-7 w-7 px-0"
+                              title={t.products.moveDown}
+                              aria-label={t.products.moveDown}
+                            >
+                              <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* 2. Standardized 2x2 Action Buttons: Camera, Stock +/-, Edit, Delete */}
+                        <div className="grid grid-cols-2 gap-1.5 min-w-0">
+                          <Button
+                            tone="quiet"
+                            onClick={() => openItemCamera(prod)}
+                            className="min-h-9 px-2 text-[11px] sm:text-xs justify-center min-w-0"
+                            title={t.ui.cameraPhotoTitle}
+                            aria-label={t.products.capturePhotoBtn}
+                          >
+                            <Camera className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="truncate">{t.products.capturePhotoBtn}</span>
+                          </Button>
+                          <Button
+                            tone={quickStockId === prod.id ? 'primary' : 'quiet'}
+                            onClick={() => toggleQuickStock(prod)}
+                            className="min-h-9 px-2 text-[11px] sm:text-xs justify-center min-w-0"
+                            title={t.products.adjustStockBtn}
+                            aria-label={t.products.adjustStockBtn}
+                          >
+                            <PackagePlus
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                quickStockId === prod.id ? '' : 'text-primary'
+                              }`}
+                            />
+                            <span className="truncate">{t.products.adjustStockBtn}</span>
+                          </Button>
+                          <Button
+                            tone="quiet"
+                            onClick={() => loadForEdit(prod)}
+                            className="min-h-9 px-2 text-[11px] sm:text-xs justify-center min-w-0"
+                          >
+                            <Icon3D name="edit" size={14} />
+                            <span className="truncate">{t.common.edit}</span>
+                          </Button>
+                          <Button
+                            tone="danger"
+                            onClick={() => onDeleteProduct(prod.id)}
+                            className="min-h-9 px-2 text-[11px] sm:text-xs justify-center min-w-0"
+                          >
+                            <Icon3D name="trash" size={14} />
+                            <span className="truncate">{t.common.delete}</span>
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
-                </div>
-
-                {/* Desktop (>= lg): Full-width Horizontal Product Management Row */}
-                <div className="hidden lg:flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 xl:gap-4">
-                  <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
-                    {!readOnly && (
-                      <div
-                        className="text-muted cursor-grab shrink-0 pt-2 sm:pt-0"
-                        title={t.products.dragHint}
-                      >
-                        <GripVertical className="h-5 w-5" />
-                      </div>
-                    )}
-
-                    <ProductImage
-                      src={prod.imageUrl}
-                      alt={prod.name}
-                      className="h-20 w-20 shrink-0"
-                      onZoom={onZoomImage}
-                    />
-
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-mono text-muted">#{idx + 1}</span>
-                        <h4 className="font-semibold text-sm text-foreground break-words leading-snug">{prod.name}</h4>
-                      </div>
-                      <p className="text-xs text-muted break-words leading-relaxed">
-                        {t.products.categoryPrefix} {prod.category}
-                        {!hideWarehouse && prod.warehouse ? ` · ${t.products.warehousePrefix} ${prod.warehouse}` : ''}
-                        {prod.barcode ? ` · ${t.products.barcodePrefix} ${prod.barcode}` : ''}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-                        {!readOnly && !hidePrices && (
-                          <span>
-                            {t.products.costPrefix} <strong>{formatMoney(prod.costPrice, currency)}</strong>
-                          </span>
-                        )}
-                        {!hidePrices && (
-                          <span>
-                            {t.products.sellPrefix} <strong className="text-primary">{formatMoney(effective, currency)}</strong>
-                          </span>
-                        )}
-                        {!hidePrices && prod.promotion > 0 && (
-                          <span className="text-accent">
-                            {t.products.promoPrefix} -{formatMoney(prod.promotion, currency)}
-                          </span>
-                        )}
-                        <span className={prod.stock <= 10 ? 'text-danger font-bold' : 'text-foreground'}>
-                          {t.products.stockPrefix} {prod.stock}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {!readOnly && (
-                    <div
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        clearLongPressTimer();
-                      }}
-                      className="grid grid-cols-2 sm:flex sm:flex-wrap xl:flex-nowrap items-center gap-2 shrink-0 pt-3 xl:pt-0 border-t xl:border-t-0 border-border/40"
-                    >
-                      <Button
-                        tone="quiet"
-                        onClick={() => moveItemByIndex(idx, -1)}
-                        disabled={idx === 0 || isFiltering}
-                        className="min-h-11 sm:min-h-9 px-2.5 text-xs whitespace-nowrap"
-                        title={t.products.moveUp}
-                        aria-label={t.products.moveUp}
-                      >
-                        <ArrowUp className="h-4 w-4 shrink-0" /> <span className="sm:hidden">{t.products.moveUp}</span>
-                      </Button>
-                      <Button
-                        tone="quiet"
-                        onClick={() => moveItemByIndex(idx, 1)}
-                        disabled={idx === localOrder.length - 1 || isFiltering}
-                        className="min-h-11 sm:min-h-9 px-2.5 text-xs whitespace-nowrap"
-                        title={t.products.moveDown}
-                        aria-label={t.products.moveDown}
-                      >
-                        <ArrowDown className="h-4 w-4 shrink-0" /> <span className="sm:hidden">{t.products.moveDown}</span>
-                      </Button>
-                      <Button
-                        tone="quiet"
-                        onClick={() => openItemCamera(prod)}
-                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
-                        title={t.ui.cameraPhotoTitle}
-                      >
-                        <Camera className="h-4 w-4 text-primary shrink-0" />
-                        <span>{t.products.capturePhotoBtn}</span>
-                      </Button>
-                      <Button
-                        tone={quickStockId === prod.id ? 'primary' : 'quiet'}
-                        onClick={() => toggleQuickStock(prod)}
-                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
-                      >
-                        <PackagePlus className={`h-4 w-4 shrink-0 ${quickStockId === prod.id ? '' : 'text-primary'}`} />
-                        <span>{t.products.adjustStockBtn}</span>
-                      </Button>
-                      <Button
-                        tone="quiet"
-                        onClick={() => loadForEdit(prod)}
-                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
-                      >
-                        <Icon3D name="edit" size={16} /> <span>{t.common.edit}</span>
-                      </Button>
-                      <Button
-                        tone="danger"
-                        onClick={() => onDeleteProduct(prod.id)}
-                        className="min-h-11 sm:min-h-9 px-3 text-xs whitespace-nowrap"
-                      >
-                        <Icon3D name="trash" size={16} /> <span>{t.common.delete}</span>
-                      </Button>
-                    </div>
-                  )}
                 </div>
 
                 {!readOnly && quickStockId === prod.id && (
@@ -1020,14 +925,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       e.stopPropagation();
                       clearLongPressTimer();
                     }}
-                    className="mt-2.5 lg:mt-3 pt-2.5 lg:pt-3 border-t border-border/60 flex flex-col lg:flex-row lg:items-center justify-between gap-2"
+                    className="mt-2.5 pt-2.5 border-t border-border/60 flex flex-col gap-2 min-w-0"
                   >
                     {(() => {
                       const delta = parseSignedDelta(quickStockInput);
                       const nextStock = Math.max(0, prod.stock + delta);
                       return (
                         <>
-                          <div className="flex flex-wrap items-center gap-1.5 lg:gap-2 text-[11px] lg:text-xs tabular-nums">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums">
                             <span className="text-muted">
                               {t.products.oldStockLabel} <strong className="text-foreground">{prod.stock}</strong>
                             </span>
@@ -1047,7 +952,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                             )}
                           </div>
 
-                          <div className="flex flex-wrap lg:flex-nowrap items-center gap-1.5 lg:gap-2 w-full lg:w-auto">
+                          <div className="flex flex-col gap-1.5 w-full min-w-0">
                             <input
                               type="text"
                               autoFocus
@@ -1063,14 +968,14 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                                 }
                               }}
                               placeholder={t.products.placeholderStockAdjust}
-                              className={`${inputClass} min-h-9 lg:min-h-10 w-full lg:w-44 text-xs tabular-nums`}
+                              className={`${inputClass} min-h-9 w-full text-xs tabular-nums`}
                             />
-                            <div className="flex items-center gap-1.5 w-full lg:w-auto">
+                            <div className="flex items-center gap-1.5 w-full">
                               <Button
                                 tone="primary"
                                 onClick={() => handleQuickStockSave(prod)}
                                 disabled={quickStockSaving || delta === 0}
-                                className="flex-1 lg:flex-none min-h-9 lg:min-h-10 px-2.5 lg:px-3 text-xs shrink-0 whitespace-nowrap"
+                                className="flex-1 min-h-9 px-2.5 text-xs whitespace-nowrap"
                               >
                                 {quickStockSaving ? t.common.saving : t.common.save}
                               </Button>
@@ -1081,7 +986,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                                   setQuickStockInput('');
                                 }}
                                 aria-label={t.common.close}
-                                className="inline-flex h-9 w-9 lg:h-10 lg:w-10 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border/70 bg-background text-muted hover:text-foreground cursor-pointer shrink-0"
                               >
                                 <X className="h-4 w-4" />
                               </button>
@@ -1139,9 +1044,9 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
               exit={{ opacity: 0, y: 20, scale: 0.96 }}
               transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.8 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-3xl"
+              className="w-full max-w-3xl min-w-0"
             >
-              <Surface className="w-full max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-2xl sm:rounded-card shadow-float overflow-hidden">
+              <Surface className="w-full max-w-full max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-2xl sm:rounded-card shadow-float overflow-hidden">
                 <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
                   <div className="h-1 w-10 rounded-full bg-border" />
                 </div>
@@ -1153,9 +1058,11 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       <h2 className="text-sm sm:text-base font-semibold text-foreground truncate">
                         {editingId ? t.products.editTitle : t.products.addTitle}
                       </h2>
-                      <p className="text-xs text-muted leading-snug line-clamp-1">
-                        {t.products.subtitle}
-                      </p>
+                      {t.products.subtitle && (
+                        <p className="text-xs text-muted leading-snug line-clamp-1">
+                          {t.products.subtitle}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1171,9 +1078,9 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
                 <form
                   onSubmit={handleSubmit}
-                  className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4 pb-safe"
+                  className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-4 sm:py-5 space-y-4 pb-safe"
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 min-w-0">
                     <Field label={t.products.fieldName}>
                       <input
                         type="text"
@@ -1187,7 +1094,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </Field>
 
                     <Field label={`${t.products.fieldCostPrice} (${currencyMeta.inputLabel})`}>
-                      <div className="relative">
+                      <div className="relative min-w-0">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">
                           {currencyMeta.symbol}
                         </span>
@@ -1204,7 +1111,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </Field>
 
                     <Field label={`${t.products.fieldSellingPrice} (${currencyMeta.inputLabel})`}>
-                      <div className="relative">
+                      <div className="relative min-w-0">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">
                           {currencyMeta.symbol}
                         </span>
@@ -1221,7 +1128,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </Field>
 
                     <Field label={`${t.products.fieldPromotion} (${currencyMeta.inputLabel})`}>
-                      <div className="relative">
+                      <div className="relative min-w-0">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">
                           {currencyMeta.symbol}
                         </span>
@@ -1238,7 +1145,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
                     <Field label={editingId ? t.products.fieldStockAdjust : t.products.fieldStock}>
                       {editingId ? (
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 min-w-0">
                           <input
                             type="text"
                             value={stock}
@@ -1276,13 +1183,13 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </Field>
 
                     <Field label={t.products.fieldBarcode}>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 min-w-0">
                         <input
                           type="text"
                           value={barcode}
                           onChange={(e) => setBarcode(e.target.value)}
                           placeholder={t.products.placeholderBarcode}
-                          className={`${inputClass} font-mono flex-1`}
+                          className={`${inputClass} font-mono flex-1 min-w-0`}
                         />
                         <Button
                           tone="quiet"
@@ -1333,40 +1240,111 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       </Field>
                     )}
 
-                    <Field label={t.products.fieldUploadPhoto}>
-                      <div className="flex items-center gap-2">
-                        <label className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-control border border-dashed border-primary/50 bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-primary/5 transition-colors">
-                          <Upload className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">
-                            {uploading ? t.products.uploadingUrl : t.products.choosePhotoBtn}
-                          </span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleFileChange}
-                            className="hidden"
-                          />
-                        </label>
-                        <Button
-                          tone="quiet"
-                          onClick={openFormCamera}
-                          disabled={uploading || saving}
-                          title={t.ui.cameraPhotoTitle}
-                          className="min-h-11 px-3 shrink-0 text-xs whitespace-nowrap"
-                        >
-                          <Camera className="h-4 w-4 text-primary shrink-0" />
-                          <span>{t.products.capturePhotoBtn}</span>
-                        </Button>
-                        {imageUrl && (
-                          <ProductImage
-                            src={imageUrl}
-                            alt={name || 'Preview'}
-                            className="h-11 w-11 shrink-0"
-                            onZoom={onZoomImage}
-                          />
+                    <div className="sm:col-span-2 lg:col-span-3 flex flex-col gap-2 min-w-0">
+                      <span className="block text-[13px] sm:text-sm font-medium text-foreground leading-relaxed">
+                        {t.products.fieldUploadPhoto}
+                      </span>
+
+                      <div className="rounded-card border border-border/75 bg-background/50 p-3 sm:p-4 space-y-3 min-w-0">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 min-w-0">
+                          <label className="inline-flex min-h-11 w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-control border border-dashed border-primary/50 bg-surface px-3 py-2 text-xs font-medium text-foreground hover:bg-primary/5 transition-colors">
+                            <Upload className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">
+                              {uploading ? t.products.uploadingUrl : t.products.choosePhotoBtn}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleFileChange}
+                              className="hidden"
+                            />
+                          </label>
+
+                          <Button
+                            tone="quiet"
+                            onClick={openFormCamera}
+                            disabled={uploading || saving}
+                            title={t.ui.cameraPhotoTitle}
+                            className="w-full min-w-0 min-h-11 px-3 text-xs justify-center"
+                          >
+                            <Camera className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{t.products.capturePhotoBtn}</span>
+                          </Button>
+
+                          <Button
+                            tone={showUrlInput ? 'primary' : 'quiet'}
+                            aria-expanded={showUrlInput}
+                            onClick={() => {
+                              setShowUrlInput((prev) => !prev);
+                              setUploadFeedback('');
+                            }}
+                            disabled={uploading || saving}
+                            className="w-full min-w-0 min-h-11 px-3 text-xs justify-center"
+                          >
+                            <Link2 className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{t.products.uploadUrlBtn}</span>
+                          </Button>
+                        </div>
+
+                        {showUrlInput && (
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="text"
+                              inputMode="url"
+                              maxLength={2000}
+                              value={imageUrl}
+                              onChange={(e) => {
+                                setImageUrl(e.target.value);
+                                setUploadFeedback('');
+                              }}
+                              placeholder={t.products.placeholderImageUrl}
+                              className={`${inputClass} flex-1 min-w-0`}
+                            />
+                            {imageUrl && (
+                              <Button
+                                tone="quiet"
+                                onClick={() => {
+                                  setImageUrl('');
+                                  setUploadFeedback('');
+                                }}
+                                title={t.products.clearPhotoBtn}
+                                aria-label={t.products.clearPhotoBtn}
+                                className="min-h-11 px-3 shrink-0 text-danger hover:text-danger"
+                              >
+                                <X className="h-4 w-4 shrink-0" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
+
+                        {imageUrl.trim() && (
+                          <div className="flex items-center justify-between gap-3 rounded-control border border-border/60 bg-surface p-2.5 min-w-0">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <ProductImage
+                                src={imageUrl.trim()}
+                                alt={name || 'Preview'}
+                                className="h-12 w-12 shrink-0"
+                                onZoom={onZoomImage}
+                              />
+                              <span className="text-xs text-muted truncate min-w-0">
+                                {imageUrl.trim()}
+                              </span>
+                            </div>
+                            <Button
+                              tone="quiet"
+                              onClick={() => {
+                                setImageUrl('');
+                                setUploadFeedback('');
+                              }}
+                              className="min-h-9 px-2.5 text-xs text-danger hover:text-danger shrink-0"
+                            >
+                              <X className="h-3.5 w-3.5 shrink-0" />
+                              <span>{t.products.clearPhotoBtn}</span>
+                            </Button>
+                          </div>
                         )}
                       </div>
-                    </Field>
+                    </div>
                   </div>
 
                   {uploadFeedback && (
@@ -1383,11 +1361,11 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     </p>
                   )}
 
-                  <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5 border-t border-border/50 pt-4">
+                  <div className="flex flex-col-reverse sm:flex-row items-center justify-center gap-3 border-t border-border/50 pt-4">
                     <Button
                       tone="quiet"
                       onClick={closeFormModal}
-                      className="w-full sm:w-auto whitespace-nowrap"
+                      className="w-full sm:w-auto sm:min-w-[160px] justify-center whitespace-nowrap"
                     >
                       {editingId ? t.products.cancelEditBtn : t.common.cancel}
                     </Button>
@@ -1395,7 +1373,7 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                       type="submit"
                       tone="primary"
                       disabled={saving || uploading}
-                      className="w-full sm:w-auto whitespace-nowrap"
+                      className="w-full sm:w-auto sm:min-w-[160px] justify-center whitespace-nowrap"
                     >
                       <Icon3D name="check" size={20} />
                       <span>
